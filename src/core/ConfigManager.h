@@ -69,6 +69,88 @@ namespace TalkMe {
             DeleteFileA(GetConfigPath().c_str());
         }
 
+        void SaveTheme(int themeId) {
+            std::string dir = GetConfigDir();
+            CreateDirectoryA(dir.c_str(), NULL);
+            std::ofstream f(GetConfigDir() + "\\theme.cfg", std::ios::trunc);
+            if (f.is_open()) f << themeId;
+        }
+
+        int LoadTheme(int defaultId = 0) {
+            std::ifstream f(GetConfigDir() + "\\theme.cfg");
+            int id = defaultId;
+            if (f.is_open()) f >> id;
+            return id;
+        }
+
+        void SaveKeybinds(const std::vector<int>& muteMicKeys, const std::vector<int>& deafenKeys) {
+            std::string dir = GetConfigDir();
+            CreateDirectoryA(dir.c_str(), NULL);
+            nlohmann::json j;
+            j["mute_mic"] = muteMicKeys;
+            j["deafen"] = deafenKeys;
+            std::ofstream f(dir + "\\keybinds.cfg", std::ios::trunc);
+            if (f.is_open()) f << j.dump();
+        }
+
+        void LoadKeybinds(std::vector<int>& muteMicKeys, std::vector<int>& deafenKeys) {
+            std::ifstream f(GetConfigDir() + "\\keybinds.cfg");
+            if (f.is_open()) {
+                try {
+                    std::string s((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                    auto j = nlohmann::json::parse(s);
+                    if (j.contains("mute_mic")) {
+                        if (j["mute_mic"].is_array())
+                            muteMicKeys = j["mute_mic"].get<std::vector<int>>();
+                        else if (j["mute_mic"].is_number()) {
+                            int k = j["mute_mic"].get<int>();
+                            if (k != 0) muteMicKeys = { k };
+                        }
+                    }
+                    if (j.contains("deafen")) {
+                        if (j["deafen"].is_array())
+                            deafenKeys = j["deafen"].get<std::vector<int>>();
+                        else if (j["deafen"].is_number()) {
+                            int k = j["deafen"].get<int>();
+                            if (k != 0) deafenKeys = { k };
+                        }
+                    }
+                } catch (...) {}
+            }
+        }
+
+        void SaveOverlay(bool enabled, int corner, float opacity) {
+            std::string dir = GetConfigDir();
+            CreateDirectoryA(dir.c_str(), NULL);
+            nlohmann::json j;
+            j["enabled"] = enabled;
+            j["corner"] = corner;
+            j["opacity"] = opacity;
+            std::ofstream f(dir + "\\overlay.cfg", std::ios::trunc);
+            if (f.is_open()) f << j.dump();
+        }
+
+        void LoadOverlay(bool& enabled, int& corner, float& opacity) {
+            std::ifstream f(GetConfigDir() + "\\overlay.cfg");
+            if (f.is_open()) {
+                try {
+                    std::string s((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                    auto j = nlohmann::json::parse(s);
+                    enabled = j.value("enabled", false);
+                    corner = j.value("corner", 1);
+                    opacity = j.value("opacity", 0.85f);
+                } catch (...) {}
+            }
+        }
+
+        /// Returns AppData\\Local\\TalkMe (same as session.dat folder). Use for imgui.ini etc.
+        static std::string GetConfigDirectory() {
+            char path[MAX_PATH];
+            if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path)))
+                return std::string(path) + "\\TalkMe";
+            return "TalkMe";
+        }
+
     private:
         std::string GetConfigDir() {
             char path[MAX_PATH];

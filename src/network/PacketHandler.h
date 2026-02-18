@@ -81,8 +81,8 @@ namespace TalkMe {
         }
 
         // ✅ NEW: Create Opus voice payload with sequence number
-        static std::string CreateVoicePayloadOpus(const std::string& username, const std::vector<uint8_t>& opusData, uint32_t seqNum) {
-            std::string payload;
+        static std::vector<uint8_t> CreateVoicePayloadOpus(const std::string& username, const std::vector<uint8_t>& opusData, uint32_t seqNum) {
+            std::vector<uint8_t> payload;
 
             // Format: [seqNum:4][usernameLen:1][username:N][opusData:M]
             payload.resize(sizeof(uint32_t) + 1 + username.size() + opusData.size());
@@ -100,11 +100,11 @@ namespace TalkMe {
             offset += 1;
 
             // Write username
-            std::memcpy(&payload[offset], username.c_str(), username.size());
+            std::memcpy(payload.data() + offset, username.c_str(), username.size());
             offset += username.size();
 
             // Write Opus data
-            std::memcpy(&payload[offset], opusData.data(), opusData.size());
+            if (!opusData.empty()) std::memcpy(payload.data() + offset, opusData.data(), opusData.size());
 
             return payload;
         }
@@ -117,7 +117,7 @@ namespace TalkMe {
             bool valid = false;
         };
 
-        static ParsedVoicePacket ParseVoicePayloadOpus(const std::string& payload) {
+        static ParsedVoicePacket ParseVoicePayloadOpus(const std::vector<uint8_t>& payload) {
             ParsedVoicePacket result;
 
             if (payload.size() < sizeof(uint32_t) + 1) {
@@ -128,12 +128,12 @@ namespace TalkMe {
 
             // Read sequence number (convert from network byte order)
             uint32_t netSeq = 0;
-            std::memcpy(&netSeq, &payload[offset], sizeof(uint32_t));
+            std::memcpy(&netSeq, payload.data() + offset, sizeof(uint32_t));
             result.sequenceNumber = ntohl(netSeq);
             offset += sizeof(uint32_t);
 
             // Read username length
-            uint8_t ulen = (uint8_t)payload[offset];
+            uint8_t ulen = payload[offset];
             offset += 1;
 
             if (payload.size() < offset + ulen) {
@@ -141,13 +141,29 @@ namespace TalkMe {
             }
 
             // Read username
-            result.sender = payload.substr(offset, ulen);
+            result.sender.assign((const char*)payload.data() + offset, ulen);
             offset += ulen;
 
             // Read Opus data
             if (offset < payload.size()) {
                 result.opusData.assign(payload.begin() + offset, payload.end());
                 result.valid = true;
+            }
+            // If not valid or sender empty, try legacy format: [ulen:1][username:N][opusData]
+            if (!result.valid || result.sender.empty()) {
+                ParsedVoicePacket legacy;
+                size_t off2 = 0;
+                if (payload.size() >= 1) {
+                    uint8_t ulen2 = payload[off2]; off2 += 1;
+                    if (payload.size() >= off2 + ulen2) {
+                        legacy.sender.assign((const char*)payload.data() + off2, ulen2);
+                        off2 += ulen2;
+                        if (off2 < payload.size()) legacy.opusData.assign(payload.begin() + off2, payload.end());
+                        legacy.sequenceNumber = 0;
+                        legacy.valid = true;
+                        return legacy;
+                    }
+                }
             }
 
             return result;

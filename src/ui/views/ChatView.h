@@ -2,8 +2,9 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <functional>
 #include "../../network/NetworkClient.h"
-#include "../../app/Application.h" 
+#include "../../app/Application.h"
 
 namespace TalkMe::UI::Views {
     void RenderChannelView(
@@ -15,6 +16,10 @@ namespace TalkMe::UI::Views {
         int& activeVoiceChannelId,
         std::vector<std::string>& voiceMembers,
         std::map<std::string, float>& speakingTimers,
-        char* chatInputBuf
+        std::map<std::string, float>& userVolumes,
+        std::function<void(const std::string&, float)> setUserVolume,
+        char* chatInputBuf,
+        bool selfMuted = false,
+        bool selfDeafened = false
     );
 }

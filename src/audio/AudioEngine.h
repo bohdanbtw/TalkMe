@@ -7,6 +7,12 @@
 
 namespace TalkMe {
 
+    struct AudioDeviceInfo {
+        std::string name;
+        int index;
+        bool isDefault;
+    };
+
     struct AudioInternal;
 
     class AudioEngine {
@@ -14,23 +20,70 @@ namespace TalkMe {
         AudioEngine();
         ~AudioEngine();
 
-        // ⚠️ DEPRECATED: Use InitializeWithSequence for new code
         bool Initialize(std::function<void(const std::vector<uint8_t>&)> onMicDataCaptured);
-
-        // ✅ RECOMMENDED: New signature with sequence number
         bool InitializeWithSequence(std::function<void(const std::vector<uint8_t>&, uint32_t seqNum)> onMicDataCaptured);
 
-        void Update();  // Call every frame to process microphone data
+        void Update();
 
-        // ⚠️ DEPRECATED: Use PushIncomingAudioWithSequence for new code
+        void SetCaptureEnabled(bool enabled) { m_CaptureEnabled = enabled; }
+        bool IsCaptureEnabled() const { return m_CaptureEnabled; }
+
         void PushIncomingAudio(const std::string& userId, const std::vector<uint8_t>& opusData);
-
-        // ✅ RECOMMENDED: Includes packet loss detection
         void PushIncomingAudioWithSequence(const std::string& userId, const std::vector<uint8_t>& opusData, uint32_t seqNum);
 
         void Shutdown();
+        void ClearRemoteTracks();
+        void OnVoiceStateUpdate(int memberCount);
+        void ApplyConfig(int targetBufferMs, int minBufferMs, int maxBufferMs, int keepaliveIntervalMs = -1);
+        void SetUserGain(const std::string& userId, float gain);
+        float GetMicActivity() const;
+
+        // Self mute/deafen
+        void SetSelfMuted(bool muted) { m_SelfMuted = muted; }
+        bool IsSelfMuted() const { return m_SelfMuted; }
+        void SetSelfDeafened(bool deafened);
+        bool IsSelfDeafened() const { return m_SelfDeafened; }
+
+        // Device enumeration & switching
+        std::vector<AudioDeviceInfo> GetInputDevices();
+        std::vector<AudioDeviceInfo> GetOutputDevices();
+        bool ReinitDevice(int inputIdx, int outputIdx);
+
+        struct Telemetry {
+            // Packet statistics
+            int totalPacketsReceived = 0;
+            int totalPacketsLost = 0;
+            int totalPacketsDuplicated = 0;
+
+            // Audio quality metrics
+            float avgJitterMs = 0.0f;
+            float currentLatencyMs = 0.0f;
+            float packetLossPercentage = 0.0f;
+
+            // Buffer health
+            int bufferUnderruns = 0;
+            int bufferOverflows = 0;
+            int currentBufferMs = 0;
+            int targetBufferMs = 150;
+
+            // Network state
+            int remoteMemberCount = 0;
+            int adaptiveBufferLevel = 0;
+
+            // Codec stats
+            int currentEncoderBitrateKbps = 32;
+            float currentVoiceActivityLevel = 0.0f;
+        };
+
+        Telemetry GetTelemetry();
+
+        // Network adaptation
+        void OnNetworkConditions(float packetLossPercent, float avgLatencyMs);
 
     private:
         std::unique_ptr<AudioInternal> m_Internal;
+        bool m_CaptureEnabled = false;
+        bool m_SelfMuted = false;
+        bool m_SelfDeafened = false;
     };
 }

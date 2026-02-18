@@ -1,0 +1,1 @@
+// FileLogger implementation - inline in Logger.h

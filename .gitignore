@@ -361,3 +361,42 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# =============================================================
+# TalkMe project-specific
+# =============================================================
+
+# Runtime config & session files
+*.cfg
+*.dat
+session.dat
+
+# Debug / profiling logs
+*.log
+talkme_debug.log
+talkme_voice_stats.log
+talkme_debug.csv
+
+# Build performance traces
+BuildPerfCpp_trace_*.etl
+*.etl
+
+# ImGui layout state
+imgui.ini
+
+# SQLite databases (server)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Cursor IDE
+.cursor/
+
+# OS junk
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+.DS_Store

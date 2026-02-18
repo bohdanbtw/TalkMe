@@ -127,14 +127,18 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
-      <SubSystem>Windows</SubSystem>
+      <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>d3d11.lib;d3dcompiler.lib;dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\audio\AudioEngine.cpp" />
+    <ClCompile Include="src\core\Logger.cpp" />
+    <ClCompile Include="src\overlay\GameOverlay.cpp" />
+    <ClCompile Include="src\network\VoiceTransport.cpp" />
     <ClCompile Include="src\ui\views\ChatView.cpp" />
+    <ClCompile Include="src\ui\views\SettingsView.cpp" />
     <ClCompile Include="src\ui\views\SidebarView.cpp" />
     <ClCompile Include="src\ui\views\RegisterView.cpp" />
     <ClCompile Include="src\ui\views\LoginView.cpp" />
@@ -142,6 +146,7 @@
     <ClCompile Include="src\app\main.cpp" />
     <ClCompile Include="src\app\Application.cpp" />
     <ClCompile Include="src\ui\Components.cpp" />
+    <ClCompile Include="src\ui\Styles.cpp" />
     <ClCompile Include="src\ui\Theme.cpp" />
     <ClCompile Include="vendor\imgui.cpp" />
     <ClCompile Include="vendor\imgui_draw.cpp" />
@@ -152,8 +157,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\audio\AudioEngine.h" />
+    <ClInclude Include="src\core\Logger.h" />
+    <ClInclude Include="src\overlay\GameOverlay.h" />
+    <ClInclude Include="src\network\VoiceTransport.h" />
     <ClInclude Include="src\shared\Protocol.h" />
     <ClInclude Include="src\ui\views\ChatView.h" />
+    <ClInclude Include="src\ui\views\SettingsView.h" />
     <ClInclude Include="src\ui\views\SidebarView.h" />
     <ClInclude Include="src\ui\views\RegisterView.h" />
     <ClInclude Include="src\ui\views\LoginView.h" />
@@ -163,6 +172,7 @@
     <ClInclude Include="src\network\NetworkClient.h" />
     <ClInclude Include="src\network\PacketHandler.h" />
     <ClInclude Include="src\ui\Components.h" />
+    <ClInclude Include="src\ui\Styles.h" />
     <ClInclude Include="src\ui\Theme.h" />
     <ClInclude Include="vendor\imconfig.h" />
     <ClInclude Include="vendor\imgui.h" />

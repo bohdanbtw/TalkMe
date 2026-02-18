@@ -1,14 +1,13 @@
 #include "Components.h"
-#include "../../vendor/imgui_internal.h" // Needed for advanced styling if we get fancy
+#include "Styles.h"
 
 namespace TalkMe::UI {
 
     bool AccentButton(const char* label, const ImVec2& size) {
-        // Push Mint Teal Colors (#00C896)
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.78f, 0.59f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.00f, 0.88f, 0.69f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.00f, 0.68f, 0.49f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.05f, 0.05f, 0.05f, 1.00f)); // Dark Text
+        ImGui::PushStyleColor(ImGuiCol_Button, Styles::Accent());
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::AccentHover());
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, Styles::AccentDim());
+        ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextOnAccent());
 
         bool pressed = ImGui::Button(label, size);
 
@@ -17,12 +16,9 @@ namespace TalkMe::UI {
     }
 
     bool SubtleButton(const char* label, const ImVec2& size) {
-        // Push Dark Grey Colors (#262626)
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.15f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.20f, 0.20f, 0.20f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.25f, 0.25f, 0.25f, 1.00f));
-
-        // We don't push text color here, so it uses the default (Off-White)
+        ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonSubtle());
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::ButtonSubtleHover());
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, Styles::ButtonSubtleHover());
 
         bool pressed = ImGui::Button(label, size);
 

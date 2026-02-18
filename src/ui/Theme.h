@@ -1,7 +1,7 @@
 #pragma once
-#include "../../vendor/imgui.h" // <--- This was missing!
+#include "../../vendor/imgui.h"
 
 namespace TalkMe::UI {
-    // Applies the "Deep Night" color scheme
-    void SetupModernStyle();
+    /// Applies app-wide theme (colors, rounding, spacing). Call once at init.
+    void ApplyAppStyle();
 }

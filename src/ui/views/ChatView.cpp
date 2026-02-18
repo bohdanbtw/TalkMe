@@ -1,155 +1,338 @@
 #include "ChatView.h"
 #include "../Components.h"
 #include "../Theme.h"
+#include "../Styles.h"
 #include "../../network/PacketHandler.h"
 #include <string>
+#include <algorithm>
 
-#ifndef max
-#define max(a,b) (((a) > (b)) ? (a) : (b))
+#ifndef NOMINMAX
+#define NOMINMAX
 #endif
+#undef min
+#undef max
 
 namespace TalkMe::UI::Views {
 
-    void RenderChannelView(NetworkClient& netClient, UserSession& currentUser, const Server& currentServer, std::vector<ChatMessage>& messages, int& selectedChannelId, int& activeVoiceChannelId, std::vector<std::string>& voiceMembers, std::map<std::string, float>& speakingTimers, char* chatInputBuf) {
-        float windowHeight = ImGui::GetWindowHeight();
-        float windowWidth = ImGui::GetWindowWidth();
+    void RenderChannelView(NetworkClient& netClient, UserSession& currentUser, const Server& currentServer,
+        std::vector<ChatMessage>& messages, int& selectedChannelId, int& activeVoiceChannelId,
+        std::vector<std::string>& voiceMembers, std::map<std::string, float>& speakingTimers,
+        std::map<std::string, float>& userVolumes, std::function<void(const std::string&, float)> setUserVolume,
+        char* chatInputBuf, bool selfMuted, bool selfDeafened)
+    {
+        float winH = ImGui::GetWindowHeight();
+        float winW = ImGui::GetWindowWidth();
+        float left = Styles::MainContentLeftOffset;
+        float areaW = winW - left - Styles::ServerRailWidth;
 
-        // FIX: Match exact width of new Sidebar (72 + 280)
-        float leftOffset = 352.0f;
-
-        ImGui::SetCursorPos(ImVec2(leftOffset, 0));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.14f, 0.14f, 0.15f, 1.00f));
-        ImGui::BeginChild("ChatArea", ImVec2(windowWidth - leftOffset, windowHeight), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::SetCursorPos(ImVec2(left, 0));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, Styles::BgChat());
+        ImGui::BeginChild("ChatArea", ImVec2(areaW, winH), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
         if (selectedChannelId != -1) {
-            std::string channelName = "Unknown"; ChannelType cType = ChannelType::Text;
-            for (const auto& ch : currentServer.channels) { if (ch.id == selectedChannelId) { channelName = ch.name; cType = ch.type; break; } }
+            std::string chName = "Unknown";
+            ChannelType cType = ChannelType::Text;
+            for (const auto& ch : currentServer.channels)
+                if (ch.id == selectedChannelId) { chName = ch.name; cType = ch.type; break; }
 
-            // --- VOICE VIEW ---
+            // ==================== VOICE VIEW ====================
             if (cType == ChannelType::Voice) {
-                ImGui::SetCursorPos(ImVec2(40, 40));
-                ImGui::SetWindowFontScale(1.8f);
-                ImGui::Text("Connected to %s", channelName.c_str());
+
+                ImGui::Dummy(ImVec2(0, 28));
+                ImGui::Indent(40);
+                ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
+                ImGui::SetWindowFontScale(1.4f);
+                ImGui::Text("%s", chName.c_str());
                 ImGui::SetWindowFontScale(1.0f);
-                ImGui::Dummy(ImVec2(0, 40));
+                ImGui::PopStyleColor();
 
-                ImGui::SetCursorPos(ImVec2(40, ImGui::GetCursorPosY()));
-                ImGui::BeginChild("VoiceGrid", ImVec2(windowWidth - leftOffset - 40, windowHeight - 150), false, ImGuiWindowFlags_None);
+                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                ImGui::Text("%d connected", (int)voiceMembers.size());
+                ImGui::PopStyleColor();
+                ImGui::Unindent(40);
 
-                // FIX: ImGui native grid rendering for perfect centering
-                float avatarRadius = 60.0f; // Massive circles
-                float itemWidth = 160.0f;   // Box size per user
-                float itemHeight = 180.0f;
-                float spacing = 20.0f;
-
-                float availableWidth = ImGui::GetContentRegionAvail().x;
-                int columns = max(1, (int)(availableWidth / (itemWidth + spacing)));
-                int col = 0;
-
-                for (const auto& member : voiceMembers) {
-                    ImGui::BeginGroup();
-
-                    // Reserve space in layout
-                    ImVec2 pos = ImGui::GetCursorScreenPos();
-                    ImGui::InvisibleButton(("##u_" + member).c_str(), ImVec2(itemWidth, itemHeight));
-
-                    ImDrawList* draw = ImGui::GetWindowDrawList();
-                    ImVec2 center = ImVec2(pos.x + itemWidth * 0.5f, pos.y + avatarRadius + 10.0f);
-
-                    // Draw Base Circle
-                    draw->AddCircleFilled(center, avatarRadius, IM_COL32(55, 55, 65, 255));
-
-                    // Draw Speaking Indicator
-                    bool isSpeaking = ((float)ImGui::GetTime() - speakingTimers[member] < 0.5f);
-                    if (isSpeaking) {
-                        draw->AddCircle(center, avatarRadius + 5.0f, IM_COL32(60, 255, 60, 255), 0, 4.0f);
-                    }
-
-                    // Draw Initials
-                    std::string init = member.substr(0, 2);
-                    float fontSize = 38.0f;
-                    ImVec2 textSize = ImGui::GetFont()->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, init.c_str());
-                    draw->AddText(ImGui::GetFont(), fontSize, ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f), IM_COL32(255, 255, 255, 255), init.c_str());
-
-                    // Draw Formatted Username
-                    std::string disp = member;
-                    size_t hashPos = member.find('#');
-                    if (hashPos != std::string::npos) disp = member.substr(0, hashPos);
-
-                    ImVec2 nameSize = ImGui::CalcTextSize(disp.c_str());
-                    draw->AddText(ImVec2(pos.x + (itemWidth - nameSize.x) * 0.5f, pos.y + avatarRadius * 2.0f + 25.0f), IM_COL32(230, 230, 230, 255), disp.c_str());
-
-                    ImGui::EndGroup();
-
-                    col++;
-                    if (col < columns) {
-                        ImGui::SameLine(0, spacing);
-                    }
-                    else {
-                        col = 0;
-                        ImGui::Dummy(ImVec2(0, spacing));
-                    }
-                }
-                ImGui::EndChild(); // End VoiceGrid
-            }
-
-            // --- TEXT VIEW ---
-            else {
-                ImGui::SetCursorPos(ImVec2(30, 20)); ImGui::BeginGroup(); ImGui::SetWindowFontScale(1.5f); ImGui::TextDisabled("#"); ImGui::SameLine(); ImGui::Text("%s", channelName.c_str()); ImGui::SetWindowFontScale(1.0f);
-                ImGui::TextDisabled("Server Invite: %s", currentServer.inviteCode.c_str()); ImGui::EndGroup();
-
-                // FIX: Explicitly forcing cursor down so text never overlaps
-                ImGui::Dummy(ImVec2(0, 20));
-                ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.20f, 0.20f, 0.22f, 1.00f));
+                ImGui::Dummy(ImVec2(0, 12));
+                ImGui::PushStyleColor(ImGuiCol_Separator, Styles::Separator());
                 ImGui::Separator();
                 ImGui::PopStyleColor();
-                ImGui::Dummy(ImVec2(0, 15));
+                ImGui::Dummy(ImVec2(0, 16));
 
-                float headerHeight = ImGui::GetCursorPosY();
-                float inputHeight = 90.0f;
-                float messageAreaHeight = windowHeight - headerHeight - inputHeight;
-                if (messageAreaHeight < 50.0f) messageAreaHeight = 50.0f;
+                float leaveBarH = 80.0f;
+                float gridTop = ImGui::GetCursorPosY();
+                float gridH = winH - gridTop - leaveBarH;
+                if (gridH < 100.0f) gridH = 100.0f;
 
-                ImGui::SetCursorPos(ImVec2(30, headerHeight));
-                ImGui::BeginChild("Messages", ImVec2(windowWidth - leftOffset - 60, messageAreaHeight), false, ImGuiWindowFlags_None);
+                ImGui::BeginChild("VoiceGrid", ImVec2(areaW, gridH), false, ImGuiWindowFlags_None);
 
-                for (const auto& msg : messages) {
-                    if (msg.channelId == selectedChannelId) {
-                        bool isMe = (msg.sender == currentUser.username); ImGui::BeginGroup();
-                        ImGui::PushStyleColor(ImGuiCol_Text, isMe ? ImVec4(0.35f, 0.71f, 0.95f, 1.00f) : ImVec4(0.9f, 0.4f, 0.4f, 1.00f));
-                        size_t hashPos = msg.sender.find('#');
-                        if (hashPos != std::string::npos) {
-                            ImGui::Text("%s", msg.sender.substr(0, hashPos).c_str()); ImGui::SameLine(0, 0);
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f)); ImGui::Text("%s", msg.sender.substr(hashPos).c_str()); ImGui::PopStyleColor();
-                        }
-                        else ImGui::Text("%s", msg.sender.c_str());
-                        ImGui::PopStyleColor(); ImGui::SameLine(); ImGui::TextDisabled("%s", msg.timestamp.c_str());
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.9f, 0.9f, 1.00f)); ImGui::TextWrapped("%s", msg.content.c_str()); ImGui::PopStyleColor(); ImGui::EndGroup();
+                float avatarR = Styles::AvatarRadius;
+                float itemW   = Styles::VoiceItemWidth;
+                float itemH   = Styles::VoiceItemHeight;
+                float gap     = Styles::VoiceItemSpacing;
+                float cardR   = Styles::VoiceCardRounding;
 
-                        if (isMe && msg.id > 0) {
-                            if (ImGui::BeginPopupContextItem(("msg_" + std::to_string(msg.id)).c_str())) {
-                                if (ImGui::Selectable("Delete Message")) netClient.Send(PacketType::Delete_Message_Request, PacketHandler::CreateDeleteMessagePayload(msg.id, selectedChannelId, currentUser.username));
-                                ImGui::EndPopup();
-                            }
-                        }
-                        ImGui::Dummy(ImVec2(0, 15));
+                float usableW = areaW - 60.0f;
+                int cols = std::max(1, (int)(usableW / (itemW + gap)));
+                float totalW = cols * itemW + (cols - 1) * gap;
+                float padX = (areaW - totalW) * 0.5f;
+                if (padX < 20.0f) padX = 20.0f;
+
+                static std::string s_volPopupMember;
+                bool wantPopup = false;
+                int col = 0;
+
+                for (size_t mi = 0; mi < voiceMembers.size(); mi++) {
+                    const auto& member = voiceMembers[mi];
+
+                    if (col == 0) {
+                        ImGui::Dummy(ImVec2(padX - 10.0f, 0));
+                        ImGui::SameLine();
                     }
+
+                    ImGui::PushID((int)mi);
+                    ImGui::BeginGroup();
+
+                    ImVec2 pos = ImGui::GetCursorScreenPos();
+                    ImGui::InvisibleButton("##card", ImVec2(itemW, itemH));
+                    if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(1) && setUserVolume) {
+                        s_volPopupMember = member;
+                        wantPopup = true;
+                    }
+
+                    ImDrawList* dl = ImGui::GetWindowDrawList();
+                    bool speaking = speakingTimers.count(member) && ((float)ImGui::GetTime() - speakingTimers[member] < 0.5f);
+                    bool muted = userVolumes.count(member) && userVolumes[member] <= 0.0f;
+
+                    // Card background
+                    ImVec2 cardEnd = ImVec2(pos.x + itemW, pos.y + itemH);
+                    if (speaking) {
+                        // Glow behind card
+                        dl->AddRectFilled(
+                            ImVec2(pos.x - 3, pos.y - 3),
+                            ImVec2(cardEnd.x + 3, cardEnd.y + 3),
+                            Styles::ColSpeakingGlow(), cardR + 3);
+                    }
+                    dl->AddRectFilled(pos, cardEnd, Styles::ColBgCard(), cardR);
+
+                    if (speaking)
+                        dl->AddRect(pos, cardEnd, Styles::ColSpeakingRing(), cardR, 0, 2.0f);
+
+                    // Avatar circle centered in card
+                    ImVec2 ctr = ImVec2(pos.x + itemW * 0.5f, pos.y + 12.0f + avatarR);
+                    dl->AddCircleFilled(ctr, avatarR, Styles::ColBgAvatar());
+
+                    // Initials
+                    std::string init = member.substr(0, std::min((size_t)2, member.size()));
+                    ImVec2 tsz = ImGui::GetFont()->CalcTextSizeA(Styles::VoiceAvatarFontSize, FLT_MAX, 0, init.c_str());
+                    dl->AddText(ImGui::GetFont(), Styles::VoiceAvatarFontSize,
+                        ImVec2(ctr.x - tsz.x * 0.5f, ctr.y - tsz.y * 0.5f),
+                        Styles::ColTextOnAvatar(), init.c_str());
+
+                    // Name
+                    std::string disp = member;
+                    size_t hp = member.find('#');
+                    if (hp != std::string::npos) disp = member.substr(0, hp);
+                    if (disp.size() > 12) disp = disp.substr(0, 11) + "..";
+
+                    ImVec2 nsz = ImGui::CalcTextSize(disp.c_str());
+                    float nameY = pos.y + avatarR * 2.0f + 22.0f;
+                    ImU32 nCol = speaking ? Styles::ColSpeakingRing() :
+                                 (muted ? Styles::ColMutedText() : Styles::ColTextName());
+                    dl->AddText(ImVec2(pos.x + (itemW - nsz.x) * 0.5f, nameY), nCol, disp.c_str());
+
+                    // Status icons below name
+                    bool isMe = (member == currentUser.username);
+                    bool micOff = isMe && selfMuted;
+                    bool spkOff = isMe && selfDeafened;
+
+                    if (muted || micOff || spkOff) {
+                        float iconY = nameY + 18.0f;
+                        std::string status;
+                        if (muted && !isMe) {
+                            status = "MUTED";
+                        } else {
+                            if (micOff) status += "MIC X";
+                            if (spkOff) { if (!status.empty()) status += "  "; status += "SPK X"; }
+                        }
+                        if (!status.empty()) {
+                            ImVec2 ms = ImGui::CalcTextSize(status.c_str());
+                            dl->AddText(ImVec2(pos.x + (itemW - ms.x) * 0.5f, iconY), Styles::ColMutedLabel(), status.c_str());
+                        }
+                    }
+
+                    ImGui::EndGroup();
+                    ImGui::PopID();
+
+                    col++;
+                    if (col < cols) {
+                        ImGui::SameLine(0, gap);
+                    } else {
+                        col = 0;
+                    }
+                }
+
+                // Volume popup
+                if (wantPopup)
+                    ImGui::OpenPopup("UserVolumePopup");
+
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Styles::PopupPadding, Styles::PopupPadding));
+                ImGui::PushStyleColor(ImGuiCol_PopupBg, Styles::BgPopup());
+                if (ImGui::BeginPopup("UserVolumePopup")) {
+                    if (!s_volPopupMember.empty() && setUserVolume) {
+                        const std::string& m = s_volPopupMember;
+                        std::string d = m;
+                        size_t hp2 = m.find('#');
+                        if (hp2 != std::string::npos) d = m.substr(0, hp2);
+
+                        ImGui::Text("%s", d.c_str());
+                        ImGui::Separator();
+                        ImGui::Dummy(ImVec2(0, 4));
+
+                        float vol = userVolumes.count(m) ? userVolumes[m] : 1.0f;
+                        if (vol <= 0.0f) {
+                            if (UI::AccentButton("Unmute", ImVec2(220, 30))) {
+                                setUserVolume(m, 1.0f);
+                                ImGui::CloseCurrentPopup();
+                            }
+                        } else {
+                            ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonDanger());
+                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::ButtonDangerHover());
+                            if (ImGui::Button("Mute", ImVec2(220, 30))) {
+                                setUserVolume(m, 0.0f);
+                                ImGui::CloseCurrentPopup();
+                            }
+                            ImGui::PopStyleColor(2);
+                        }
+
+                        ImGui::Dummy(ImVec2(0, 6));
+                        float pct = vol * 100.0f;
+                        ImGui::SetNextItemWidth(220);
+                        if (ImGui::SliderFloat("##Vol", &pct, 0, 200, "%.0f%%"))
+                            setUserVolume(m, pct / 100.0f);
+                    }
+                    ImGui::EndPopup();
+                }
+                ImGui::PopStyleColor();
+                ImGui::PopStyleVar();
+
+                ImGui::EndChild(); // VoiceGrid
+
+                // Leave Voice Chat button (bottom bar)
+                ImGui::Dummy(ImVec2(0, 8));
+                float leaveBtnW = 220.0f;
+                float leaveBtnH = 42.0f;
+                float leaveBtnX = (areaW - leaveBtnW) * 0.5f;
+                if (leaveBtnX < 20.0f) leaveBtnX = 20.0f;
+                ImGui::SetCursorPosX(leaveBtnX);
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonDanger());
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::ButtonDangerHover());
+                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextOnAccent());
+                if (ImGui::Button("Leave Voice Chat", ImVec2(leaveBtnW, leaveBtnH))) {
+                    activeVoiceChannelId = -1;
+                    netClient.Send(PacketType::Join_Voice_Channel, PacketHandler::JoinVoiceChannelPayload(-1));
+                }
+                ImGui::PopStyleColor(3);
+                ImGui::PopStyleVar();
+            }
+            // ==================== TEXT VIEW ====================
+            else {
+                ImGui::Dummy(ImVec2(0, 20));
+                ImGui::Indent(36);
+                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextSecondary());
+                ImGui::SetWindowFontScale(1.25f);
+                ImGui::Text("# %s", chName.c_str());
+                ImGui::SetWindowFontScale(1.0f);
+                ImGui::PopStyleColor();
+
+                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                ImGui::Text("Invite: %s", currentServer.inviteCode.c_str());
+                ImGui::PopStyleColor();
+                ImGui::Unindent(36);
+
+                ImGui::Dummy(ImVec2(0, 6));
+                ImGui::PushStyleColor(ImGuiCol_Separator, Styles::Separator());
+                ImGui::Separator();
+                ImGui::PopStyleColor();
+                ImGui::Dummy(ImVec2(0, 4));
+
+                float hdrH = ImGui::GetCursorPosY();
+                float inpH = 68.0f;
+                float msgH = winH - hdrH - inpH;
+                if (msgH < 50.0f) msgH = 50.0f;
+
+                ImGui::SetCursorPosX(32);
+                ImGui::BeginChild("Messages", ImVec2(areaW - 64, msgH), false, ImGuiWindowFlags_None);
+                for (const auto& msg : messages) {
+                    if (msg.channelId != selectedChannelId) continue;
+                    bool isMe = (msg.sender == currentUser.username);
+
+                    ImGui::BeginGroup();
+                    ImGui::PushStyleColor(ImGuiCol_Text, isMe ? Styles::Accent() : Styles::Error());
+                    size_t hp = msg.sender.find('#');
+                    if (hp != std::string::npos) {
+                        ImGui::Text("%s", msg.sender.substr(0, hp).c_str());
+                        ImGui::SameLine(0, 0);
+                        ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                        ImGui::Text("%s", msg.sender.substr(hp).c_str());
+                        ImGui::PopStyleColor();
+                    } else {
+                        ImGui::Text("%s", msg.sender.c_str());
+                    }
+                    ImGui::PopStyleColor();
+
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s", msg.timestamp.c_str());
+
+                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextPrimary());
+                    ImGui::TextWrapped("%s", msg.content.c_str());
+                    ImGui::PopStyleColor();
+                    ImGui::EndGroup();
+
+                    if (isMe && msg.id > 0) {
+                        if (ImGui::BeginPopupContextItem(("msg_" + std::to_string(msg.id)).c_str())) {
+                            if (ImGui::Selectable("Delete Message"))
+                                netClient.Send(PacketType::Delete_Message_Request,
+                                    PacketHandler::CreateDeleteMessagePayload(msg.id, selectedChannelId, currentUser.username));
+                            ImGui::EndPopup();
+                        }
+                    }
+                    ImGui::Dummy(ImVec2(0, 8));
                 }
                 if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
                 ImGui::EndChild();
 
-                ImGui::SetCursorPos(ImVec2(30, windowHeight - 70)); ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 5.0f); ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.18f, 0.18f, 0.20f, 1.00f));
-                ImGui::PushItemWidth(windowWidth - leftOffset - 150); bool enterPressed = ImGui::InputText("##chat_input", chatInputBuf, 1024, ImGuiInputTextFlags_EnterReturnsTrue); ImGui::PopItemWidth(); ImGui::SameLine();
-                if (UI::AccentButton("Send", ImVec2(80, 35)) || enterPressed) {
-                    if (strlen(chatInputBuf) > 0) { netClient.Send(PacketType::Message_Text, PacketHandler::CreateMessagePayload(selectedChannelId, currentUser.username, chatInputBuf)); memset(chatInputBuf, 0, 1024); ImGui::SetKeyboardFocusHere(-1); }
+                // Input bar
+                ImGui::Dummy(ImVec2(0, 4));
+                ImGui::Indent(32);
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+                ImGui::PushStyleColor(ImGuiCol_FrameBg, Styles::ButtonSubtle());
+                float inputW = areaW - 150;
+                ImGui::PushItemWidth(inputW);
+                bool enter = ImGui::InputText("##chat_in", chatInputBuf, 1024, ImGuiInputTextFlags_EnterReturnsTrue);
+                ImGui::PopItemWidth();
+                ImGui::SameLine();
+                if (UI::AccentButton("Send", ImVec2(68, 32)) || enter) {
+                    if (strlen(chatInputBuf) > 0) {
+                        netClient.Send(PacketType::Message_Text,
+                            PacketHandler::CreateMessagePayload(selectedChannelId, currentUser.username, chatInputBuf));
+                        memset(chatInputBuf, 0, 1024);
+                        ImGui::SetKeyboardFocusHere(-1);
+                    }
                 }
-                ImGui::PopStyleColor(); ImGui::PopStyleVar();
+                ImGui::PopStyleColor();
+                ImGui::PopStyleVar();
+                ImGui::Unindent(32);
             }
+        } else {
+            const char* t = "Select a channel to get started";
+            ImVec2 sz = ImGui::CalcTextSize(t);
+            ImGui::Dummy(ImVec2(0, winH * 0.5f - sz.y));
+            float cx = (areaW - sz.x) * 0.5f;
+            if (cx > 0) { ImGui::Dummy(ImVec2(cx, 0)); ImGui::SameLine(); }
+            ImGui::TextDisabled("%s", t);
         }
-        else {
-            const char* txt = "Select a Text Channel"; auto textSize = ImGui::CalcTextSize(txt);
-            ImGui::SetCursorPos(ImVec2((windowWidth - leftOffset - textSize.x) * 0.5f, windowHeight * 0.5f)); ImGui::TextDisabled("%s", txt);
-        }
-        ImGui::EndChild(); ImGui::PopStyleColor();
+
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
     }
 }
