@@ -366,16 +366,23 @@ FodyWeavers.xsd
 # TalkMe project-specific
 # =============================================================
 
+# Vcpkg installed packages (restore with vcpkg install)
+vcpkg_installed/
+
 # Runtime config & session files
 *.cfg
 *.dat
 session.dat
+user_volumes.json
 
 # Debug / profiling logs
 *.log
+logs.log
 talkme_debug.log
 talkme_voice_stats.log
+talkme_voice_trace.log
 talkme_debug.csv
+**/voice_trace*.log
 
 # Build performance traces
 BuildPerfCpp_trace_*.etl

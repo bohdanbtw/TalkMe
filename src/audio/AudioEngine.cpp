@@ -2,9 +2,9 @@
 #define NOMINMAX
 #endif
 
-
 #include "AudioEngine.h"
 #include "../core/Logger.h"
+#include "../shared/Protocol.h" 
 #include <vector>
 #include <cstring> 
 #include <map>
@@ -21,14 +21,14 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include "../../vendor/miniaudio.h" 
 
-
 namespace TalkMe {
 
-    static const int MAX_TRACKS = 100;
-    static const int OPUS_FRAME_SIZE = 480;
-    static const int SAMPLE_RATE = 48000;
-    static const float SILENCE_THRESHOLD = 0.0001f;
-    static const int AUDIO_LOG_SAMPLE_EVERY = 100; // log every Nth packet to avoid huge debug logs
+    static constexpr int MAX_TRACKS = 100;
+    static constexpr int OPUS_FRAME_SIZE = 480;
+    static constexpr int SAMPLE_RATE = 48000;
+    static constexpr float SILENCE_THRESHOLD = 0.0001f;
+    static constexpr int AUDIO_LOG_SAMPLE_EVERY = 100;
+    static constexpr int VOICE_TRACE_SAMPLE_EVERY = 50;
 
     class OpusEncoderWrapper {
     public:
@@ -45,7 +45,8 @@ namespace TalkMe {
                 opus_encoder_ctl(encoder, OPUS_SET_PACKET_LOSS_PERC(10));
                 currentBitrate = 32000;
                 LOG_AUDIO("Encoder created successfully");
-            } else {
+            }
+            else {
                 std::stringstream ss;
                 ss << "Encoder creation failed with error code: " << err;
                 LOG_ERROR(ss.str());
@@ -62,28 +63,33 @@ namespace TalkMe {
         }
 
         void AdjustBitrate(float packetLossPercent) {
-            int newBitrate = 32000;  // Base bitrate
-            if (packetLossPercent > 5.0f) {
-                newBitrate = 16000;  // Reduce for poor networks (packet loss > 5%)
-            } else if (packetLossPercent > 2.0f) {
-                newBitrate = 24000;  // Moderate reduction
-            } else if (packetLossPercent < 0.5f) {
-                newBitrate = 48000;  // Increase for excellent networks
-            }
+            int newBitrate = 32000;
+            if (packetLossPercent > 15.0f) newBitrate = 24000;
+            else if (packetLossPercent > 5.0f) newBitrate = 28000;
+            else if (packetLossPercent > 2.0f) newBitrate = 32000;
+            else if (packetLossPercent < 0.5f) newBitrate = 48000;
 
             if (newBitrate != currentBitrate) {
                 opus_encoder_ctl(encoder, OPUS_SET_BITRATE(newBitrate));
                 currentBitrate = newBitrate;
-
                 std::stringstream ss;
-                ss << "Encoder bitrate adjusted to " << (newBitrate / 1000) 
-                   << "kbps (packet loss: " << packetLossPercent << "%)";
+                ss << "Encoder bitrate adjusted to " << (newBitrate / 1000)
+                    << "kbps (packet loss: " << packetLossPercent << "%)";
                 LOG_AUDIO(ss.str());
             }
         }
 
         void SetPacketLossPercentage(float lossPercent) {
             opus_encoder_ctl(encoder, OPUS_SET_PACKET_LOSS_PERC((int)lossPercent));
+        }
+
+        void SetTargetBitrate(int bitrate) {
+            if (!encoder) return;
+            int clamped = std::clamp(bitrate, 12000, 64000);
+            if (clamped != currentBitrate) {
+                opus_encoder_ctl(encoder, OPUS_SET_BITRATE(clamped));
+                currentBitrate = clamped;
+            }
         }
 
         int GetCurrentBitrate() const { return currentBitrate; }
@@ -102,53 +108,34 @@ namespace TalkMe {
                 std::stringstream ss;
                 ss << "Decoder creation failed with error code: " << err;
                 LOG_ERROR(ss.str());
-            } else {
+            }
+            else {
                 LOG_AUDIO("Decoder created successfully");
             }
         }
         ~OpusDecoderWrapper() { if (decoder) opus_decoder_destroy(decoder); }
-        
+
         int DecodeWithDiagnostics(const uint8_t* data, size_t len, float* pcmOut) {
-            if (!decoder) {
-                LOG_ERROR("Decode attempted but decoder is null");
-                return -1;
-            }
+            if (!decoder) return -1;
             int samples = opus_decode_float(decoder, data, (int)len, pcmOut, OPUS_FRAME_SIZE, 0);
             if (samples != OPUS_FRAME_SIZE) {
                 std::stringstream ss;
-                ss << "Opus decode error: returned " << samples << " samples (expected " << OPUS_FRAME_SIZE 
-                   << "), input_size=" << len;
+                ss << "Opus decode error: returned " << samples << " samples (expected " << OPUS_FRAME_SIZE
+                    << "), input_size=" << len;
                 LOG_ERROR(ss.str());
             }
             return samples;
         }
 
         int DecodeLossWithDiagnostics(float* pcmOut) {
-            if (!decoder) {
-                LOG_ERROR("Decode loss attempted but decoder is null");
-                return -1;
-            }
+            if (!decoder) return -1;
             int samples = opus_decode_float(decoder, nullptr, 0, pcmOut, OPUS_FRAME_SIZE, 0);
-            if (samples != OPUS_FRAME_SIZE) {
-                std::stringstream ss;
-                ss << "Opus decode loss error: returned " << samples << " samples";
-                LOG_ERROR(ss.str());
-            } else {
-                LOG_AUDIO("Packet loss concealment applied");
-            }
+            if (samples == OPUS_FRAME_SIZE) LOG_AUDIO("Packet loss concealment applied");
             return samples;
-        }
-
-        bool Decode(const uint8_t* data, size_t len, float* pcmOut) {
-            return DecodeWithDiagnostics(data, len, pcmOut) == OPUS_FRAME_SIZE;
-        }
-        bool DecodeLoss(float* pcmOut) {
-            return DecodeLossWithDiagnostics(pcmOut) == OPUS_FRAME_SIZE;
         }
     private:
         OpusDecoder* decoder = nullptr;
     };
-
 
     struct VoiceTrack {
         ma_pcm_rb rb;
@@ -158,7 +145,9 @@ namespace TalkMe {
         uint32_t lastSequenceNumber = 0;
         bool firstPacket = true;
         bool isBuffering = true;
-        std::atomic<float> gain{1.0f};
+        bool coldStart = true;
+        std::atomic<float> gain{ 1.0f };
+        double smoothedBufferLevelMs = 0.0;
     };
 
     struct AudioInternal {
@@ -168,13 +157,20 @@ namespace TalkMe {
         VoiceTrack tracks[MAX_TRACKS];
         std::unique_ptr<OpusEncoderWrapper> encoder;
         std::function<void(const std::vector<uint8_t>&, uint32_t)> onMicData;
+
+        std::function<void(const TalkMe::ReceiverReportPayload&)> onReceiverReport;
+        std::chrono::steady_clock::time_point lastReceiverReportTime = std::chrono::steady_clock::now();
+
+        uint32_t highestSeqReceived = 0;
+        int intervalPacketsReceived = 0;
+        int intervalPacketsLost = 0;
+
         float currentGain = 1.0f;
         float targetGain = 1.0f;
         float captureRMS = 0.0f;
         const float VAD_THRESHOLD = 0.002f;
         uint32_t outgoingSeqNum = 0;
 
-        // Telemetry tracking
         int totalPacketsReceived = 0;
         int totalPacketsLost = 0;
         int totalPacketsDuplicated = 0;
@@ -182,32 +178,27 @@ namespace TalkMe {
         int bufferOverflows = 0;
         double avgJitterMs = 0.0;
         double currentLatencyMs = 0.0;
+        double maxJitterSpikeMs = 0.0;
         double packetLossPercentage = 0.0;
 
-        // Adaptive buffer management
         int remoteMemberCount = 0;
         int targetBufferMs = 150;
         int minBufferMs = 80;
         int maxBufferMs = 300;
-        int lastAdaptTime = 0;
         int adaptiveBufferLevel = 150;
 
-        // Codec adaptation
         int currentEncoderBitrate = 32000;
-        int lastBitrateAdjustTime = 0;
         float currentVoiceActivityLevel = 0.0f;
 
-        // Logging for diagnostics
-        int lastTelemetryLogTime = 0;
         std::map<std::string, uint32_t> lastSeq;
         std::map<std::string, std::chrono::steady_clock::time_point> lastArrival;
         bool deviceStarted = false;
-        std::atomic<bool> selfDeafened{false};
+        std::atomic<bool> selfDeafened{ false };
         int callbackInvocations = 0;
         std::chrono::steady_clock::time_point lastKeepaliveTime = std::chrono::steady_clock::now();
         int keepaliveIntervalMs = 8000;
         std::mutex m_GainMutex;
-        std::map<std::string, float> m_UserGains; // per-user output gain (0 = mute, 1 = normal)
+        std::map<std::string, float> m_UserGains;
     };
 
     inline float CalculateRMS(const float* samples, ma_uint32 count) {
@@ -224,9 +215,7 @@ namespace TalkMe {
 
     bool IsVoiceActive(const float* pcm, int samples) {
         float energy = 0.0f;
-        for (int i = 0; i < samples; i++) {
-            energy += pcm[i] * pcm[i];
-        }
+        for (int i = 0; i < samples; i++) energy += pcm[i] * pcm[i];
         return (energy / samples) > SILENCE_THRESHOLD;
     }
 
@@ -235,21 +224,15 @@ namespace TalkMe {
         if (!internal) return;
 
         internal->callbackInvocations++;
-        if (internal->callbackInvocations == 1) {
-            LOG_AUDIO("Audio callback started");
-        }
+        if (internal->callbackInvocations == 1) LOG_AUDIO("Audio callback started");
 
-        // Microphone input handling
         if (pInput && internal->onMicData) {
             const float* pInputFloat = (const float*)pInput;
             float rms = CalculateRMS(pInputFloat, frameCount);
             internal->captureRMS = rms * 0.2f + internal->captureRMS * 0.8f;
-
-            // Update voice activity level for telemetry
-            bool isActive = internal->captureRMS > internal->VAD_THRESHOLD;
             internal->currentVoiceActivityLevel = internal->captureRMS;
 
-            if (isActive) {
+            if (internal->captureRMS > internal->VAD_THRESHOLD) {
                 void* pWrite;
                 ma_uint32 toWrite = frameCount;
                 while (toWrite > 0) {
@@ -270,6 +253,7 @@ namespace TalkMe {
         float* pOutputFloat = (float*)pOutput;
         std::memset(pOutputFloat, 0, frameCount * sizeof(float));
         if (internal->selfDeafened.load(std::memory_order_relaxed)) return;
+
         int activeCount = 0;
         float mixBuffer[4096];
         if (frameCount > 4096) return;
@@ -278,24 +262,45 @@ namespace TalkMe {
         for (int i = 0; i < MAX_TRACKS; ++i) {
             if (!internal->tracks[i].active) continue;
             ma_uint32 available = ma_pcm_rb_available_read(&internal->tracks[i].rb);
+            int targetMs = internal->adaptiveBufferLevel;
 
             if (internal->tracks[i].isBuffering) {
-                int targetMs = internal->adaptiveBufferLevel;
-                ma_uint32 requiredFrames = (ma_uint32)((targetMs * SAMPLE_RATE) / 1000);
+                int recoveryMs = (std::max)(40, (std::min)(static_cast<int>(internal->maxJitterSpikeMs) + 20, targetMs));
+                int thresholdMs = internal->tracks[i].coldStart ? targetMs : recoveryMs;
+
+                ma_uint32 requiredFrames = (ma_uint32)((thresholdMs * SAMPLE_RATE) / 1000);
                 if (requiredFrames < OPUS_FRAME_SIZE) requiredFrames = OPUS_FRAME_SIZE;
                 if (requiredFrames > 48000) requiredFrames = 48000;
+
                 if (available < requiredFrames) continue;
+
                 internal->tracks[i].isBuffering = false;
+                internal->tracks[i].smoothedBufferLevelMs = (available * 1000.0) / SAMPLE_RATE;
+            } else {
+                double availMs = (available * 1000.0) / SAMPLE_RATE;
+                internal->tracks[i].smoothedBufferLevelMs = internal->tracks[i].smoothedBufferLevelMs * 0.998 + availMs * 0.002;
+
+                if (internal->tracks[i].smoothedBufferLevelMs > targetMs + 40.0 && available >= OPUS_FRAME_SIZE * 2) {
+                    void* pRead;
+                    ma_uint32 chunk = OPUS_FRAME_SIZE;
+                    if (ma_pcm_rb_acquire_read(&internal->tracks[i].rb, &chunk, &pRead) == MA_SUCCESS) {
+                        ma_pcm_rb_commit_read(&internal->tracks[i].rb, chunk);
+                        internal->tracks[i].smoothedBufferLevelMs -= 10.0;
+                        available -= OPUS_FRAME_SIZE;
+                    }
+                }
+                else if (internal->tracks[i].smoothedBufferLevelMs < targetMs - 30.0 && available > 0 && available < OPUS_FRAME_SIZE * 3) {
+                    internal->tracks[i].smoothedBufferLevelMs += 10.0;
+                    continue;
+                }
             }
 
             if (available < frameCount) {
-                // Buffer underrun detected
                 internal->bufferUnderruns++;
-                std::stringstream ss;
-                ss << "Buffer underrun on track " << i 
-                   << " (available=" << available << " needed=" << frameCount << ")";
-                LOG_ERROR(ss.str());
                 internal->tracks[i].isBuffering = true;
+                internal->tracks[i].coldStart = false;
+
+                internal->adaptiveBufferLevel = (std::min)(internal->adaptiveBufferLevel + 20, internal->maxBufferMs);
                 continue;
             }
 
@@ -321,20 +326,14 @@ namespace TalkMe {
             internal->currentGain = internal->currentGain * 0.95f + internal->targetGain * 0.05f;
             for (ma_uint32 i = 0; i < frameCount; ++i) pOutputFloat[i] = SoftClip(mixBuffer[i] * internal->currentGain);
         }
-
-        // Log summary every 5 seconds
-        if (frameCount % (48000 * 5 / 480) == 0) {  // Every 5 sec at 48kHz
-            std::stringstream ss;
-            ss << "Audio Stats - Loss: " << (100.0f * internal->totalPacketsLost / 
-               (internal->totalPacketsLost + internal->totalPacketsReceived))
-               << "% | Jitter: " << internal->avgJitterMs << "ms"
-               << " | Buffer: " << internal->targetBufferMs << "ms";
-            LOG_AUDIO(ss.str());
-        }
     }
 
     AudioEngine::AudioEngine() : m_Internal(std::make_unique<AudioInternal>()) {}
     AudioEngine::~AudioEngine() { Shutdown(); }
+
+    void AudioEngine::SetReceiverReportCallback(std::function<void(const TalkMe::ReceiverReportPayload&)> callback) {
+        if (m_Internal) m_Internal->onReceiverReport = std::move(callback);
+    }
 
     bool AudioEngine::InitializeWithSequence(std::function<void(const std::vector<uint8_t>&, uint32_t)> onMicDataCaptured) {
         m_Internal->onMicData = onMicDataCaptured;
@@ -346,9 +345,6 @@ namespace TalkMe {
         }
         for (int i = 0; i < MAX_TRACKS; ++i) {
             if (ma_pcm_rb_init(ma_format_f32, 1, bufferFrames, nullptr, nullptr, &m_Internal->tracks[i].rb) != MA_SUCCESS) {
-                std::stringstream ss;
-                ss << "Failed to initialize track " << i << " ring buffer";
-                LOG_ERROR(ss.str());
                 return false;
             }
             m_Internal->tracks[i].active = false;
@@ -363,17 +359,13 @@ namespace TalkMe {
         m_Internal->config.dataCallback = DataCallback;
         m_Internal->config.pUserData = m_Internal.get();
         if (ma_device_init(nullptr, &m_Internal->config, &m_Internal->device) != MA_SUCCESS) {
-            LOG_ERROR("Failed to initialize miniaudio device");
             return false;
         }
         if (ma_device_start(&m_Internal->device) == MA_SUCCESS) {
             m_Internal->deviceStarted = true;
-            LOG_AUDIO("Audio device started successfully");
             return true;
-        } else {
-            LOG_ERROR("Failed to start audio device");
-            return false;
         }
+        return false;
     }
 
     bool AudioEngine::Initialize(std::function<void(const std::vector<uint8_t>&)> onMicDataCaptured) {
@@ -383,7 +375,6 @@ namespace TalkMe {
     void AudioEngine::Update() {
         if (!m_Internal || !m_Internal->onMicData) return;
 
-        // When capture is disabled, drain the capture buffer so it doesn't overflow (mic callback keeps filling it).
         if (!m_CaptureEnabled) {
             ma_uint32 available = ma_pcm_rb_available_read(&m_Internal->captureRb);
             while (available >= OPUS_FRAME_SIZE) {
@@ -396,18 +387,39 @@ namespace TalkMe {
             return;
         }
 
-        // Voice keepalive: send a silent frame periodically (interval from server config).
         auto now = std::chrono::steady_clock::now();
-        int elapsedMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(now - m_Internal->lastKeepaliveTime).count();
+
+        int rrElapsedMs = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - m_Internal->lastReceiverReportTime).count());
+        if (rrElapsedMs >= 2000) {
+            if (m_Internal->onReceiverReport) {
+                TalkMe::ReceiverReportPayload rr{};
+                rr.highestSequenceReceived = m_Internal->highestSeqReceived;
+                rr.packetsLost = static_cast<uint32_t>(m_Internal->totalPacketsLost);
+                rr.jitterMs = static_cast<uint32_t>(m_Internal->avgJitterMs);
+
+                int expected = m_Internal->intervalPacketsReceived + m_Internal->intervalPacketsLost;
+                rr.fractionLost = (expected > 0) ? static_cast<uint8_t>((std::min)((static_cast<float>(m_Internal->intervalPacketsLost) / expected) * 256.0f, 255.0f)) : 0;
+
+                m_Internal->onReceiverReport(rr);
+            }
+
+            m_Internal->intervalPacketsReceived = 0;
+            m_Internal->intervalPacketsLost = 0;
+
+            // Slow-Decay: Gradually relax the buffer as the network stabilizes
+            m_Internal->maxJitterSpikeMs *= 0.9;
+            m_Internal->lastReceiverReportTime = now;
+        }
+
+        int elapsedMs = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - m_Internal->lastKeepaliveTime).count());
         if (elapsedMs >= m_Internal->keepaliveIntervalMs) {
             m_Internal->lastKeepaliveTime = now;
-            float silence[OPUS_FRAME_SIZE] = {0};
+            float silence[OPUS_FRAME_SIZE] = { 0 };
             std::vector<uint8_t> packet = m_Internal->encoder->Encode(silence);
             if (!packet.empty())
                 m_Internal->onMicData(packet, m_Internal->outgoingSeqNum++);
         }
 
-        // Process microphone capture
         ma_uint32 available = ma_pcm_rb_available_read(&m_Internal->captureRb);
         if (available >= OPUS_FRAME_SIZE) {
             float pcmBuffer[OPUS_FRAME_SIZE];
@@ -421,150 +433,113 @@ namespace TalkMe {
                 if (hasVoice && !m_SelfMuted) {
                     std::vector<uint8_t> packet = m_Internal->encoder->Encode(pcmBuffer);
                     if (!packet.empty()) {
-                        if (m_Internal->outgoingSeqNum % AUDIO_LOG_SAMPLE_EVERY == 0) {
-                            std::stringstream ss;
-                            ss << "Encoded packet size=" << packet.size() << " seq=" << m_Internal->outgoingSeqNum;
-                            LOG_AUDIO(ss.str());
-                        }
                         m_Internal->onMicData(packet, m_Internal->outgoingSeqNum++);
                     }
                 }
             }
         }
-
-        // Periodic telemetry logging (every ~5 seconds at 48kHz)
-        static int telemetryFrameCounter = 0;
-        telemetryFrameCounter++;
-        int loggingInterval = (SAMPLE_RATE * 5) / OPUS_FRAME_SIZE;  // ~5 seconds
-
-        if (telemetryFrameCounter >= loggingInterval) {
-            telemetryFrameCounter = 0;
-
-            Telemetry tel = GetTelemetry();
-            std::stringstream ss;
-            ss << "=== Audio Telemetry ===" 
-               << " Packets: recv=" << tel.totalPacketsReceived
-               << " loss=" << tel.totalPacketsLost
-               << " (" << tel.packetLossPercentage << "%)"
-               << " dup=" << tel.totalPacketsDuplicated
-               << " | Jitter: " << tel.avgJitterMs << "ms"
-               << " | Buffer: " << tel.currentBufferMs << "ms"
-               << " | Codec: " << tel.currentEncoderBitrateKbps << "kbps"
-               << " | Members: " << tel.remoteMemberCount
-               << " | Underruns: " << tel.bufferUnderruns;
-            LOG_AUDIO(ss.str());
-        }
     }
 
     void AudioEngine::PushIncomingAudioWithSequence(const std::string& userId, const std::vector<uint8_t>& opusData, uint32_t seqNum) {
-       if (!m_Internal) return;
-       auto now = std::chrono::steady_clock::now();
-       m_Internal->totalPacketsReceived++;
+        if (!m_Internal) return;
+        auto now = std::chrono::steady_clock::now();
 
-       auto itLast = m_Internal->lastSeq.find(userId);
-       bool isDuplicate = false;
+        if (seqNum > m_Internal->highestSeqReceived) {
+            m_Internal->highestSeqReceived = seqNum;
+        }
 
-       if (itLast != m_Internal->lastSeq.end()) {
-           uint32_t last = itLast->second;
+        auto itLast = m_Internal->lastSeq.find(userId);
+        if (itLast != m_Internal->lastSeq.end()) {
+            uint32_t last = itLast->second;
 
-           // Check for duplicate packets
-           if (seqNum == last) {
-               m_Internal->totalPacketsDuplicated++;
-               isDuplicate = true;
-               std::stringstream ssDup;
-               ssDup << "Duplicate packet detected: seqNum=" << seqNum;
-               LOG_AUDIO(ssDup.str());
-               return;  // Skip processing duplicate
-           }
+            if (seqNum == last) {
+                m_Internal->totalPacketsDuplicated++;
+                return;
+            }
 
-           // Detect packet loss using sequence numbers
-           uint32_t expectedSeq = last + 1;
-           if (seqNum > expectedSeq) {
-               int lost = seqNum - expectedSeq;
-               m_Internal->totalPacketsLost += lost;
-               std::stringstream ss;
-               ss << "Packet loss detected from user " << userId 
-                  << ": " << lost << " packets missing (expected=" << expectedSeq 
-                  << " got=" << seqNum << ")";
-               LOG_AUDIO(ss.str());
-           }
+            if (seqNum < last) return;
 
-           // Update jitter calculation
-           auto itTime = m_Internal->lastArrival.find(userId);
-           if (itTime != m_Internal->lastArrival.end()) {
-               double deltaMs = static_cast<double>(std::chrono::duration_cast<std::chrono::milliseconds>(now - itTime->second).count());
-               m_Internal->avgJitterMs = m_Internal->avgJitterMs * 0.95 + deltaMs * 0.05;
-               m_Internal->currentLatencyMs = deltaMs;
-           }
-       }
+            uint32_t expectedSeq = last + 1;
+            if (seqNum > expectedSeq) {
+                int lost = seqNum - expectedSeq;
+                m_Internal->totalPacketsLost += lost;
+                m_Internal->intervalPacketsLost += lost;
+            }
+        }
 
-       m_Internal->lastSeq[userId] = seqNum;
-       m_Internal->lastArrival[userId] = now;
+        m_Internal->totalPacketsReceived++;
+        m_Internal->intervalPacketsReceived++;
 
-       // Find or create track for this user
-       int trackIdx = -1;
-       for (int i = 0; i < MAX_TRACKS; ++i) {
-           if (m_Internal->tracks[i].active && m_Internal->tracks[i].userId == userId) { 
-               trackIdx = i; 
-               break; 
-           }
-       }
+        auto itTime = m_Internal->lastArrival.find(userId);
+        if (itTime != m_Internal->lastArrival.end() && itLast != m_Internal->lastSeq.end()) {
+            uint32_t seqDiff = seqNum - itLast->second;
+            if (seqDiff > 0 && seqDiff < 100) {
+                double expectedDeltaMs = seqDiff * 10.0;
+                double actualDeltaMs = static_cast<double>(std::chrono::duration_cast<std::chrono::milliseconds>(now - itTime->second).count());
+                double transitDiff = std::abs(actualDeltaMs - expectedDeltaMs);
+                if (transitDiff <= 200.0) {
+                    if (transitDiff > m_Internal->avgJitterMs) {
+                        m_Internal->maxJitterSpikeMs = (std::max)(m_Internal->maxJitterSpikeMs, transitDiff);
+                    }
+                    m_Internal->avgJitterMs = m_Internal->avgJitterMs * 0.9375 + transitDiff * 0.0625;
+                }
+                m_Internal->currentLatencyMs = actualDeltaMs;
+            }
+        }
+        m_Internal->lastSeq[userId] = seqNum;
+        m_Internal->lastArrival[userId] = now;
 
-       if (trackIdx == -1) {
-           for (int i = 0; i < MAX_TRACKS; ++i) {
-               if (!m_Internal->tracks[i].active) {
-                   m_Internal->tracks[i].userId = userId;
-                   m_Internal->tracks[i].active = true;
-                   m_Internal->tracks[i].decoder = std::make_unique<OpusDecoderWrapper>();
-                   m_Internal->tracks[i].firstPacket = true;
-                   m_Internal->tracks[i].isBuffering = true;
-                   m_Internal->tracks[i].lastSequenceNumber = seqNum - 1;
-                   {
-                       std::lock_guard<std::mutex> lock(m_Internal->m_GainMutex);
-                       auto itGain = m_Internal->m_UserGains.find(userId);
-                       m_Internal->tracks[i].gain.store(
-                           itGain != m_Internal->m_UserGains.end() ? itGain->second : 1.0f,
-                           std::memory_order_relaxed);
-                   }
-                   std::stringstream ss;
-                   ss << "Created track " << i << " for user=" << userId;
-                   LOG_AUDIO(ss.str());
-                   trackIdx = i; 
-                   break;
-               }
-           }
-       }
+        int trackIdx = -1;
+        for (int i = 0; i < MAX_TRACKS; ++i) {
+            if (m_Internal->tracks[i].active && m_Internal->tracks[i].userId == userId) {
+                trackIdx = i;
+                break;
+            }
+        }
 
-       if (trackIdx == -1) {
-           LOG_ERROR("No available tracks for incoming audio");
-           return;
-       }
+        if (trackIdx == -1) {
+            for (int i = 0; i < MAX_TRACKS; ++i) {
+                if (!m_Internal->tracks[i].active) {
+                    m_Internal->tracks[i].userId = userId;
+                    m_Internal->tracks[i].active = true;
+                    m_Internal->tracks[i].decoder = std::make_unique<OpusDecoderWrapper>();
+                    m_Internal->tracks[i].firstPacket = true;
+                    m_Internal->tracks[i].isBuffering = true;
+                    m_Internal->tracks[i].coldStart = true;
+                    m_Internal->tracks[i].lastSequenceNumber = seqNum - 1;
+                    {
+                        std::lock_guard<std::mutex> lock(m_Internal->m_GainMutex);
+                        auto itGain = m_Internal->m_UserGains.find(userId);
+                        m_Internal->tracks[i].gain.store(
+                            itGain != m_Internal->m_UserGains.end() ? itGain->second : 1.0f,
+                            std::memory_order_relaxed);
+                    }
+                    trackIdx = i;
+                    break;
+                }
+            }
+        }
 
-       auto& track = m_Internal->tracks[trackIdx];
+        if (trackIdx == -1) return;
 
-       // Handle packet loss using sequence numbers on per-track basis
-       if (!track.firstPacket && seqNum != 0) {
-           uint32_t expected = track.lastSequenceNumber + 1;
-           if (seqNum > expected && seqNum < expected + 10) {
-               std::stringstream ss;
-               ss << "Detected packet loss on track " << trackIdx << ": expected=" << expected
-                   << " got=" << seqNum << " (missing " << (seqNum - expected) << " packets)";
-               LOG_AUDIO(ss.str());
+        auto& track = m_Internal->tracks[trackIdx];
 
-               // Apply packet loss concealment for each missing packet
-               for (uint32_t i = 0; i < (seqNum - expected); ++i) {
-                   float plc[OPUS_FRAME_SIZE];
-                   int samples = track.decoder->DecodeLossWithDiagnostics(plc);
-                   if (samples == OPUS_FRAME_SIZE) {
-                       void* pW;
-                       ma_uint32 c = OPUS_FRAME_SIZE;
-                       if (ma_pcm_rb_acquire_write(&track.rb, &c, &pW) == MA_SUCCESS) {
-                           std::memcpy(pW, plc, c * sizeof(float));
-                           ma_pcm_rb_commit_write(&track.rb, c);
-                       }
-                   }
-               }
-           }
+        if (!track.firstPacket && seqNum != 0) {
+            uint32_t expected = track.lastSequenceNumber + 1;
+            if (seqNum > expected && seqNum < expected + 10) {
+                for (uint32_t i = 0; i < (seqNum - expected); ++i) {
+                    float plc[OPUS_FRAME_SIZE];
+                    int samples = track.decoder->DecodeLossWithDiagnostics(plc);
+                    if (samples == OPUS_FRAME_SIZE) {
+                        void* pW;
+                        ma_uint32 c = OPUS_FRAME_SIZE;
+                        if (ma_pcm_rb_acquire_write(&track.rb, &c, &pW) == MA_SUCCESS) {
+                            std::memcpy(pW, plc, c * sizeof(float));
+                            ma_pcm_rb_commit_write(&track.rb, c);
+                        }
+                    }
+                }
+            }
         }
         track.lastSequenceNumber = seqNum;
         track.firstPacket = false;
@@ -574,17 +549,12 @@ namespace TalkMe {
         if (samples == OPUS_FRAME_SIZE) {
             ma_uint32 avail = ma_pcm_rb_available_read(&track.rb);
             if (avail > 96000) {
-                // Buffer overflow - need to skip data to prevent audio distortion
                 ma_uint32 toSeek = avail - 48000;
                 ma_pcm_rb_seek_read(&track.rb, toSeek);
                 m_Internal->bufferOverflows++;
-                std::stringstream ss;
-                ss << "Track " << trackIdx << " buffer overflow detected (avail=" << avail 
-                   << " frames), seeked back " << toSeek << " frames";
-                LOG_ERROR(ss.str());
             }
 
-            void* pW; 
+            void* pW;
             ma_uint32 frames = OPUS_FRAME_SIZE;
             if (ma_pcm_rb_acquire_write(&track.rb, &frames, &pW) == MA_SUCCESS) {
                 std::memcpy(pW, pcm, frames * sizeof(float));
@@ -614,20 +584,52 @@ namespace TalkMe {
             t.userId.clear();
             t.firstPacket = true;
             t.isBuffering = true;
+            t.coldStart = true;
             t.lastSequenceNumber = 0;
+            t.smoothedBufferLevelMs = 0.0;
             t.gain.store(1.0f, std::memory_order_relaxed);
         }
         m_Internal->lastSeq.clear();
         m_Internal->lastArrival.clear();
-        LOG_AUDIO("Cleared all remote voice tracks");
     }
 
-    void AudioEngine::ApplyConfig(int targetBufferMs, int minBufferMs, int maxBufferMs, int keepaliveIntervalMs) {
+    void AudioEngine::RemoveUserTrack(const std::string& userId) {
+        if (!m_Internal || userId.empty()) return;
+        for (int i = 0; i < MAX_TRACKS; ++i) {
+            auto& t = m_Internal->tracks[i];
+            if (!t.active || t.userId != userId) continue;
+            ma_uint32 avail = ma_pcm_rb_available_read(&t.rb);
+            while (avail > 0) {
+                ma_uint32 chunk = avail;
+                void* pRead;
+                if (ma_pcm_rb_acquire_read(&t.rb, &chunk, &pRead) != MA_SUCCESS) break;
+                ma_pcm_rb_commit_read(&t.rb, chunk);
+                avail -= chunk;
+            }
+            t.active = false;
+            t.decoder.reset();
+            t.userId.clear();
+            t.firstPacket = true;
+            t.isBuffering = true;
+            t.coldStart = true;
+            t.lastSequenceNumber = 0;
+            t.smoothedBufferLevelMs = 0.0;
+            t.gain.store(1.0f, std::memory_order_relaxed);
+        }
+        m_Internal->lastSeq.erase(userId);
+        m_Internal->lastArrival.erase(userId);
+    }
+
+    void AudioEngine::ApplyConfig(int targetBufferMs, int minBufferMs, int maxBufferMs, int keepaliveIntervalMs, int targetBitrateKbps) {
         if (!m_Internal) return;
         if (targetBufferMs >= 0) { m_Internal->targetBufferMs = targetBufferMs; m_Internal->adaptiveBufferLevel = targetBufferMs; }
         if (minBufferMs >= 0) m_Internal->minBufferMs = minBufferMs;
         if (maxBufferMs >= 0) m_Internal->maxBufferMs = maxBufferMs;
         if (keepaliveIntervalMs >= 0) m_Internal->keepaliveIntervalMs = keepaliveIntervalMs;
+        if (targetBitrateKbps > 0 && m_Internal->encoder) {
+            m_Internal->encoder->SetTargetBitrate(targetBitrateKbps * 1000);
+            m_Internal->currentEncoderBitrate = m_Internal->encoder->GetCurrentBitrate();
+        }
     }
 
     void AudioEngine::SetUserGain(const std::string& userId, float gain) {
@@ -636,11 +638,9 @@ namespace TalkMe {
             std::lock_guard<std::mutex> lock(m_Internal->m_GainMutex);
             m_Internal->m_UserGains[userId] = gain;
         }
-        bool found = false;
         for (int i = 0; i < MAX_TRACKS; ++i) {
             if (m_Internal->tracks[i].active && m_Internal->tracks[i].userId == userId) {
                 m_Internal->tracks[i].gain.store(gain, std::memory_order_relaxed);
-                found = true;
                 break;
             }
         }
@@ -652,12 +652,8 @@ namespace TalkMe {
     }
 
     void AudioEngine::Shutdown() {
-        LOG_AUDIO("Shutting down audio engine");
         if (m_Internal) {
-            if (m_Internal->deviceStarted) {
-                ma_device_uninit(&m_Internal->device);
-                LOG_AUDIO("Audio device stopped");
-            }
+            if (m_Internal->deviceStarted) ma_device_uninit(&m_Internal->device);
             ma_pcm_rb_uninit(&m_Internal->captureRb);
             for (int i = 0; i < MAX_TRACKS; ++i) {
                 ma_pcm_rb_uninit(&m_Internal->tracks[i].rb);
@@ -665,61 +661,64 @@ namespace TalkMe {
             }
             m_Internal->encoder.reset();
         }
-        Logger::Instance().Shutdown();
     }
 
     void AudioEngine::OnVoiceStateUpdate(int memberCount) {
         if (!m_Internal) return;
         m_Internal->remoteMemberCount = memberCount;
-
-        // Dynamic jitter buffer based on network conditions and member count
         int base = 100;
         int jitterMs = (int)std::ceil(m_Internal->avgJitterMs);
-
-        // Scale buffer based on number of participants (more participants = need larger buffer)
         int memberBonus = memberCount * 15;
         int adapt = base + jitterMs + memberBonus;
-
-        // Clamp to reasonable range
         if (adapt > m_Internal->maxBufferMs) adapt = m_Internal->maxBufferMs;
         if (adapt < m_Internal->minBufferMs) adapt = m_Internal->minBufferMs;
-
         m_Internal->adaptiveBufferLevel = adapt;
-
-        std::stringstream ss;
-        ss << "Adaptive buffer adjusted: members=" << memberCount 
-           << " jitter=" << jitterMs << "ms final=" << adapt << "ms";
-        LOG_AUDIO(ss.str());
     }
 
     void AudioEngine::OnNetworkConditions(float packetLossPercent, float avgLatencyMs) {
         if (!m_Internal) return;
-
-        // Update packet loss percentage for telemetry
         int totalSamples = m_Internal->totalPacketsReceived + m_Internal->totalPacketsLost;
         if (totalSamples > 0) {
-            m_Internal->packetLossPercentage = 
-                (100.0f * m_Internal->totalPacketsLost) / totalSamples;
+            m_Internal->packetLossPercentage = (100.0f * m_Internal->totalPacketsLost) / totalSamples;
         } else {
             m_Internal->packetLossPercentage = packetLossPercent;
         }
 
-        int targetBuffer = 480 * 2 * (int)(avgLatencyMs / 10);  // 2x safety margin
-        targetBuffer = std::max(480 * (int)m_Internal->minBufferMs / 10, 
-                                std::min(targetBuffer, 480 * (int)m_Internal->maxBufferMs / 10));
-        m_Internal->adaptiveBufferLevel = (targetBuffer / 480) * 10;
+        // Utilize the maximum spike, not just the smoothed average
+        int effectiveJitterMs = static_cast<int>(std::ceil((std::max)(m_Internal->avgJitterMs, m_Internal->maxJitterSpikeMs)));
+        int lossBurstMs = static_cast<int>(m_Internal->packetLossPercentage * 1.5f);
+        int targetMs = static_cast<int>(avgLatencyMs) + 3 * effectiveJitterMs + lossBurstMs + 20;
 
-        // Adaptive bitrate based on packet loss
+        targetMs = (std::max)(targetMs, m_Internal->minBufferMs);
+        targetMs = (std::min)(targetMs, m_Internal->maxBufferMs);
+        m_Internal->adaptiveBufferLevel = targetMs;
+
         if (m_Internal->encoder) {
             m_Internal->encoder->AdjustBitrate(static_cast<float>(m_Internal->packetLossPercentage));
             m_Internal->encoder->SetPacketLossPercentage(static_cast<float>(m_Internal->packetLossPercentage));
             m_Internal->currentEncoderBitrate = m_Internal->encoder->GetCurrentBitrate();
         }
+    }
 
-        std::stringstream ss;
-        ss << "Network conditions: loss=" << m_Internal->packetLossPercentage 
-           << "% latency=" << avgLatencyMs << "ms buffer=" << m_Internal->adaptiveBufferLevel << "ms";
-        LOG_AUDIO(ss.str());
+    void AudioEngine::ApplyProbeResults(float rttMs, float jitterMs, float lossPct) {
+        if (!m_Internal) return;
+        m_Internal->avgJitterMs = jitterMs;
+        m_Internal->maxJitterSpikeMs = jitterMs; // Initialize spike tracker
+        m_Internal->packetLossPercentage = lossPct;
+
+        float oneWayMs = rttMs / 2.f;
+        int effectiveJitterMs = static_cast<int>(std::ceil(jitterMs));
+        int lossBurstMs = static_cast<int>(lossPct * 1.5f);
+        int targetMs = static_cast<int>(oneWayMs) + 3 * effectiveJitterMs + lossBurstMs + 20;
+
+        targetMs = (std::max)(targetMs, m_Internal->minBufferMs);
+        targetMs = (std::min)(targetMs, m_Internal->maxBufferMs);
+        m_Internal->adaptiveBufferLevel = targetMs;
+
+        if (m_Internal->encoder) {
+            m_Internal->encoder->AdjustBitrate(lossPct);
+            m_Internal->encoder->SetPacketLossPercentage(lossPct);
+        }
     }
 
     void AudioEngine::SetSelfDeafened(bool deafened) {
@@ -810,16 +809,11 @@ namespace TalkMe {
         m_Internal->config.capture.pDeviceID = pCaptureId;
         m_Internal->config.playback.pDeviceID = pPlaybackId;
 
-        if (ma_device_init(nullptr, &m_Internal->config, &m_Internal->device) != MA_SUCCESS) {
-            LOG_ERROR("Failed to reinit audio device");
-            return false;
-        }
+        if (ma_device_init(nullptr, &m_Internal->config, &m_Internal->device) != MA_SUCCESS) return false;
         if (ma_device_start(&m_Internal->device) == MA_SUCCESS) {
             m_Internal->deviceStarted = true;
-            LOG_AUDIO("Audio device reinitialized successfully");
             return true;
         }
-        LOG_ERROR("Failed to start reinitialized audio device");
         return false;
     }
 
@@ -827,31 +821,24 @@ namespace TalkMe {
         Telemetry t;
         if (!m_Internal) return t;
 
-        // Packet statistics
         t.totalPacketsReceived = m_Internal->totalPacketsReceived;
         t.totalPacketsLost = m_Internal->totalPacketsLost;
         t.totalPacketsDuplicated = m_Internal->totalPacketsDuplicated;
 
-        // Calculate packet loss percentage
         int totalSamples = m_Internal->totalPacketsReceived + m_Internal->totalPacketsLost;
-        t.packetLossPercentage = (totalSamples > 0) ? 
-            (100.0f * m_Internal->totalPacketsLost) / totalSamples : 0.0f;
+        t.packetLossPercentage = (totalSamples > 0) ? (100.0f * m_Internal->totalPacketsLost) / totalSamples : 0.0f;
 
-        // Audio quality metrics
         t.avgJitterMs = (float)m_Internal->avgJitterMs;
         t.currentLatencyMs = (float)m_Internal->currentLatencyMs;
 
-        // Buffer health
         t.bufferUnderruns = m_Internal->bufferUnderruns;
         t.bufferOverflows = m_Internal->bufferOverflows;
         t.currentBufferMs = m_Internal->adaptiveBufferLevel;
         t.targetBufferMs = m_Internal->targetBufferMs;
 
-        // Network state
         t.remoteMemberCount = m_Internal->remoteMemberCount;
         t.adaptiveBufferLevel = m_Internal->adaptiveBufferLevel;
 
-        // Codec stats
         t.currentEncoderBitrateKbps = m_Internal->currentEncoderBitrate / 1000;
         t.currentVoiceActivityLevel = m_Internal->currentVoiceActivityLevel;
 

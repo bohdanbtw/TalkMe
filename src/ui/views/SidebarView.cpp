@@ -11,7 +11,9 @@ namespace TalkMe::UI::Views {
         std::vector<Server>& servers, int& selectedServerId, int& selectedChannelId,
         int& activeVoiceChannelId, std::vector<std::string>& voiceMembers,
         char* newServerNameBuf, char* newChannelNameBuf, bool& showSettings,
-        bool& selfMuted, bool& selfDeafened, const VoiceInfoData& voiceInfo)
+        bool& selfMuted,         bool& selfDeafened, const VoiceInfoData& voiceInfo,
+        std::function<void()> onToggleEchoLive,
+        std::function<void()> onInfPopupOpened)
     {
         float parentW = ImGui::GetWindowWidth();
         float windowHeight = ImGui::GetWindowHeight();
@@ -227,33 +229,77 @@ namespace TalkMe::UI::Views {
         if (!inVoice) ImGui::PopStyleColor(2);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip(inVoice ? "Voice Call Info" : "Not in a voice channel");
 
-        // Voice info popup
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16, 14));
+        // Voice info popup (no scrolling; centred when opened)
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18, 16));
         ImGui::PushStyleColor(ImGuiCol_PopupBg, Styles::BgPopup());
+        ImGui::SetNextWindowSize(ImVec2(440, 680), ImGuiCond_Always);
+        ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
         if (ImGui::BeginPopup("VoiceInfoPopup")) {
+            if (onInfPopupOpened) onInfPopupOpened();
             ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
             ImGui::Text("Voice Call Info");
             ImGui::PopStyleColor();
+            ImGui::Text("Server version: %s", voiceInfo.serverVersion.empty() ? "—" : voiceInfo.serverVersion.c_str());
+            ImGui::Text("Voice path: %s", voiceInfo.voicePath.empty() ? "—" : voiceInfo.voicePath.c_str());
             ImGui::Dummy(ImVec2(0, 6));
             ImGui::PushStyleColor(ImGuiCol_Separator, Styles::Separator());
             ImGui::Separator();
             ImGui::PopStyleColor();
-            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::Dummy(ImVec2(0, 10));
 
-            ImGui::Text("Avg Ping:");           ImGui::SameLine(160); ImGui::Text("%.0f ms", voiceInfo.avgPingMs);
-            ImGui::Text("Packet Loss:");        ImGui::SameLine(160); ImGui::Text("%.1f %%", voiceInfo.packetLossPercent);
+            const float statLeft = 200.f;
+            ImGui::Text("Packet interval:");   ImGui::SameLine(statLeft);
+            if (voiceInfo.avgPingMs > 2000.f)
+                ImGui::Text("2000+ ms");
+            else
+                ImGui::Text("%.0f ms", voiceInfo.avgPingMs);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Time between received voice packets from remote. High value = few packets getting through.");
+            ImGui::Text("Packet Loss:");        ImGui::SameLine(statLeft); ImGui::Text("%.1f %%", voiceInfo.packetLossPercent);
             ImGui::Dummy(ImVec2(0, 4));
-            ImGui::Text("Packets Received:");   ImGui::SameLine(160); ImGui::Text("%d", voiceInfo.packetsReceived);
-            ImGui::Text("Packets Lost:");       ImGui::SameLine(160); ImGui::Text("%d", voiceInfo.packetsLost);
+            ImGui::Text("Packets Received:");   ImGui::SameLine(statLeft); ImGui::Text("%d", voiceInfo.packetsReceived);
+            ImGui::Text("Packets Lost:");       ImGui::SameLine(statLeft); ImGui::Text("%d", voiceInfo.packetsLost);
             ImGui::Dummy(ImVec2(0, 4));
-            ImGui::Text("Buffer:");             ImGui::SameLine(160); ImGui::Text("%d ms", voiceInfo.currentBufferMs);
-            ImGui::Text("Encoder Bitrate:");    ImGui::SameLine(160); ImGui::Text("%d kbps", voiceInfo.encoderBitrateKbps);
+            ImGui::Text("Buffer:");             ImGui::SameLine(statLeft); ImGui::Text("%d ms", voiceInfo.currentBufferMs);
+            ImGui::Text("Encoder Bitrate:");    ImGui::SameLine(statLeft); ImGui::Text("%d kbps", voiceInfo.encoderBitrateKbps);
 
             if (voiceInfo.packetLossPercent > 10.0f) {
-                ImGui::Dummy(ImVec2(0, 8));
+                ImGui::Dummy(ImVec2(0, 10));
                 ImGui::PushStyleColor(ImGuiCol_Text, Styles::Error());
-                ImGui::TextWrapped("High packet loss detected. Voice quality may be degraded.");
+                ImGui::TextWrapped("High packet loss. Voice quality may be degraded.");
                 ImGui::PopStyleColor();
+                ImGui::TextColored(ImVec4(0.65f, 0.65f, 0.65f, 1.f),
+                    "On TCP this usually means server not forwarding, or a bad/congested connection.");
+            }
+
+            ImGui::Dummy(ImVec2(0, 12));
+            ImGui::Separator();
+            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::Text("Average ping: %.0f ms", voiceInfo.avgPingMs);
+            ImGui::Text("Last ping: %.0f ms", voiceInfo.lastPingMs);
+            ImGui::Text("Loss of packets: %.1f %%", voiceInfo.packetLossPercent);
+            ImGui::Dummy(ImVec2(0, 8));
+            {
+                const std::vector<float>& h = voiceInfo.pingHistory;
+                const float graphW = 400.f;
+                const float graphH = 180.f;
+                ImVec2 graphSize(graphW, graphH);
+                ImGui::BeginChild("##pingGraph", graphSize, false, ImGuiWindowFlags_NoScrollbar);
+                if (h.size() >= 2) {
+                    float maxVal = 0.f;
+                    for (float v : h) if (v > maxVal) maxVal = v;
+                    float scaleMax = (maxVal < 10.f) ? 100.f : (std::floor(maxVal / 50.f) + 1.f) * 50.f;
+                    ImGui::PlotLines("##ping", h.data(), (int)h.size(), 0, nullptr, 0.f, scaleMax, graphSize);
+                } else if (h.size() == 1) {
+                    float two[2] = { h[0], h[0] };
+                    float yMax = (h[0] < 10.f) ? 100.f : (std::floor(h[0] / 50.f) + 1.f) * 50.f;
+                    ImGui::PlotLines("##ping", two, 2, 0, nullptr, 0.f, yMax, graphSize);
+                } else {
+                    float placeholder[2] = { 0.f, 0.f };
+                    ImGui::PlotLines("##ping", placeholder, 2, 0, nullptr, 0.f, 100.f, graphSize);
+                    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.f), "Waiting for ping data...");
+                }
+                ImGui::EndChild();
             }
 
             ImGui::EndPopup();

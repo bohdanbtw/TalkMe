@@ -18,6 +18,7 @@ namespace TalkMe {
         asio::ip::tcp::socket m_Socket{ m_Context };
         std::thread m_ContextThread;
         std::atomic<bool> m_IsConnected{false};
+        std::atomic<bool> m_Connecting{false};
 
         PacketHeader m_InHeader;
         std::vector<uint8_t> m_InBody;
@@ -54,6 +55,7 @@ namespace TalkMe {
             if (onResult) onResult(true);
             return;
         }
+        if (m_Impl->m_Connecting.exchange(true)) return;
 
         std::thread([this, host, port, onResult]() {
             try {
@@ -63,7 +65,6 @@ namespace TalkMe {
                 }
                 m_Impl->m_Context.restart();
 
-                // Fresh socket for each connection attempt
                 m_Impl->m_Socket = asio::ip::tcp::socket(m_Impl->m_Context);
 
                 asio::ip::tcp::resolver resolver(m_Impl->m_Context);
@@ -82,7 +83,6 @@ namespace TalkMe {
                     m_Impl->m_IsConnected.store(false);
                 });
 
-                // Synchronize: block until run() is actively processing handlers
                 auto ready = std::make_shared<std::promise<void>>();
                 auto future = ready->get_future();
                 asio::post(m_Impl->m_Context, [ready]() { ready->set_value(); });
@@ -90,7 +90,6 @@ namespace TalkMe {
 
                 m_Impl->m_IsConnected.store(true);
 
-                // Fire callback on the ASIO thread so Send() works from inside it
                 if (onResult) {
                     asio::post(m_Impl->m_Context, [onResult]() { onResult(true); });
                 }
@@ -99,6 +98,7 @@ namespace TalkMe {
                 m_Impl->m_IsConnected.store(false);
                 if (onResult) onResult(false);
             }
+            m_Impl->m_Connecting.store(false);
         }).detach();
     }
 
@@ -137,7 +137,7 @@ namespace TalkMe {
 
         buffer->resize(sizeof(PacketHeader) + size);
         PacketHeader header = { type, size };
-
+        header.ToNetwork();
         std::memcpy(buffer->data(), &header, sizeof(header));
         if (size > 0)
             std::memcpy(buffer->data() + sizeof(header), data.data(), size);
@@ -158,7 +158,7 @@ namespace TalkMe {
 
         buffer->resize(sizeof(PacketHeader) + size);
         PacketHeader header = { type, size };
-
+        header.ToNetwork();
         std::memcpy(buffer->data(), &header, sizeof(header));
         if (size > 0)
             std::memcpy(buffer->data() + sizeof(header), data.data(), size);
@@ -185,6 +185,7 @@ namespace TalkMe {
             asio::buffer(&m_Impl->m_InHeader, sizeof(PacketHeader)),
             [this](std::error_code ec, std::size_t) {
                 if (!ec) {
+                    m_Impl->m_InHeader.ToHost();
                     if (m_Impl->m_InHeader.size > 10 * 1024 * 1024) {
                         CloseSocket();
                         return;

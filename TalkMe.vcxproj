@@ -73,6 +73,9 @@
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <VcpkgTriplet>x64-windows-static</VcpkgTriplet>
   </PropertyGroup>
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -134,7 +137,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\audio\AudioEngine.cpp" />
-    <ClCompile Include="src\core\Logger.cpp" />
     <ClCompile Include="src\overlay\GameOverlay.cpp" />
     <ClCompile Include="src\network\VoiceTransport.cpp" />
     <ClCompile Include="src\ui\views\ChatView.cpp" />

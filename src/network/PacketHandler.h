@@ -4,7 +4,6 @@
 #include <cstring>
 #include <nlohmann/json.hpp>
 #include "../../TalkMe/src/shared/Protocol.h"
-#include <winsock2.h>
 
 namespace TalkMe {
     class PacketHandler {
@@ -64,6 +63,16 @@ namespace TalkMe {
             return j.dump();
         }
 
+        static std::string CreateVoiceStatsPayload(int cid, float ping_ms, float loss_pct, float jitter_ms, int buffer_ms) {
+            nlohmann::json j;
+            j["cid"] = cid;
+            j["ping_ms"] = ping_ms;
+            j["loss_pct"] = loss_pct;
+            j["jitter_ms"] = jitter_ms;
+            j["buffer_ms"] = buffer_ms;
+            return j.dump();
+        }
+
         static std::string CreateMessagePayload(int cid, const std::string& sender, const std::string& content) {
             nlohmann::json j;
             j["cid"] = cid;
@@ -90,7 +99,7 @@ namespace TalkMe {
             size_t offset = 0;
 
             // Write sequence number (network byte order)
-            uint32_t netSeq = htonl(seqNum);
+            uint32_t netSeq = HostToNet32(seqNum);
             std::memcpy(&payload[offset], &netSeq, sizeof(uint32_t));
             offset += sizeof(uint32_t);
 
@@ -129,7 +138,7 @@ namespace TalkMe {
             // Read sequence number (convert from network byte order)
             uint32_t netSeq = 0;
             std::memcpy(&netSeq, payload.data() + offset, sizeof(uint32_t));
-            result.sequenceNumber = ntohl(netSeq);
+            result.sequenceNumber = NetToHost32(netSeq);
             offset += sizeof(uint32_t);
 
             // Read username length

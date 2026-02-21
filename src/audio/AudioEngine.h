@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include "../shared/Protocol.h"
 
 namespace TalkMe {
 
@@ -30,11 +31,12 @@ namespace TalkMe {
 
         void PushIncomingAudio(const std::string& userId, const std::vector<uint8_t>& opusData);
         void PushIncomingAudioWithSequence(const std::string& userId, const std::vector<uint8_t>& opusData, uint32_t seqNum);
-
+        void SetReceiverReportCallback(std::function<void(const TalkMe::ReceiverReportPayload&)> callback);
         void Shutdown();
         void ClearRemoteTracks();
+        void RemoveUserTrack(const std::string& userId);
         void OnVoiceStateUpdate(int memberCount);
-        void ApplyConfig(int targetBufferMs, int minBufferMs, int maxBufferMs, int keepaliveIntervalMs = -1);
+        void ApplyConfig(int targetBufferMs, int minBufferMs, int maxBufferMs, int keepaliveIntervalMs = -1, int targetBitrateKbps = -1);
         void SetUserGain(const std::string& userId, float gain);
         float GetMicActivity() const;
 
@@ -79,6 +81,9 @@ namespace TalkMe {
 
         // Network adaptation
         void OnNetworkConditions(float packetLossPercent, float avgLatencyMs);
+
+        // Link-probe: seed jitter buffer from probe RTT/jitter/loss (before voice traffic).
+        void ApplyProbeResults(float rttMs, float jitterMs, float lossPct);
 
     private:
         std::unique_ptr<AudioInternal> m_Internal;

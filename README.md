@@ -20,94 +20,96 @@
 Most voice apps ship hundreds of megabytes of Electron/Chromium runtime just to render a chat window. TalkMe takes the opposite approach: **native C++, native GPU rendering, native audio**. The result is an app that launches instantly, idles under **15 MB of RAM**, and never spins your CPU when you're not talking.
 
 | Metric | TalkMe | Typical Electron App |
-|---|---|---|
-| Cold start | **< 1 s** | 3 -- 8 s |
-| Idle RAM | **~12 -- 15 MB** | 200 -- 400 MB |
-| Installer size | **~3 MB** | 80 -- 150 MB |
-| CPU idle | **< 0.1 %** | 1 -- 3 % |
-| Voice latency | **< 30 ms** | 50 -- 120 ms |
+|--------|--------|----------------------|
+| Cold start | **< 1 s** | 3 – 8 s |
+| Idle RAM | **~12 – 15 MB** | 200 – 400 MB |
+| Installer size | **~3 MB** | 80 – 150 MB |
+| CPU idle | **< 0.1 %** | 1 – 3 % |
+| Voice latency | **< 30 ms** | 50 – 120 ms |
 
 ---
 
 ## Features
 
 ### Voice Communication
-- **Opus codec** -- studio-grade compression at 32 kbps delivers crystal clear audio while consuming almost no bandwidth.
-- **Adaptive jitter buffer** -- dynamically adjusts between 80 ms and 300 ms to smooth out network variance without adding perceptible delay.
-- **Self mute & deafen** -- toggle your mic or headset with a single click or a custom keyboard shortcut. Status icons are visible to all participants.
-- **Per-user volume control** -- right-click any participant to raise or lower their volume independently.
-- **Live voice statistics** -- real-time telemetry overlay showing ping, packet loss, jitter, buffer depth, and bitrate.
-- **Join / leave sounds** -- lightweight audio cues generated at startup (no external sound files needed).
+- **Opus codec** — studio-grade compression at 32 kbps for clear audio with minimal bandwidth.
+- **Adaptive jitter buffer** — 80–300 ms range to smooth network variance without noticeable delay.
+- **Self mute & deafen** — one-click or custom hotkey; status visible to all participants.
+- **Per-user volume control** — right-click any participant to adjust their volume; settings persist across restarts (`user_volumes.json` in config directory).
+- **Voice Call Info (INF)** — realtime average ping, last ping, packet loss %, and a live ping graph (UDP RTT).
+- **Join / leave sounds** — lightweight cues generated at startup (no external sound files).
 
 ### Servers & Channels
 - **Create or join servers** with invite codes.
-- **Text & voice channels** within each server.
-- Seamless switching between channels with instant voice state synchronization.
+- **Text & voice channels** per server.
+- Instant voice state sync when switching channels; remote track state is cleared when users leave so reconnects work correctly.
 
 ### In-Game Overlay
-- **Anti-cheat safe** -- uses a standard Win32 layered window with GDI+ rendering. No DLL injection, no hooking, no memory patching.
-- **Always on top, click-through, transparent** -- see who's talking without leaving your game.
-- Configurable corner position (TL / TR / BL / BR) and opacity slider.
-- Near-zero GPU impact -- renders only when the member list changes.
+- **Anti-cheat safe** — Win32 layered window + GDI+; no DLL injection or hooking.
+- **Always on top, click-through, transparent** — see who’s talking without leaving the game.
+- Configurable corner (TL/TR/BL/BR) and opacity.
+- Minimal GPU use; only redraws when the member list changes.
 
 ### Customization
-- **Theme engine** -- switch between built-in themes or tweak accent colors.
-- **Hotkey combinations** -- bind multi-key shortcuts (e.g. `Ctrl+Shift+M`) for mute and deafen.
-- **Audio device selection** -- pick your preferred microphone and speaker at runtime; no restart required.
-- Persistent settings saved locally with DPAPI-encrypted session tokens.
+- **Theme engine** — built-in themes and accent colors.
+- **Hotkeys** — multi-key shortcuts (e.g. Ctrl+Shift+M) for mute and deafen.
+- **Audio device selection** — change mic/speaker at runtime.
+- Persistent settings with DPAPI-encrypted session tokens; config stored under `%LocalAppData%\TalkMe`.
 
 ---
 
 ## Tech Stack
 
 | Layer | Technology |
-|---|---|
+|-------|------------|
 | UI | [Dear ImGui](https://github.com/ocornut/imgui) on DirectX 11 |
-| Audio I/O | [miniaudio](https://miniaud.io/) (single-header, zero dependencies) |
-| Voice Codec | [Opus](https://opus-codec.org/) (libopus) |
+| Audio I/O | [miniaudio](https://miniaud.io/) (single-header) |
+| Voice codec | [Opus](https://opus-codec.org/) (libopus) |
 | Networking | [Asio](https://think-async.com/Asio/) (standalone, non-Boost) |
-| Overlay | Win32 + GDI+ (no injection) |
-| Database (server) | SQLite 3 |
+| Overlay | Win32 + GDI+ |
+| Server DB | SQLite 3 |
 
-Every dependency is either header-only or statically linked. There is **no runtime installer**, no framework prerequisite, and no background service.
+Dependencies are header-only or statically linked. No runtime installer or background service.
 
 ---
 
 ## Building
 
 ### Requirements
-
 - **Windows 10+** (x64)
-- **Visual Studio 2022+** with the "Desktop development with C++" workload
-- DirectX 11 SDK (included with the Windows SDK)
+- **Visual Studio 2022+** with “Desktop development with C++”
+- **vcpkg** (for Opus, nlohmann-json, etc.) — install from [vcpkg](https://vcpkg.io/) and ensure it’s in your PATH, or use VS’s built-in vcpkg support
+- DirectX 11 (Windows SDK)
 
 ### Steps
 
-```
+```bash
 git clone https://github.com/bohdanbtw/TalkMe.git
 cd TalkMe
 ```
 
-Open **`TalkMe.slnx`** in Visual Studio, select **Release | x64**, and build (`Ctrl+Shift+B`).
+1. Open **`TalkMe.slnx`** in Visual Studio (or use **`TalkMe.vcxproj`**).
+2. Restore vcpkg dependencies (if needed): **Project → Manage NuGet Packages** or run `vcpkg install` from the project root with manifest mode.
+3. Select **Release | x64**, then build (`Ctrl+Shift+B`).
 
-Or from a Developer Command Prompt:
+From a **Developer Command Prompt**:
 
-```
+```bash
 MSBuild TalkMe.vcxproj /p:Configuration=Release /p:Platform=x64
 ```
 
-The output binary is placed in `x64/Release/TalkMe.exe`.
+Output: **`x64/Release/TalkMe.exe`**. Build artifacts (`x64/`, `vcpkg_installed/`, logs) are gitignored.
 
 ### Server
 
-The self-hosted server lives in the `server/` directory. Compile it on any platform with a C++17 compiler, Asio, and SQLite:
+The C++ server in `server/` uses Asio and SQLite:
 
-```
-g++ -std=c++17 -O2 -o talkme-server server.cpp -lsqlite3 -lpthread
+```bash
+g++ -std=c++17 -O2 -o talkme-server server/server.cpp -lsqlite3 -lpthread
 ./talkme-server
 ```
 
-The server listens on port **5555** by default.
+Default port: **5555** (TCP); voice UDP on **5556**.
 
 ---
 
@@ -116,26 +118,29 @@ The server listens on port **5555** by default.
 ```
 TalkMe/
 ├── src/
-│   ├── app/            # Application entry point, main loop, state machine
-│   ├── audio/          # AudioEngine (miniaudio + Opus encode/decode)
-│   ├── core/           # ConfigManager, Logger
-│   ├── network/        # TCP client, UDP voice transport, packet protocol
-│   ├── overlay/        # In-game overlay (Win32 + GDI+)
-│   └── ui/             # ImGui views, styles, theming
-├── server/             # Standalone C++ server (Asio + SQLite)
-├── vendor/             # Third-party headers (ImGui, miniaudio, Asio, Opus, etc.)
-├── TalkMe.vcxproj      # Visual Studio project
-└── TalkMe.slnx         # Visual Studio solution
+│   ├── app/          # Application, main loop, state
+│   ├── audio/        # AudioEngine (miniaudio + Opus)
+│   ├── core/         # ConfigManager, Logger
+│   ├── network/      # TCP client, UDP voice transport, protocol
+│   ├── overlay/      # In-game overlay (Win32 + GDI+)
+│   ├── shared/       # Protocol (shared client/server)
+│   └── ui/           # ImGui views, styles, theme
+├── server/           # Standalone C++ server (Asio + SQLite)
+├── vendor/           # Third-party headers (ImGui, miniaudio, etc.)
+├── docs/             # Architecture and specs
+├── TalkMe.vcxproj
+├── TalkMe.slnx
+└── vcpkg.json        # Manifest dependencies
 ```
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Fork the repo, create a feature branch, and open a pull request. Please keep changes focused and avoid introducing heavy external dependencies.
+Contributions are welcome. Fork the repo, use a feature branch, and open a pull request. Keep changes focused and avoid heavy new dependencies.
 
 ---
 
 ## License
 
-This project is released under the [MIT License](LICENSE).
+[MIT License](LICENSE).
