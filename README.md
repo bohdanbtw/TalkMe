@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/platform-Windows-0078D6?style=flat-square&logo=windows" alt="Windows">
   <img src="https://img.shields.io/badge/renderer-DirectX%2011-black?style=flat-square" alt="DirectX 11">
   <img src="https://img.shields.io/badge/audio-Opus%20%2B%20miniaudio-orange?style=flat-square" alt="Opus + miniaudio">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License">
+  <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square" alt="GPL-3.0 License">
 </p>
 
 <h1 align="center">TalkMe</h1>
