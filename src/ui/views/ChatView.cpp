@@ -21,7 +21,8 @@ namespace TalkMe::UI::Views {
         char* chatInputBuf, bool selfMuted, bool selfDeafened,
         const std::map<std::string, UserVoiceState>* userMuteStates,
         const std::map<std::string, float>* typingUsers,
-        std::function<void()> onUserTyping)
+        std::function<void()> onUserTyping,
+        int* replyingToMessageId)
     {
         float winH = ImGui::GetWindowHeight();
         float winW = ImGui::GetWindowWidth();
@@ -287,6 +288,23 @@ namespace TalkMe::UI::Views {
                     bool isMe = (msg.sender == currentUser.username);
 
                     ImGui::BeginGroup();
+
+                    if (msg.replyToId > 0) {
+                        for (const auto& orig : messages) {
+                            if (orig.id == msg.replyToId) {
+                                std::string replySender = orig.sender;
+                                size_t rhp = replySender.find('#');
+                                if (rhp != std::string::npos) replySender = replySender.substr(0, rhp);
+                                std::string preview = orig.content.substr(0, 60);
+                                if (orig.content.size() > 60) preview += "...";
+                                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                                ImGui::Text("  | %s: %s", replySender.c_str(), preview.c_str());
+                                ImGui::PopStyleColor();
+                                break;
+                            }
+                        }
+                    }
+
                     ImGui::PushStyleColor(ImGuiCol_Text, isMe ? Styles::Accent() : Styles::Error());
                     size_t hp = msg.sender.find('#');
                     if (hp != std::string::npos) {
@@ -308,9 +326,11 @@ namespace TalkMe::UI::Views {
                     ImGui::PopStyleColor();
                     ImGui::EndGroup();
 
-                    if (isMe && msg.id > 0) {
+                    if (msg.id > 0) {
                         if (ImGui::BeginPopupContextItem(("msg_" + std::to_string(msg.id)).c_str())) {
-                            if (ImGui::Selectable("Delete Message"))
+                            if (replyingToMessageId && ImGui::Selectable("Reply"))
+                                *replyingToMessageId = msg.id;
+                            if (isMe && ImGui::Selectable("Delete Message"))
                                 netClient.Send(PacketType::Delete_Message_Request,
                                     PacketHandler::CreateDeleteMessagePayload(msg.id, selectedChannelId, currentUser.username));
                             ImGui::EndPopup();
@@ -350,6 +370,27 @@ namespace TalkMe::UI::Views {
                     ImGui::Unindent(32);
                 }
 
+                // Reply bar (if replying)
+                if (replyingToMessageId && *replyingToMessageId > 0) {
+                    ImGui::Indent(32);
+                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
+                    for (const auto& orig : messages) {
+                        if (orig.id == *replyingToMessageId) {
+                            std::string rn = orig.sender;
+                            size_t rhp = rn.find('#');
+                            if (rhp != std::string::npos) rn = rn.substr(0, rhp);
+                            ImGui::Text("Replying to %s", rn.c_str());
+                            break;
+                        }
+                    }
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine();
+                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                    if (ImGui::SmallButton("X")) *replyingToMessageId = 0;
+                    ImGui::PopStyleColor();
+                    ImGui::Unindent(32);
+                }
+
                 // Input bar
                 ImGui::Indent(32);
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
@@ -365,8 +406,15 @@ namespace TalkMe::UI::Views {
                 ImGui::SameLine();
                 if (UI::AccentButton("Send", ImVec2(68, 32)) || enter) {
                     if (strlen(chatInputBuf) > 0) {
-                        netClient.Send(PacketType::Message_Text,
-                            PacketHandler::CreateMessagePayload(selectedChannelId, currentUser.username, chatInputBuf));
+                        nlohmann::json msgJ;
+                        msgJ["cid"] = selectedChannelId;
+                        msgJ["u"] = currentUser.username;
+                        msgJ["msg"] = std::string(chatInputBuf);
+                        if (replyingToMessageId && *replyingToMessageId > 0) {
+                            msgJ["reply_to"] = *replyingToMessageId;
+                            *replyingToMessageId = 0;
+                        }
+                        netClient.Send(PacketType::Message_Text, msgJ.dump());
                         memset(chatInputBuf, 0, 1024);
                         ImGui::SetKeyboardFocusHere(-1);
                     }

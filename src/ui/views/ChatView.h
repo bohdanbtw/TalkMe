@@ -26,6 +26,7 @@ namespace TalkMe::UI::Views {
         bool selfDeafened = false,
         const std::map<std::string, UserVoiceState>* userMuteStates = nullptr,
         const std::map<std::string, float>* typingUsers = nullptr,
-        std::function<void()> onUserTyping = nullptr
+        std::function<void()> onUserTyping = nullptr,
+        int* replyingToMessageId = nullptr
     );
 }

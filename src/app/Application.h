@@ -44,6 +44,7 @@ namespace TalkMe {
         std::string sender;
         std::string content;
         std::string timestamp;
+        int replyToId = 0;
     };
 
     class Application {
@@ -120,6 +121,7 @@ namespace TalkMe {
         std::chrono::steady_clock::time_point m_LastTypingSentTime;
 
         std::set<std::string> m_OnlineUsers;  // set of currently online usernames
+        int m_ReplyingToMessageId = 0;  // message ID being replied to (0 = not replying)
         std::mutex m_RecentSpeakersMutex;
         std::vector<std::string> m_RecentSpeakers;  // drained each frame to update m_SpeakingTimers
         std::mutex m_VoiceDedupeMutex;
