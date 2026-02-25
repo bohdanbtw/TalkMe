@@ -938,7 +938,8 @@ namespace TalkMe {
                             m_NetClient.Send(PacketType::Typing_Indicator, tj.dump());
                             m_LastTypingSentTime = now;
                         }
-                    });
+                    },
+                    &m_ReplyingToMessageId);
             }
         }
     }

@@ -512,13 +512,15 @@ namespace TalkMe {
             if (m_Header.type == PacketType::Message_Text) {
                 if (!j.contains("cid") || !j.contains("msg")) return;
                 int cid = j["cid"];
-                int mid = Database::Get().SaveMessageReturnId(cid, m_Username, j["msg"], j.value("attachment_id", ""));
+                int replyTo = j.value("reply_to", 0);
+                int mid = Database::Get().SaveMessageReturnId(cid, m_Username, j["msg"], j.value("attachment_id", ""), replyTo);
                 json out;
                 out["mid"] = mid;
                 out["cid"] = cid;
                 out["u"] = m_Username;
                 out["msg"] = j["msg"];
                 out["attachment_id"] = j.value("attachment_id", "");
+                if (replyTo > 0) out["reply_to"] = replyTo;
                 m_Server.BroadcastToChannelMembers(cid, PacketType::Message_Text, out.dump());
                 return;
             }

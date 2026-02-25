@@ -308,7 +308,8 @@ void Application::ProcessNetworkMessages() {
                         if (item.contains("mid"))
                             m_Messages.push_back({ item.value("mid", 0), item["cid"],
                                                    item.value("u", ""), item.value("msg", ""),
-                                                   item.value("time", "Old") });
+                                                   item.value("time", "Old"),
+                                                   item.value("reply_to", 0) });
                 }
                 continue;
             }
@@ -334,7 +335,8 @@ void Application::ProcessNetworkMessages() {
             if (msg.type == PacketType::Message_Text) {
                 m_Messages.push_back({ j.value("mid", 0), j.value("cid", 0),
                                        j.value("u", "??"), j.value("msg", ""),
-                                       GetCurrentTimeStr() });
+                                       GetCurrentTimeStr(),
+                                       j.value("reply_to", 0) });
                 continue;
             }
         }

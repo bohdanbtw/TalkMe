@@ -40,8 +40,8 @@ namespace TalkMe {
         std::string GetUserServersJSON(const std::string& username);
         std::string GetServerContentJSON(int serverId);
         std::string GetMessageHistoryJSON(int channelId);
-        void SaveMessage(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId = "");
-        int SaveMessageReturnId(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId = "");
+        void SaveMessage(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId = "", int replyTo = 0);
+        int SaveMessageReturnId(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId = "", int replyTo = 0);
         int GetServerIdForChannel(int cid);
         std::vector<std::string> GetUsersInServerByChannel(int channelId);
         uint32_t GetUserPermissions(int serverId, const std::string& username);

@@ -139,6 +139,7 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN edited_at DATETIME;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN is_pinned INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN attachment_id TEXT DEFAULT '';", 0, 0, 0);
+        sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN reply_to INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE server_members ADD COLUMN permissions INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN is_2fa_enabled INTEGER DEFAULT 0;", 0, 0, 0);
@@ -555,7 +556,7 @@ namespace TalkMe {
         std::shared_lock<std::shared_mutex> lock(m_RwMutex);
         json j = json::array();
         sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(m_Db, "SELECT id, channel_id, sender, content, time, IFNULL(edited_at, ''), is_pinned, IFNULL(attachment_id, '') FROM messages WHERE channel_id = ? ORDER BY time ASC LIMIT 50;", -1, &stmt, 0) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(m_Db, "SELECT id, channel_id, sender, content, time, IFNULL(edited_at, ''), is_pinned, IFNULL(attachment_id, ''), IFNULL(reply_to, 0) FROM messages WHERE channel_id = ? ORDER BY time ASC LIMIT 50;", -1, &stmt, 0) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, channelId);
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* u = (const char*)sqlite3_column_text(stmt, 2);
@@ -563,7 +564,10 @@ namespace TalkMe {
                 const char* t = (const char*)sqlite3_column_text(stmt, 4);
                 const char* editVal = (const char*)sqlite3_column_text(stmt, 5);
                 const char* attVal = (const char*)sqlite3_column_text(stmt, 7);
-                j.push_back({ {"mid", sqlite3_column_int(stmt, 0)}, {"cid", sqlite3_column_int(stmt, 1)}, {"u", u ? u : ""}, {"msg", m ? m : ""}, {"time", t ? t : ""}, {"edit", editVal ? editVal : ""}, {"pin", sqlite3_column_int(stmt, 6) != 0}, {"attachment", attVal ? attVal : ""} });
+                int replyTo = sqlite3_column_int(stmt, 8);
+                json entry = { {"mid", sqlite3_column_int(stmt, 0)}, {"cid", sqlite3_column_int(stmt, 1)}, {"u", u ? u : ""}, {"msg", m ? m : ""}, {"time", t ? t : ""}, {"edit", editVal ? editVal : ""}, {"pin", sqlite3_column_int(stmt, 6) != 0}, {"attachment", attVal ? attVal : ""} };
+                if (replyTo > 0) entry["reply_to"] = replyTo;
+                j.push_back(entry);
             }
             sqlite3_finalize(stmt);
         }
@@ -591,15 +595,16 @@ namespace TalkMe {
             });
     }
 
-    int Database::SaveMessageReturnId(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId) {
+    int Database::SaveMessageReturnId(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId, int replyTo) {
         std::unique_lock<std::shared_mutex> lock(m_RwMutex);
         sqlite3_stmt* stmt = nullptr;
         int mid = 0;
-        if (sqlite3_prepare_v2(m_Db, "INSERT INTO messages (channel_id, sender, content, attachment_id) VALUES (?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(m_Db, "INSERT INTO messages (channel_id, sender, content, attachment_id, reply_to) VALUES (?, ?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, cid);
             sqlite3_bind_text(stmt, 2, sender.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(stmt, 3, msg.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(stmt, 4, attachmentId.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 5, replyTo);
             if (sqlite3_step(stmt) == SQLITE_DONE)
                 mid = (int)sqlite3_last_insert_rowid(m_Db);
             sqlite3_finalize(stmt);
