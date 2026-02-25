@@ -24,6 +24,8 @@ namespace TalkMe::UI::Views {
         char* chatInputBuf,
         bool selfMuted = false,
         bool selfDeafened = false,
-        const std::map<std::string, UserVoiceState>* userMuteStates = nullptr
+        const std::map<std::string, UserVoiceState>* userMuteStates = nullptr,
+        const std::map<std::string, float>* typingUsers = nullptr,
+        std::function<void()> onUserTyping = nullptr
     );
 }

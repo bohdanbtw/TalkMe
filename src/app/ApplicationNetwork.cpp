@@ -167,6 +167,9 @@ void Application::ProcessNetworkMessages() {
             }
 
             if (msg.type == PacketType::Typing_Indicator) {
+                const std::string user = j.value("u", "");
+                if (!user.empty() && user != m_CurrentUser.username)
+                    m_TypingUsers[user] = (float)ImGui::GetTime();
                 continue;
             }
 
