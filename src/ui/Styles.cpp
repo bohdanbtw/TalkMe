@@ -200,12 +200,172 @@ namespace TalkMe::UI {
         return t;
     }
 
+    static ThemeColors MakeDracula() {
+        ThemeColors t{};
+        t.bgMain        = {0.11f, 0.12f, 0.17f, 1.f};
+        t.bgSidebar     = {0.13f, 0.14f, 0.19f, 1.f};
+        t.bgChannelList = {0.13f, 0.14f, 0.19f, 1.f};
+        t.bgChat        = {0.15f, 0.16f, 0.22f, 1.f};
+        t.bgFooter      = {0.11f, 0.12f, 0.17f, 1.f};
+        t.bgPopup       = {0.18f, 0.19f, 0.25f, 1.f};
+        t.bgAvatar      = {0.30f, 0.22f, 0.36f, 1.f};
+        t.bgCard        = {0.18f, 0.19f, 0.25f, 1.f};
+
+        t.textPrimary   = {0.98f, 0.97f, 0.95f, 1.f};
+        t.textSecondary = {0.68f, 0.65f, 0.72f, 1.f};
+        t.textMuted     = {0.50f, 0.48f, 0.55f, 1.f};
+
+        t.accent        = {0.98f, 0.36f, 0.52f, 1.f};
+        t.accentHover   = {1.00f, 0.45f, 0.60f, 1.f};
+        t.accentDim     = {0.78f, 0.28f, 0.42f, 1.f};
+
+        t.speakingGreen = {0.46f, 0.98f, 0.68f, 1.f};
+        t.speakingGlow  = {0.38f, 0.80f, 0.55f, 0.40f};
+        t.error         = {0.98f, 0.36f, 0.36f, 1.f};
+
+        t.buttonSubtle      = {0.20f, 0.20f, 0.28f, 1.f};
+        t.buttonSubtleHover = {0.28f, 0.26f, 0.36f, 1.f};
+        t.buttonDanger      = {0.78f, 0.22f, 0.28f, 1.f};
+        t.buttonDangerHover = {0.90f, 0.32f, 0.38f, 1.f};
+        t.separator         = {0.24f, 0.22f, 0.32f, 1.f};
+        t.textOnAccent      = {1.00f, 1.00f, 1.00f, 1.f};
+
+        t.frameBg       = {0.18f, 0.18f, 0.24f, 1.f};
+        t.frameBgHover  = {0.24f, 0.23f, 0.32f, 1.f};
+        t.frameBgActive = {0.30f, 0.28f, 0.38f, 1.f};
+        t.scrollGrab       = {0.40f, 0.38f, 0.50f, 0.55f};
+        t.scrollGrabHover  = {0.50f, 0.48f, 0.60f, 0.75f};
+        t.scrollGrabActive = {0.60f, 0.56f, 0.70f, 1.f};
+        return t;
+    }
+
+    static ThemeColors MakeNord() {
+        ThemeColors t{};
+        t.bgMain        = {0.18f, 0.20f, 0.24f, 1.f};
+        t.bgSidebar     = {0.20f, 0.22f, 0.27f, 1.f};
+        t.bgChannelList = {0.20f, 0.22f, 0.27f, 1.f};
+        t.bgChat        = {0.24f, 0.26f, 0.31f, 1.f};
+        t.bgFooter      = {0.18f, 0.20f, 0.24f, 1.f};
+        t.bgPopup       = {0.28f, 0.30f, 0.36f, 1.f};
+        t.bgAvatar      = {0.40f, 0.52f, 0.64f, 1.f};
+        t.bgCard        = {0.26f, 0.28f, 0.34f, 1.f};
+
+        t.textPrimary   = {0.93f, 0.94f, 0.96f, 1.f};
+        t.textSecondary = {0.58f, 0.62f, 0.70f, 1.f};
+        t.textMuted     = {0.46f, 0.50f, 0.58f, 1.f};
+
+        t.accent        = {0.51f, 0.65f, 0.85f, 1.f};
+        t.accentHover   = {0.62f, 0.74f, 0.92f, 1.f};
+        t.accentDim     = {0.40f, 0.54f, 0.74f, 1.f};
+
+        t.speakingGreen = {0.56f, 0.82f, 0.66f, 1.f};
+        t.speakingGlow  = {0.46f, 0.70f, 0.55f, 0.40f};
+        t.error         = {0.88f, 0.42f, 0.44f, 1.f};
+
+        t.buttonSubtle      = {0.26f, 0.28f, 0.34f, 1.f};
+        t.buttonSubtleHover = {0.32f, 0.34f, 0.42f, 1.f};
+        t.buttonDanger      = {0.78f, 0.32f, 0.34f, 1.f};
+        t.buttonDangerHover = {0.88f, 0.42f, 0.44f, 1.f};
+        t.separator         = {0.30f, 0.33f, 0.40f, 1.f};
+        t.textOnAccent      = {0.18f, 0.20f, 0.24f, 1.f};
+
+        t.frameBg       = {0.24f, 0.26f, 0.32f, 1.f};
+        t.frameBgHover  = {0.30f, 0.32f, 0.38f, 1.f};
+        t.frameBgActive = {0.34f, 0.36f, 0.44f, 1.f};
+        t.scrollGrab       = {0.44f, 0.48f, 0.56f, 0.55f};
+        t.scrollGrabHover  = {0.54f, 0.58f, 0.66f, 0.75f};
+        t.scrollGrabActive = {0.64f, 0.68f, 0.76f, 1.f};
+        return t;
+    }
+
+    static ThemeColors MakeMonokai() {
+        ThemeColors t{};
+        t.bgMain        = {0.15f, 0.14f, 0.13f, 1.f};
+        t.bgSidebar     = {0.18f, 0.17f, 0.15f, 1.f};
+        t.bgChannelList = {0.18f, 0.17f, 0.15f, 1.f};
+        t.bgChat        = {0.22f, 0.21f, 0.18f, 1.f};
+        t.bgFooter      = {0.15f, 0.14f, 0.13f, 1.f};
+        t.bgPopup       = {0.26f, 0.24f, 0.21f, 1.f};
+        t.bgAvatar      = {0.42f, 0.32f, 0.12f, 1.f};
+        t.bgCard        = {0.24f, 0.22f, 0.19f, 1.f};
+
+        t.textPrimary   = {0.96f, 0.96f, 0.94f, 1.f};
+        t.textSecondary = {0.72f, 0.68f, 0.58f, 1.f};
+        t.textMuted     = {0.55f, 0.52f, 0.44f, 1.f};
+
+        t.accent        = {0.98f, 0.68f, 0.24f, 1.f};
+        t.accentHover   = {1.00f, 0.78f, 0.38f, 1.f};
+        t.accentDim     = {0.78f, 0.54f, 0.18f, 1.f};
+
+        t.speakingGreen = {0.66f, 0.92f, 0.32f, 1.f};
+        t.speakingGlow  = {0.54f, 0.78f, 0.26f, 0.40f};
+        t.error         = {0.92f, 0.32f, 0.28f, 1.f};
+
+        t.buttonSubtle      = {0.28f, 0.26f, 0.22f, 1.f};
+        t.buttonSubtleHover = {0.36f, 0.33f, 0.28f, 1.f};
+        t.buttonDanger      = {0.82f, 0.28f, 0.22f, 1.f};
+        t.buttonDangerHover = {0.92f, 0.38f, 0.32f, 1.f};
+        t.separator         = {0.32f, 0.30f, 0.26f, 1.f};
+        t.textOnAccent      = {0.10f, 0.08f, 0.05f, 1.f};
+
+        t.frameBg       = {0.24f, 0.22f, 0.19f, 1.f};
+        t.frameBgHover  = {0.30f, 0.28f, 0.24f, 1.f};
+        t.frameBgActive = {0.36f, 0.33f, 0.28f, 1.f};
+        t.scrollGrab       = {0.48f, 0.44f, 0.36f, 0.55f};
+        t.scrollGrabHover  = {0.58f, 0.54f, 0.44f, 0.75f};
+        t.scrollGrabActive = {0.68f, 0.62f, 0.52f, 1.f};
+        return t;
+    }
+
+    static ThemeColors MakeSolarized() {
+        ThemeColors t{};
+        t.bgMain        = {0.00f, 0.17f, 0.21f, 1.f};
+        t.bgSidebar     = {0.02f, 0.20f, 0.24f, 1.f};
+        t.bgChannelList = {0.02f, 0.20f, 0.24f, 1.f};
+        t.bgChat        = {0.03f, 0.24f, 0.28f, 1.f};
+        t.bgFooter      = {0.00f, 0.17f, 0.21f, 1.f};
+        t.bgPopup       = {0.04f, 0.28f, 0.32f, 1.f};
+        t.bgAvatar      = {0.08f, 0.44f, 0.52f, 1.f};
+        t.bgCard        = {0.04f, 0.26f, 0.30f, 1.f};
+
+        t.textPrimary   = {0.51f, 0.58f, 0.58f, 1.f};
+        t.textSecondary = {0.40f, 0.48f, 0.48f, 1.f};
+        t.textMuted     = {0.28f, 0.36f, 0.36f, 1.f};
+
+        t.accent        = {0.16f, 0.63f, 0.60f, 1.f};
+        t.accentHover   = {0.24f, 0.72f, 0.68f, 1.f};
+        t.accentDim     = {0.12f, 0.52f, 0.50f, 1.f};
+
+        t.speakingGreen = {0.52f, 0.60f, 0.00f, 1.f};
+        t.speakingGlow  = {0.42f, 0.50f, 0.00f, 0.40f};
+        t.error         = {0.83f, 0.21f, 0.21f, 1.f};
+
+        t.buttonSubtle      = {0.05f, 0.30f, 0.34f, 1.f};
+        t.buttonSubtleHover = {0.08f, 0.36f, 0.40f, 1.f};
+        t.buttonDanger      = {0.80f, 0.18f, 0.18f, 1.f};
+        t.buttonDangerHover = {0.88f, 0.28f, 0.28f, 1.f};
+        t.separator         = {0.06f, 0.32f, 0.36f, 1.f};
+        t.textOnAccent      = {0.00f, 0.17f, 0.21f, 1.f};
+
+        t.frameBg       = {0.04f, 0.26f, 0.30f, 1.f};
+        t.frameBgHover  = {0.06f, 0.32f, 0.36f, 1.f};
+        t.frameBgActive = {0.08f, 0.38f, 0.42f, 1.f};
+        t.scrollGrab       = {0.20f, 0.44f, 0.48f, 0.55f};
+        t.scrollGrabHover  = {0.28f, 0.52f, 0.56f, 0.75f};
+        t.scrollGrabActive = {0.36f, 0.60f, 0.64f, 1.f};
+        return t;
+    }
+
     ThemeColors Styles::BuildTheme(ThemeId id) {
         switch (id) {
             case ThemeId::Daylight: return MakeDaylight();
             case ThemeId::Ocean:    return MakeOcean();
             case ThemeId::Sakura:   return MakeSakura();
             case ThemeId::Forest:   return MakeForest();
+            case ThemeId::Dracula: return MakeDracula();
+            case ThemeId::Nord:    return MakeNord();
+            case ThemeId::Monokai: return MakeMonokai();
+            case ThemeId::Solarized: return MakeSolarized();
             default:                return MakeMidnight();
         }
     }
@@ -217,6 +377,10 @@ namespace TalkMe::UI {
             case ThemeId::Ocean:    return "Ocean";
             case ThemeId::Sakura:   return "Sakura";
             case ThemeId::Forest:   return "Forest";
+            case ThemeId::Dracula: return "Dracula";
+            case ThemeId::Nord:    return "Nord";
+            case ThemeId::Monokai: return "Monokai";
+            case ThemeId::Solarized: return "Solarized";
             default:                return "Unknown";
         }
     }

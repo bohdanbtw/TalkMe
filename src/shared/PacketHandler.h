@@ -3,15 +3,16 @@
 #include <vector>
 #include <cstring>
 #include <nlohmann/json.hpp>
-#include "../../TalkMe/src/shared/Protocol.h"
+#include "Protocol.h"
 
 namespace TalkMe {
     class PacketHandler {
     public:
-        static std::string CreateLoginPayload(const std::string& email, const std::string& password) {
+        static std::string CreateLoginPayload(const std::string& email, const std::string& password, const std::string& hwid = "") {
             nlohmann::json j;
             j["e"] = email;
             j["p"] = password;
+            if (!hwid.empty()) j["hwid"] = hwid;
             return j.dump();
         }
 
@@ -89,36 +90,29 @@ namespace TalkMe {
             return j.dump();
         }
 
-        // ✅ NEW: Create Opus voice payload with sequence number
         static std::vector<uint8_t> CreateVoicePayloadOpus(const std::string& username, const std::vector<uint8_t>& opusData, uint32_t seqNum) {
             std::vector<uint8_t> payload;
 
-            // Format: [seqNum:4][usernameLen:1][username:N][opusData:M]
             payload.resize(sizeof(uint32_t) + 1 + username.size() + opusData.size());
 
             size_t offset = 0;
 
-            // Write sequence number (network byte order)
             uint32_t netSeq = HostToNet32(seqNum);
             std::memcpy(&payload[offset], &netSeq, sizeof(uint32_t));
             offset += sizeof(uint32_t);
 
-            // Write username length
             uint8_t ulen = (uint8_t)username.size();
             payload[offset] = ulen;
             offset += 1;
 
-            // Write username
             std::memcpy(payload.data() + offset, username.c_str(), username.size());
             offset += username.size();
 
-            // Write Opus data
             if (!opusData.empty()) std::memcpy(payload.data() + offset, opusData.data(), opusData.size());
 
             return payload;
         }
 
-        // Parse incoming Opus voice packet
         struct ParsedVoicePacket {
             uint32_t sequenceNumber = 0;
             std::string sender;
@@ -130,35 +124,30 @@ namespace TalkMe {
             ParsedVoicePacket result;
 
             if (payload.size() < sizeof(uint32_t) + 1) {
-                return result; // Invalid
+                return result;
             }
 
             size_t offset = 0;
 
-            // Read sequence number (convert from network byte order)
             uint32_t netSeq = 0;
             std::memcpy(&netSeq, payload.data() + offset, sizeof(uint32_t));
             result.sequenceNumber = NetToHost32(netSeq);
             offset += sizeof(uint32_t);
 
-            // Read username length
             uint8_t ulen = payload[offset];
             offset += 1;
 
             if (payload.size() < offset + ulen) {
-                return result; // Invalid
+                return result;
             }
 
-            // Read username
             result.sender.assign((const char*)payload.data() + offset, ulen);
             offset += ulen;
 
-            // Read Opus data
             if (offset < payload.size()) {
                 result.opusData.assign(payload.begin() + offset, payload.end());
                 result.valid = true;
             }
-            // If not valid or sender empty, try legacy format: [ulen:1][username:N][opusData]
             if (!result.valid || result.sender.empty()) {
                 ParsedVoicePacket legacy;
                 size_t off2 = 0;
@@ -178,7 +167,6 @@ namespace TalkMe {
             return result;
         }
 
-        // ⚠️ DEPRECATED: Old voice payload (for backward compatibility)
         static std::string CreateVoicePayload(const std::string& username, const std::vector<uint8_t>& audio) {
             std::string payload;
             uint8_t ulen = (uint8_t)username.size();

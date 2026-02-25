@@ -2,7 +2,7 @@
 #include "../Components.h"
 #include "../Theme.h"
 #include "../Styles.h"
-#include "../../network/PacketHandler.h"
+#include "../../shared/PacketHandler.h"
 #include <string>
 #include <algorithm>
 
@@ -187,27 +187,34 @@ namespace TalkMe::UI::Views {
                         ImGui::Separator();
                         ImGui::Dummy(ImVec2(0, 4));
 
-                        float vol = userVolumes.count(m) ? userVolumes[m] : 1.0f;
-                        if (vol <= 0.0f) {
-                            if (UI::AccentButton("Unmute", ImVec2(220, 30))) {
-                                setUserVolume(m, 1.0f);
-                                ImGui::CloseCurrentPopup();
+                        bool isSelf = (m == currentUser.username);
+                        if (!isSelf) {
+                            float vol = userVolumes.count(m) ? userVolumes[m] : 1.0f;
+                            if (vol <= 0.0f) {
+                                if (UI::AccentButton("Unmute", ImVec2(220, 30))) {
+                                    setUserVolume(m, 1.0f);
+                                    ImGui::CloseCurrentPopup();
+                                }
+                            } else {
+                                ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonDanger());
+                                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::ButtonDangerHover());
+                                if (ImGui::Button("Mute", ImVec2(220, 30))) {
+                                    setUserVolume(m, 0.0f);
+                                    ImGui::CloseCurrentPopup();
+                                }
+                                ImGui::PopStyleColor(2);
                             }
-                        } else {
-                            ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonDanger());
-                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::ButtonDangerHover());
-                            if (ImGui::Button("Mute", ImVec2(220, 30))) {
-                                setUserVolume(m, 0.0f);
-                                ImGui::CloseCurrentPopup();
-                            }
-                            ImGui::PopStyleColor(2);
-                        }
 
-                        ImGui::Dummy(ImVec2(0, 6));
-                        float pct = vol * 100.0f;
-                        ImGui::SetNextItemWidth(220);
-                        if (ImGui::SliderFloat("##Vol", &pct, 0, 200, "%.0f%%"))
-                            setUserVolume(m, pct / 100.0f);
+                            ImGui::Dummy(ImVec2(0, 6));
+                            float pct = vol * 100.0f;
+                            ImGui::SetNextItemWidth(220);
+                            if (ImGui::SliderFloat("##Vol", &pct, 0, 200, "%.0f%%"))
+                                setUserVolume(m, pct / 100.0f);
+                        } else {
+                            ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                            ImGui::TextDisabled("Use MIC / SPK in the sidebar to mute or deafen yourself.");
+                            ImGui::PopStyleColor();
+                        }
                     }
                     ImGui::EndPopup();
                 }
