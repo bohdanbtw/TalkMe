@@ -140,6 +140,7 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN is_pinned INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN attachment_id TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN reply_to INTEGER DEFAULT 0;", 0, 0, 0);
+        sqlite3_exec(m_Db, "ALTER TABLE channels ADD COLUMN description TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE server_members ADD COLUMN permissions INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN is_2fa_enabled INTEGER DEFAULT 0;", 0, 0, 0);
@@ -540,12 +541,15 @@ namespace TalkMe {
         std::shared_lock<std::shared_mutex> lock(m_RwMutex);
         json j = json::array();
         sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(m_Db, "SELECT id, name, type FROM channels WHERE server_id = ?;", -1, &stmt, 0) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(m_Db, "SELECT id, name, type, IFNULL(description, '') FROM channels WHERE server_id = ?;", -1, &stmt, 0) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, serverId);
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* n = (const char*)sqlite3_column_text(stmt, 1);
                 const char* t = (const char*)sqlite3_column_text(stmt, 2);
-                j.push_back({ {"id", sqlite3_column_int(stmt, 0)}, {"name", n ? n : ""}, {"type", t ? t : ""} });
+                const char* d = (const char*)sqlite3_column_text(stmt, 3);
+                json entry = { {"id", sqlite3_column_int(stmt, 0)}, {"name", n ? n : ""}, {"type", t ? t : ""} };
+                if (d && d[0] != '\0') entry["desc"] = d;
+                j.push_back(entry);
             }
             sqlite3_finalize(stmt);
         }

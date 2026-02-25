@@ -308,6 +308,7 @@ void Application::ProcessNetworkMessages() {
                             ch.name = item["name"];
                             const std::string typeStr = item.value("type", "text");
                             ch.type = (typeStr == "voice") ? ChannelType::Voice : ChannelType::Text;
+                            ch.description = item.value("desc", "");
                             it->channels.push_back(ch);
                         }
                     }

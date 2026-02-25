@@ -37,9 +37,10 @@ namespace TalkMe::UI::Views {
 
         if (selectedChannelId != -1) {
             std::string chName = "Unknown";
+            std::string chDesc;
             ChannelType cType = ChannelType::Text;
             for (const auto& ch : currentServer.channels)
-                if (ch.id == selectedChannelId) { chName = ch.name; cType = ch.type; break; }
+                if (ch.id == selectedChannelId) { chName = ch.name; cType = ch.type; chDesc = ch.description; break; }
 
             // ==================== VOICE VIEW ====================
             if (cType == ChannelType::Voice) {
@@ -266,6 +267,12 @@ namespace TalkMe::UI::Views {
                 ImGui::Text("# %s", chName.c_str());
                 ImGui::SetWindowFontScale(1.0f);
                 ImGui::PopStyleColor();
+
+                if (!chDesc.empty()) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                    ImGui::TextWrapped("%s", chDesc.c_str());
+                    ImGui::PopStyleColor();
+                }
 
                 ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
                 ImGui::Text("Invite: %s", currentServer.inviteCode.c_str());

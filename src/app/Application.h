@@ -29,6 +29,7 @@ namespace TalkMe {
         int id;
         std::string name;
         ChannelType type;
+        std::string description;
     };
 
     struct Server {
