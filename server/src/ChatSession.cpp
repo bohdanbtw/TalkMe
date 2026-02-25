@@ -521,6 +521,29 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Voice_Mute_State) {
+                int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
+                if (cid == -1) return;
+                json out;
+                out["u"] = m_Username;
+                out["muted"] = j.value("muted", false);
+                out["deafened"] = j.value("deafened", false);
+                out["cid"] = cid;
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Voice_Mute_State, out.dump());
+                m_Server.BroadcastToVoiceChannel(cid, buf);
+                return;
+            }
+
+            if (m_Header.type == PacketType::Typing_Indicator) {
+                if (!j.contains("cid")) return;
+                int cid = j["cid"];
+                json out;
+                out["u"] = m_Username;
+                out["cid"] = cid;
+                m_Server.BroadcastToChannelMembers(cid, PacketType::Typing_Indicator, out.dump());
+                return;
+            }
+
             if (m_Header.type == PacketType::Voice_Stats_Report) {
                 m_Server.RecordVoiceStats(m_Username, j.value("cid", -1),
                     j.value("ping_ms", 0.0), j.value("loss_pct", 0.0),

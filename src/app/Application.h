@@ -112,6 +112,9 @@ namespace TalkMe {
         std::set<std::string> m_JoinSoundPlayedFor;  // members we already played join sound for in this channel
         std::map<std::string, float> m_SpeakingTimers;
         std::map<std::string, float> m_UserVolumes;  // client-side per-user volume (0 = mute, 1 = normal)
+
+        struct UserVoiceState { bool muted = false; bool deafened = false; };
+        std::map<std::string, UserVoiceState> m_UserMuteStates;  // per-user mute/deafen state from server
         std::mutex m_RecentSpeakersMutex;
         std::vector<std::string> m_RecentSpeakers;  // drained each frame to update m_SpeakingTimers
         std::mutex m_VoiceDedupeMutex;

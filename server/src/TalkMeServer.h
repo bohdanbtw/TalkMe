@@ -91,6 +91,12 @@ namespace TalkMe {
         // Per-channel bitrate ceiling derived from active speaker count.
         uint32_t GetChannelBitrateLimit(int cid);
 
+        // Broadcast a pre-built buffer to all members in a voice channel.
+        void BroadcastToVoiceChannel(int cid, std::shared_ptr<std::vector<uint8_t>> buffer);
+
+        // Create a shared buffer suitable for broadcasting (public wrapper).
+        std::shared_ptr<std::vector<uint8_t>> CreateBroadcastBuffer(PacketType type, const std::string& data);
+
     private:
         // --- Tuning constants ---------------------------------------------------
         static constexpr size_t  kActiveSpeakerMax = 32;
