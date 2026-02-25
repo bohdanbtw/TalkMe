@@ -7,6 +7,9 @@
 #include "../../app/Application.h"
 
 namespace TalkMe::UI::Views {
+
+    struct UserVoiceState { bool muted = false; bool deafened = false; };
+
     void RenderChannelView(
         NetworkClient& netClient,
         UserSession& currentUser,
@@ -20,6 +23,12 @@ namespace TalkMe::UI::Views {
         std::function<void(const std::string&, float)> setUserVolume,
         char* chatInputBuf,
         bool selfMuted = false,
-        bool selfDeafened = false
+        bool selfDeafened = false,
+        const std::map<std::string, UserVoiceState>* userMuteStates = nullptr,
+        const std::map<std::string, float>* typingUsers = nullptr,
+        std::function<void()> onUserTyping = nullptr,
+        int* replyingToMessageId = nullptr,
+        const std::vector<std::pair<std::string, bool>>* serverMembers = nullptr,
+        bool* showMemberList = nullptr
     );
 }

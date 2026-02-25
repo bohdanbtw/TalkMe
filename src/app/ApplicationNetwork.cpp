@@ -156,6 +156,50 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            // ── Presence packets ─────────────────────────────────────────
+            if (msg.type == PacketType::Voice_Mute_State) {
+                const std::string user = j.value("u", "");
+                if (!user.empty()) {
+                    m_UserMuteStates[user] = { j.value("muted", false), j.value("deafened", false) };
+                    UpdateOverlay();
+                }
+                continue;
+            }
+
+            if (msg.type == PacketType::Typing_Indicator) {
+                const std::string user = j.value("u", "");
+                if (!user.empty() && user != m_CurrentUser.username)
+                    m_TypingUsers[user] = (float)ImGui::GetTime();
+                continue;
+            }
+
+            if (msg.type == PacketType::Member_List_Response) {
+                m_ServerMembers.clear();
+                for (const auto& item : j) {
+                    ServerMember sm;
+                    sm.username = item.value("u", "");
+                    sm.online = item.value("online", false);
+                    if (!sm.username.empty()) m_ServerMembers.push_back(sm);
+                }
+                std::sort(m_ServerMembers.begin(), m_ServerMembers.end(),
+                    [](const ServerMember& a, const ServerMember& b) {
+                        if (a.online != b.online) return a.online > b.online;
+                        return a.username < b.username;
+                    });
+                continue;
+            }
+
+            if (msg.type == PacketType::Presence_Update) {
+                const std::string user = j.value("u", "");
+                if (!user.empty()) {
+                    if (j.value("online", false))
+                        m_OnlineUsers.insert(user);
+                    else
+                        m_OnlineUsers.erase(user);
+                }
+                continue;
+            }
+
             // ── Packets requiring an active session ────────────────────────
             if (msg.type == PacketType::Voice_Config) {
                 m_VoiceConfig.keepaliveIntervalMs          = j.value("keepalive_interval_ms",           m_VoiceConfig.keepaliveIntervalMs);
@@ -246,6 +290,8 @@ void Application::ProcessNetworkMessages() {
                     m_SelectedServerId = m_ServerList[0].id;
                     m_NetClient.Send(PacketType::Get_Server_Content_Request,
                                      PacketHandler::GetServerContentPayload(m_SelectedServerId));
+                    { nlohmann::json mj; mj["sid"] = m_SelectedServerId;
+                      m_NetClient.Send(PacketType::Member_List_Request, mj.dump()); }
                 }
                 continue;
             }
@@ -262,6 +308,7 @@ void Application::ProcessNetworkMessages() {
                             ch.name = item["name"];
                             const std::string typeStr = item.value("type", "text");
                             ch.type = (typeStr == "voice") ? ChannelType::Voice : ChannelType::Text;
+                            ch.description = item.value("desc", "");
                             it->channels.push_back(ch);
                         }
                     }
@@ -280,7 +327,8 @@ void Application::ProcessNetworkMessages() {
                         if (item.contains("mid"))
                             m_Messages.push_back({ item.value("mid", 0), item["cid"],
                                                    item.value("u", ""), item.value("msg", ""),
-                                                   item.value("time", "Old") });
+                                                   item.value("time", "Old"),
+                                                   item.value("reply_to", 0) });
                 }
                 continue;
             }
@@ -306,7 +354,8 @@ void Application::ProcessNetworkMessages() {
             if (msg.type == PacketType::Message_Text) {
                 m_Messages.push_back({ j.value("mid", 0), j.value("cid", 0),
                                        j.value("u", "??"), j.value("msg", ""),
-                                       GetCurrentTimeStr() });
+                                       GetCurrentTimeStr(),
+                                       j.value("reply_to", 0) });
                 continue;
             }
         }

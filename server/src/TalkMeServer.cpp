@@ -165,6 +165,10 @@ namespace TalkMe {
             }
             if (!hasActive) {
                 m_UdpBindings.erase(user);
+                // Broadcast offline presence (outside lock below)
+                lock.unlock();
+                BroadcastPresence(user, false);
+                lock.lock();
             }
         }
 
@@ -775,6 +779,40 @@ namespace TalkMe {
                 session->SendShared(buffer, false);
             }
         }
+    }
+
+    void TalkMeServer::BroadcastToVoiceChannel(int cid,
+        std::shared_ptr<std::vector<uint8_t>> buffer) {
+        std::shared_lock lock(m_RoomMutex);
+        auto it = m_VoiceChannels.find(cid);
+        if (it == m_VoiceChannels.end()) return;
+        for (const auto& s : it->second)
+            s->SendShared(buffer, false);
+    }
+
+    std::shared_ptr<std::vector<uint8_t>>
+        TalkMeServer::CreateBroadcastBuffer(PacketType type, const std::string& data) {
+        return CreateBuffer(type, data);
+    }
+
+    void TalkMeServer::BroadcastPresence(const std::string& username, bool online) {
+        json j;
+        j["u"] = username;
+        j["online"] = online;
+        auto buf = CreateBuffer(PacketType::Presence_Update, j.dump());
+        std::shared_lock lock(m_RoomMutex);
+        for (const auto& s : m_AllSessions)
+            s->SendShared(buf, false);
+    }
+
+    std::vector<std::string> TalkMeServer::GetOnlineUsers() {
+        std::shared_lock lock(m_RoomMutex);
+        std::set<std::string> names;
+        for (const auto& s : m_AllSessions) {
+            const std::string& u = s->GetUsername();
+            if (!u.empty()) names.insert(u);
+        }
+        return std::vector<std::string>(names.begin(), names.end());
     }
 
 } // namespace TalkMe

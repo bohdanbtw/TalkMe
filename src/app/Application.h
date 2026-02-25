@@ -29,6 +29,7 @@ namespace TalkMe {
         int id;
         std::string name;
         ChannelType type;
+        std::string description;
     };
 
     struct Server {
@@ -44,6 +45,7 @@ namespace TalkMe {
         std::string sender;
         std::string content;
         std::string timestamp;
+        int replyToId = 0;
     };
 
     class Application {
@@ -112,6 +114,19 @@ namespace TalkMe {
         std::set<std::string> m_JoinSoundPlayedFor;  // members we already played join sound for in this channel
         std::map<std::string, float> m_SpeakingTimers;
         std::map<std::string, float> m_UserVolumes;  // client-side per-user volume (0 = mute, 1 = normal)
+
+        struct UserVoiceState { bool muted = false; bool deafened = false; };
+        std::map<std::string, UserVoiceState> m_UserMuteStates;  // per-user mute/deafen state from server
+
+        std::map<std::string, float> m_TypingUsers;  // username -> timestamp of last typing indicator
+        std::chrono::steady_clock::time_point m_LastTypingSentTime;
+
+        std::set<std::string> m_OnlineUsers;  // set of currently online usernames
+        int m_ReplyingToMessageId = 0;  // message ID being replied to (0 = not replying)
+
+        struct ServerMember { std::string username; bool online = false; };
+        std::vector<ServerMember> m_ServerMembers;  // members of currently selected server
+        bool m_ShowMemberList = false;
         std::mutex m_RecentSpeakersMutex;
         std::vector<std::string> m_RecentSpeakers;  // drained each frame to update m_SpeakingTimers
         std::mutex m_VoiceDedupeMutex;
@@ -193,6 +208,6 @@ namespace TalkMe {
         float m_OverlayOpacity = 0.85f;
         void UpdateOverlay();
 
-        bool m_ShowFrameTimeOverlay = false;  // Toggle with F3; shows frame time (ms) and FPS for profiling.
+        // FPS overlay member removed — use external profiling tools instead.
     };
 }

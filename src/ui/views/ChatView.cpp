@@ -18,7 +18,13 @@ namespace TalkMe::UI::Views {
         std::vector<ChatMessage>& messages, int& selectedChannelId, int& activeVoiceChannelId,
         std::vector<std::string>& voiceMembers, std::map<std::string, float>& speakingTimers,
         std::map<std::string, float>& userVolumes, std::function<void(const std::string&, float)> setUserVolume,
-        char* chatInputBuf, bool selfMuted, bool selfDeafened)
+        char* chatInputBuf, bool selfMuted, bool selfDeafened,
+        const std::map<std::string, UserVoiceState>* userMuteStates,
+        const std::map<std::string, float>* typingUsers,
+        std::function<void()> onUserTyping,
+        int* replyingToMessageId,
+        const std::vector<std::pair<std::string, bool>>* serverMembers,
+        bool* showMemberList)
     {
         float winH = ImGui::GetWindowHeight();
         float winW = ImGui::GetWindowWidth();
@@ -31,9 +37,10 @@ namespace TalkMe::UI::Views {
 
         if (selectedChannelId != -1) {
             std::string chName = "Unknown";
+            std::string chDesc;
             ChannelType cType = ChannelType::Text;
             for (const auto& ch : currentServer.channels)
-                if (ch.id == selectedChannelId) { chName = ch.name; cType = ch.type; break; }
+                if (ch.id == selectedChannelId) { chName = ch.name; cType = ch.type; chDesc = ch.description; break; }
 
             // ==================== VOICE VIEW ====================
             if (cType == ChannelType::Voice) {
@@ -141,8 +148,18 @@ namespace TalkMe::UI::Views {
 
                     // Status icons below name
                     bool isMe = (member == currentUser.username);
-                    bool micOff = isMe && selfMuted;
-                    bool spkOff = isMe && selfDeafened;
+                    bool micOff = false;
+                    bool spkOff = false;
+                    if (isMe) {
+                        micOff = selfMuted;
+                        spkOff = selfDeafened;
+                    } else if (userMuteStates) {
+                        auto sit = userMuteStates->find(member);
+                        if (sit != userMuteStates->end()) {
+                            micOff = sit->second.muted;
+                            spkOff = sit->second.deafened;
+                        }
+                    }
 
                     if (muted || micOff || spkOff) {
                         float iconY = nameY + 18.0f;
@@ -251,9 +268,22 @@ namespace TalkMe::UI::Views {
                 ImGui::SetWindowFontScale(1.0f);
                 ImGui::PopStyleColor();
 
+                if (!chDesc.empty()) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                    ImGui::TextWrapped("%s", chDesc.c_str());
+                    ImGui::PopStyleColor();
+                }
+
                 ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
                 ImGui::Text("Invite: %s", currentServer.inviteCode.c_str());
                 ImGui::PopStyleColor();
+
+                if (showMemberList) {
+                    ImGui::SameLine(areaW - 120);
+                    if (ImGui::SmallButton(*showMemberList ? "Members <<" : "Members >>"))
+                        *showMemberList = !*showMemberList;
+                }
+
                 ImGui::Unindent(36);
 
                 ImGui::Dummy(ImVec2(0, 6));
@@ -263,7 +293,7 @@ namespace TalkMe::UI::Views {
                 ImGui::Dummy(ImVec2(0, 4));
 
                 float hdrH = ImGui::GetCursorPosY();
-                float inpH = 68.0f;
+                float inpH = 88.0f;
                 float msgH = winH - hdrH - inpH;
                 if (msgH < 50.0f) msgH = 50.0f;
 
@@ -274,6 +304,23 @@ namespace TalkMe::UI::Views {
                     bool isMe = (msg.sender == currentUser.username);
 
                     ImGui::BeginGroup();
+
+                    if (msg.replyToId > 0) {
+                        for (const auto& orig : messages) {
+                            if (orig.id == msg.replyToId) {
+                                std::string replySender = orig.sender;
+                                size_t rhp = replySender.find('#');
+                                if (rhp != std::string::npos) replySender = replySender.substr(0, rhp);
+                                std::string preview = orig.content.substr(0, 60);
+                                if (orig.content.size() > 60) preview += "...";
+                                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                                ImGui::Text("  | %s: %s", replySender.c_str(), preview.c_str());
+                                ImGui::PopStyleColor();
+                                break;
+                            }
+                        }
+                    }
+
                     ImGui::PushStyleColor(ImGuiCol_Text, isMe ? Styles::Accent() : Styles::Error());
                     size_t hp = msg.sender.find('#');
                     if (hp != std::string::npos) {
@@ -295,9 +342,36 @@ namespace TalkMe::UI::Views {
                     ImGui::PopStyleColor();
                     ImGui::EndGroup();
 
-                    if (isMe && msg.id > 0) {
+                    if (msg.id > 0) {
+                        static int s_editingMsgId = 0;
+                        static char s_editBuf[1024] = "";
+
+                        if (s_editingMsgId == msg.id) {
+                            ImGui::PushItemWidth(areaW - 180);
+                            bool submitted = ImGui::InputText(("##edit_" + std::to_string(msg.id)).c_str(),
+                                s_editBuf, sizeof(s_editBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+                            ImGui::PopItemWidth();
+                            ImGui::SameLine();
+                            if (ImGui::SmallButton("Save") || submitted) {
+                                if (strlen(s_editBuf) > 0) {
+                                    nlohmann::json ej;
+                                    ej["mid"] = msg.id; ej["cid"] = selectedChannelId; ej["msg"] = std::string(s_editBuf);
+                                    netClient.Send(PacketType::Edit_Message_Request, ej.dump());
+                                }
+                                s_editingMsgId = 0;
+                            }
+                            ImGui::SameLine();
+                            if (ImGui::SmallButton("Cancel")) s_editingMsgId = 0;
+                        }
+
                         if (ImGui::BeginPopupContextItem(("msg_" + std::to_string(msg.id)).c_str())) {
-                            if (ImGui::Selectable("Delete Message"))
+                            if (replyingToMessageId && ImGui::Selectable("Reply"))
+                                *replyingToMessageId = msg.id;
+                            if (isMe && ImGui::Selectable("Edit Message")) {
+                                s_editingMsgId = msg.id;
+                                strncpy_s(s_editBuf, msg.content.c_str(), sizeof(s_editBuf) - 1);
+                            }
+                            if (isMe && ImGui::Selectable("Delete Message"))
                                 netClient.Send(PacketType::Delete_Message_Request,
                                     PacketHandler::CreateDeleteMessagePayload(msg.id, selectedChannelId, currentUser.username));
                             ImGui::EndPopup();
@@ -308,8 +382,57 @@ namespace TalkMe::UI::Views {
                 if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
                 ImGui::EndChild();
 
+                // Typing indicator
+                {
+                    std::string typingText;
+                    if (typingUsers) {
+                        float now = (float)ImGui::GetTime();
+                        std::vector<std::string> active;
+                        for (const auto& [user, ts] : *typingUsers) {
+                            if (now - ts < 4.0f) {
+                                std::string disp = user;
+                                size_t hp = user.find('#');
+                                if (hp != std::string::npos) disp = user.substr(0, hp);
+                                active.push_back(disp);
+                            }
+                        }
+                        if (active.size() == 1) typingText = active[0] + " is typing...";
+                        else if (active.size() == 2) typingText = active[0] + " and " + active[1] + " are typing...";
+                        else if (active.size() > 2) typingText = std::to_string(active.size()) + " people are typing...";
+                    }
+                    ImGui::Indent(32);
+                    if (!typingText.empty()) {
+                        ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                        ImGui::Text("%s", typingText.c_str());
+                        ImGui::PopStyleColor();
+                    } else {
+                        ImGui::Dummy(ImVec2(0, ImGui::GetTextLineHeight()));
+                    }
+                    ImGui::Unindent(32);
+                }
+
+                // Reply bar (if replying)
+                if (replyingToMessageId && *replyingToMessageId > 0) {
+                    ImGui::Indent(32);
+                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
+                    for (const auto& orig : messages) {
+                        if (orig.id == *replyingToMessageId) {
+                            std::string rn = orig.sender;
+                            size_t rhp = rn.find('#');
+                            if (rhp != std::string::npos) rn = rn.substr(0, rhp);
+                            ImGui::Text("Replying to %s", rn.c_str());
+                            break;
+                        }
+                    }
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine();
+                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                    if (ImGui::SmallButton("X")) *replyingToMessageId = 0;
+                    ImGui::PopStyleColor();
+                    ImGui::Unindent(32);
+                }
+
                 // Input bar
-                ImGui::Dummy(ImVec2(0, 4));
                 ImGui::Indent(32);
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
                 ImGui::PushStyleColor(ImGuiCol_FrameBg, Styles::ButtonSubtle());
@@ -317,11 +440,22 @@ namespace TalkMe::UI::Views {
                 ImGui::PushItemWidth(inputW);
                 bool enter = ImGui::InputText("##chat_in", chatInputBuf, 1024, ImGuiInputTextFlags_EnterReturnsTrue);
                 ImGui::PopItemWidth();
+
+                if (ImGui::IsItemActive() && strlen(chatInputBuf) > 0 && onUserTyping)
+                    onUserTyping();
+
                 ImGui::SameLine();
                 if (UI::AccentButton("Send", ImVec2(68, 32)) || enter) {
                     if (strlen(chatInputBuf) > 0) {
-                        netClient.Send(PacketType::Message_Text,
-                            PacketHandler::CreateMessagePayload(selectedChannelId, currentUser.username, chatInputBuf));
+                        nlohmann::json msgJ;
+                        msgJ["cid"] = selectedChannelId;
+                        msgJ["u"] = currentUser.username;
+                        msgJ["msg"] = std::string(chatInputBuf);
+                        if (replyingToMessageId && *replyingToMessageId > 0) {
+                            msgJ["reply_to"] = *replyingToMessageId;
+                            *replyingToMessageId = 0;
+                        }
+                        netClient.Send(PacketType::Message_Text, msgJ.dump());
                         memset(chatInputBuf, 0, 1024);
                         ImGui::SetKeyboardFocusHere(-1);
                     }
@@ -337,6 +471,43 @@ namespace TalkMe::UI::Views {
             float cx = (areaW - sz.x) * 0.5f;
             if (cx > 0) { ImGui::Dummy(ImVec2(cx, 0)); ImGui::SameLine(); }
             ImGui::TextDisabled("%s", t);
+        }
+
+        // Member list panel (overlaid on right side of chat area)
+        if (showMemberList && *showMemberList && serverMembers && !serverMembers->empty()) {
+            float panelW = 180.0f;
+            float panelX = areaW - panelW;
+            ImGui::SetCursorPos(ImVec2(panelX, 0));
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, Styles::BgSidebar());
+            ImGui::BeginChild("MemberList", ImVec2(panelW, winH), true);
+
+            ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+            int onlineCount = 0;
+            for (const auto& [_, on] : *serverMembers) if (on) onlineCount++;
+            ImGui::Text("MEMBERS - %d/%d", onlineCount, (int)serverMembers->size());
+            ImGui::PopStyleColor();
+            ImGui::Separator();
+            ImGui::Dummy(ImVec2(0, 4));
+
+            for (const auto& [name, online] : *serverMembers) {
+                std::string disp = name;
+                size_t hp = name.find('#');
+                if (hp != std::string::npos) disp = name.substr(0, hp);
+
+                ImU32 dotCol = online ? IM_COL32(80, 220, 100, 255) : IM_COL32(120, 120, 125, 255);
+                ImVec2 pos = ImGui::GetCursorScreenPos();
+                ImGui::GetWindowDrawList()->AddCircleFilled(
+                    ImVec2(pos.x + 6, pos.y + 8), 4.0f, dotCol);
+                ImGui::Dummy(ImVec2(16, 0));
+                ImGui::SameLine();
+
+                if (!online) ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                ImGui::Text("%s", disp.c_str());
+                if (!online) ImGui::PopStyleColor();
+            }
+
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
         }
 
         ImGui::EndChild();

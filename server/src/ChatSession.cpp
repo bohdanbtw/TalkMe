@@ -299,6 +299,7 @@ namespace TalkMe {
                                     sendResp(PacketType::Login_Success, res.dump());
                                     if (!serversJson.empty())
                                         sendResp(PacketType::Server_List_Response, serversJson);
+                                    m_Server.BroadcastPresence(m_Username, true);
                                 }
                                 else if (loginResult == 2) {
                                     m_PendingHWID = hwid;
@@ -355,6 +356,7 @@ namespace TalkMe {
                     json res; res["u"] = m_Username; res["2fa_enabled"] = true;
                     SendLocal(PacketType::Login_Success, res.dump());
                     SendLocal(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
+                    m_Server.BroadcastPresence(m_Username, true);
                 }
                 return;
             }
@@ -510,14 +512,65 @@ namespace TalkMe {
             if (m_Header.type == PacketType::Message_Text) {
                 if (!j.contains("cid") || !j.contains("msg")) return;
                 int cid = j["cid"];
-                int mid = Database::Get().SaveMessageReturnId(cid, m_Username, j["msg"], j.value("attachment_id", ""));
+                int replyTo = j.value("reply_to", 0);
+                int mid = Database::Get().SaveMessageReturnId(cid, m_Username, j["msg"], j.value("attachment_id", ""), replyTo);
                 json out;
                 out["mid"] = mid;
                 out["cid"] = cid;
                 out["u"] = m_Username;
                 out["msg"] = j["msg"];
                 out["attachment_id"] = j.value("attachment_id", "");
+                if (replyTo > 0) out["reply_to"] = replyTo;
                 m_Server.BroadcastToChannelMembers(cid, PacketType::Message_Text, out.dump());
+                return;
+            }
+
+            if (m_Header.type == PacketType::Member_List_Request) {
+                if (!j.contains("sid") || !j["sid"].is_number_integer()) return;
+                int sid = j["sid"];
+                auto members = Database::Get().GetServerMembers(sid);
+                auto onlineUsers = m_Server.GetOnlineUsers();
+                std::set<std::string> onlineSet(onlineUsers.begin(), onlineUsers.end());
+                json res = json::array();
+                for (const auto& m : members) {
+                    json entry;
+                    entry["u"] = m;
+                    entry["online"] = onlineSet.count(m) > 0;
+                    res.push_back(entry);
+                }
+                SendLocal(PacketType::Member_List_Response, res.dump());
+                return;
+            }
+
+            if (m_Header.type == PacketType::Delete_Channel_Request) {
+                if (!j.contains("cid") || !j.contains("sid")) return;
+                if (Database::Get().DeleteChannel(j["cid"], m_Username)) {
+                    SendLocal(PacketType::Server_Content_Response,
+                        Database::Get().GetServerContentJSON(j["sid"]));
+                }
+                return;
+            }
+
+            if (m_Header.type == PacketType::Voice_Mute_State) {
+                int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
+                if (cid == -1) return;
+                json out;
+                out["u"] = m_Username;
+                out["muted"] = j.value("muted", false);
+                out["deafened"] = j.value("deafened", false);
+                out["cid"] = cid;
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Voice_Mute_State, out.dump());
+                m_Server.BroadcastToVoiceChannel(cid, buf);
+                return;
+            }
+
+            if (m_Header.type == PacketType::Typing_Indicator) {
+                if (!j.contains("cid")) return;
+                int cid = j["cid"];
+                json out;
+                out["u"] = m_Username;
+                out["cid"] = cid;
+                m_Server.BroadcastToChannelMembers(cid, PacketType::Typing_Indicator, out.dump());
                 return;
             }
 
