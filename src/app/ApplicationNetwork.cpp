@@ -173,6 +173,17 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            if (msg.type == PacketType::Presence_Update) {
+                const std::string user = j.value("u", "");
+                if (!user.empty()) {
+                    if (j.value("online", false))
+                        m_OnlineUsers.insert(user);
+                    else
+                        m_OnlineUsers.erase(user);
+                }
+                continue;
+            }
+
             // ── Packets requiring an active session ────────────────────────
             if (msg.type == PacketType::Voice_Config) {
                 m_VoiceConfig.keepaliveIntervalMs          = j.value("keepalive_interval_ms",           m_VoiceConfig.keepaliveIntervalMs);

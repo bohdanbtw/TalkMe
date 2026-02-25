@@ -129,6 +129,8 @@ namespace TalkMe {
         // --- PRESENCE ---
         Voice_Mute_State,    // Client -> Server -> All: user muted/deafened state change
         Typing_Indicator,    // Client -> Server -> Channel: user is typing
+        Presence_Update,     // Server -> Client: user online/offline status change
+        Member_List_Response,// Server -> Client: list of members in a server with online status
 
         // --- DIAGNOSTIC ---
         Echo_Request,

@@ -118,6 +118,8 @@ namespace TalkMe {
 
         std::map<std::string, float> m_TypingUsers;  // username -> timestamp of last typing indicator
         std::chrono::steady_clock::time_point m_LastTypingSentTime;
+
+        std::set<std::string> m_OnlineUsers;  // set of currently online usernames
         std::mutex m_RecentSpeakersMutex;
         std::vector<std::string> m_RecentSpeakers;  // drained each frame to update m_SpeakingTimers
         std::mutex m_VoiceDedupeMutex;
