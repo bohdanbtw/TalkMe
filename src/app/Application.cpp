@@ -928,7 +928,17 @@ namespace TalkMe {
                         for (const auto& [k, v] : m_UserVolumes) j[k] = v;
                         std::ofstream of(ConfigManager::GetConfigDirectory() + "\\user_volumes.json");
                         if (of) of << j.dump();
-                    }, m_ChatInputBuf, m_SelfMuted, m_SelfDeafened, &m_UserMuteStates);
+                    }, m_ChatInputBuf, m_SelfMuted, m_SelfDeafened, &m_UserMuteStates,
+                    &m_TypingUsers,
+                    [this]() {
+                        auto now = std::chrono::steady_clock::now();
+                        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_LastTypingSentTime);
+                        if (elapsed.count() >= 3000 && m_SelectedChannelId != -1) {
+                            nlohmann::json tj; tj["cid"] = m_SelectedChannelId;
+                            m_NetClient.Send(PacketType::Typing_Indicator, tj.dump());
+                            m_LastTypingSentTime = now;
+                        }
+                    });
             }
         }
     }

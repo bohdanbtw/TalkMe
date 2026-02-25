@@ -115,6 +115,9 @@ namespace TalkMe {
 
         struct UserVoiceState { bool muted = false; bool deafened = false; };
         std::map<std::string, UserVoiceState> m_UserMuteStates;  // per-user mute/deafen state from server
+
+        std::map<std::string, float> m_TypingUsers;  // username -> timestamp of last typing indicator
+        std::chrono::steady_clock::time_point m_LastTypingSentTime;
         std::mutex m_RecentSpeakersMutex;
         std::vector<std::string> m_RecentSpeakers;  // drained each frame to update m_SpeakingTimers
         std::mutex m_VoiceDedupeMutex;

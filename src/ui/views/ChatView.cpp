@@ -19,7 +19,9 @@ namespace TalkMe::UI::Views {
         std::vector<std::string>& voiceMembers, std::map<std::string, float>& speakingTimers,
         std::map<std::string, float>& userVolumes, std::function<void(const std::string&, float)> setUserVolume,
         char* chatInputBuf, bool selfMuted, bool selfDeafened,
-        const std::map<std::string, UserVoiceState>* userMuteStates)
+        const std::map<std::string, UserVoiceState>* userMuteStates,
+        const std::map<std::string, float>* typingUsers,
+        std::function<void()> onUserTyping)
     {
         float winH = ImGui::GetWindowHeight();
         float winW = ImGui::GetWindowWidth();
@@ -274,7 +276,7 @@ namespace TalkMe::UI::Views {
                 ImGui::Dummy(ImVec2(0, 4));
 
                 float hdrH = ImGui::GetCursorPosY();
-                float inpH = 68.0f;
+                float inpH = 88.0f;
                 float msgH = winH - hdrH - inpH;
                 if (msgH < 50.0f) msgH = 50.0f;
 
@@ -319,8 +321,36 @@ namespace TalkMe::UI::Views {
                 if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
                 ImGui::EndChild();
 
+                // Typing indicator
+                {
+                    std::string typingText;
+                    if (typingUsers) {
+                        float now = (float)ImGui::GetTime();
+                        std::vector<std::string> active;
+                        for (const auto& [user, ts] : *typingUsers) {
+                            if (now - ts < 4.0f) {
+                                std::string disp = user;
+                                size_t hp = user.find('#');
+                                if (hp != std::string::npos) disp = user.substr(0, hp);
+                                active.push_back(disp);
+                            }
+                        }
+                        if (active.size() == 1) typingText = active[0] + " is typing...";
+                        else if (active.size() == 2) typingText = active[0] + " and " + active[1] + " are typing...";
+                        else if (active.size() > 2) typingText = std::to_string(active.size()) + " people are typing...";
+                    }
+                    ImGui::Indent(32);
+                    if (!typingText.empty()) {
+                        ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                        ImGui::Text("%s", typingText.c_str());
+                        ImGui::PopStyleColor();
+                    } else {
+                        ImGui::Dummy(ImVec2(0, ImGui::GetTextLineHeight()));
+                    }
+                    ImGui::Unindent(32);
+                }
+
                 // Input bar
-                ImGui::Dummy(ImVec2(0, 4));
                 ImGui::Indent(32);
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
                 ImGui::PushStyleColor(ImGuiCol_FrameBg, Styles::ButtonSubtle());
@@ -328,6 +358,10 @@ namespace TalkMe::UI::Views {
                 ImGui::PushItemWidth(inputW);
                 bool enter = ImGui::InputText("##chat_in", chatInputBuf, 1024, ImGuiInputTextFlags_EnterReturnsTrue);
                 ImGui::PopItemWidth();
+
+                if (ImGui::IsItemActive() && strlen(chatInputBuf) > 0 && onUserTyping)
+                    onUserTyping();
+
                 ImGui::SameLine();
                 if (UI::AccentButton("Send", ImVec2(68, 32)) || enter) {
                     if (strlen(chatInputBuf) > 0) {
