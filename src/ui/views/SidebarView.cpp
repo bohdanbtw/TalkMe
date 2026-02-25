@@ -88,6 +88,14 @@ namespace TalkMe::UI::Views {
                             netClient.Send(PacketType::Select_Text_Channel, PacketHandler::SelectTextChannelPayload(ch.id));
                         }
                     }
+                    if (ImGui::BeginPopupContextItem(("del_ch_" + std::to_string(ch.id)).c_str())) {
+                        if (ImGui::Selectable("Delete Channel")) {
+                            nlohmann::json dj; dj["cid"] = ch.id; dj["sid"] = selectedServerId;
+                            netClient.Send(PacketType::Delete_Channel_Request, dj.dump());
+                            if (selectedChannelId == ch.id) selectedChannelId = -1;
+                        }
+                        ImGui::EndPopup();
+                    }
                     ImGui::Unindent(10);
                     if (sel) ImGui::PopStyleColor(2);
                 }

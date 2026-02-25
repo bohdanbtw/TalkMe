@@ -542,6 +542,15 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Delete_Channel_Request) {
+                if (!j.contains("cid") || !j.contains("sid")) return;
+                if (Database::Get().DeleteChannel(j["cid"], m_Username)) {
+                    SendLocal(PacketType::Server_Content_Response,
+                        Database::Get().GetServerContentJSON(j["sid"]));
+                }
+                return;
+            }
+
             if (m_Header.type == PacketType::Voice_Mute_State) {
                 int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
                 if (cid == -1) return;

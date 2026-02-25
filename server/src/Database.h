@@ -49,6 +49,7 @@ namespace TalkMe {
         bool EditMessage(int msgId, const std::string& username, const std::string& newContent);
         bool PinMessage(int msgId, int cid, const std::string& username, bool pinState);
         std::vector<std::string> GetServerMembers(int serverId);
+        bool DeleteChannel(int channelId, const std::string& username);
 
     private:
         void Enqueue(std::function<void()> task);
