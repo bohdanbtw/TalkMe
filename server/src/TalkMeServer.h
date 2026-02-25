@@ -97,6 +97,12 @@ namespace TalkMe {
         // Create a shared buffer suitable for broadcasting (public wrapper).
         std::shared_ptr<std::vector<uint8_t>> CreateBroadcastBuffer(PacketType type, const std::string& data);
 
+        // Broadcast user online/offline presence to all sessions.
+        void BroadcastPresence(const std::string& username, bool online);
+
+        // Get list of currently online usernames.
+        std::vector<std::string> GetOnlineUsers();
+
     private:
         // --- Tuning constants ---------------------------------------------------
         static constexpr size_t  kActiveSpeakerMax = 32;

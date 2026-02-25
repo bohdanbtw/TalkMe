@@ -299,6 +299,7 @@ namespace TalkMe {
                                     sendResp(PacketType::Login_Success, res.dump());
                                     if (!serversJson.empty())
                                         sendResp(PacketType::Server_List_Response, serversJson);
+                                    m_Server.BroadcastPresence(m_Username, true);
                                 }
                                 else if (loginResult == 2) {
                                     m_PendingHWID = hwid;
@@ -355,6 +356,7 @@ namespace TalkMe {
                     json res; res["u"] = m_Username; res["2fa_enabled"] = true;
                     SendLocal(PacketType::Login_Success, res.dump());
                     SendLocal(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
+                    m_Server.BroadcastPresence(m_Username, true);
                 }
                 return;
             }
