@@ -576,19 +576,21 @@ namespace TalkMe {
         return j.dump();
     }
 
-    void Database::SaveMessage(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId) {
+    void Database::SaveMessage(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId, int replyTo) {
         int ch = cid;
         std::string s = sender;
         std::string m = msg;
         std::string aid = attachmentId;
-        Enqueue([this, ch, s, m, aid]() {
+        int rt = replyTo;
+        Enqueue([this, ch, s, m, aid, rt]() {
             std::unique_lock<std::shared_mutex> lock(m_RwMutex);
             sqlite3_stmt* stmt;
-            if (sqlite3_prepare_v2(m_Db, "INSERT INTO messages (channel_id, sender, content, attachment_id) VALUES (?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+            if (sqlite3_prepare_v2(m_Db, "INSERT INTO messages (channel_id, sender, content, attachment_id, reply_to) VALUES (?, ?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
                 sqlite3_bind_int(stmt, 1, ch);
                 sqlite3_bind_text(stmt, 2, s.c_str(), -1, SQLITE_TRANSIENT);
                 sqlite3_bind_text(stmt, 3, m.c_str(), -1, SQLITE_TRANSIENT);
                 sqlite3_bind_text(stmt, 4, aid.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(stmt, 5, rt);
                 sqlite3_step(stmt);
                 sqlite3_finalize(stmt);
             }
