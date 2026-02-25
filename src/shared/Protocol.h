@@ -126,6 +126,10 @@ namespace TalkMe {
         Edit_Message_Request,
         Pin_Message_Request,
 
+        // --- PRESENCE ---
+        Voice_Mute_State,    // Client -> Server -> All: user muted/deafened state change
+        Typing_Indicator,    // Client -> Server -> Channel: user is typing
+
         // --- DIAGNOSTIC ---
         Echo_Request,
         Echo_Response

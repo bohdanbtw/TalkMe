@@ -18,7 +18,8 @@ namespace TalkMe::UI::Views {
         std::vector<ChatMessage>& messages, int& selectedChannelId, int& activeVoiceChannelId,
         std::vector<std::string>& voiceMembers, std::map<std::string, float>& speakingTimers,
         std::map<std::string, float>& userVolumes, std::function<void(const std::string&, float)> setUserVolume,
-        char* chatInputBuf, bool selfMuted, bool selfDeafened)
+        char* chatInputBuf, bool selfMuted, bool selfDeafened,
+        const std::map<std::string, UserVoiceState>* userMuteStates)
     {
         float winH = ImGui::GetWindowHeight();
         float winW = ImGui::GetWindowWidth();
@@ -141,8 +142,18 @@ namespace TalkMe::UI::Views {
 
                     // Status icons below name
                     bool isMe = (member == currentUser.username);
-                    bool micOff = isMe && selfMuted;
-                    bool spkOff = isMe && selfDeafened;
+                    bool micOff = false;
+                    bool spkOff = false;
+                    if (isMe) {
+                        micOff = selfMuted;
+                        spkOff = selfDeafened;
+                    } else if (userMuteStates) {
+                        auto sit = userMuteStates->find(member);
+                        if (sit != userMuteStates->end()) {
+                            micOff = sit->second.muted;
+                            spkOff = sit->second.deafened;
+                        }
+                    }
 
                     if (muted || micOff || spkOff) {
                         float iconY = nameY + 18.0f;

@@ -156,6 +156,20 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            // ── Presence packets ─────────────────────────────────────────
+            if (msg.type == PacketType::Voice_Mute_State) {
+                const std::string user = j.value("u", "");
+                if (!user.empty()) {
+                    m_UserMuteStates[user] = { j.value("muted", false), j.value("deafened", false) };
+                    UpdateOverlay();
+                }
+                continue;
+            }
+
+            if (msg.type == PacketType::Typing_Indicator) {
+                continue;
+            }
+
             // ── Packets requiring an active session ────────────────────────
             if (msg.type == PacketType::Voice_Config) {
                 m_VoiceConfig.keepaliveIntervalMs          = j.value("keepalive_interval_ms",           m_VoiceConfig.keepaliveIntervalMs);

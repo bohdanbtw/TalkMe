@@ -777,4 +777,18 @@ namespace TalkMe {
         }
     }
 
+    void TalkMeServer::BroadcastToVoiceChannel(int cid,
+        std::shared_ptr<std::vector<uint8_t>> buffer) {
+        std::shared_lock lock(m_RoomMutex);
+        auto it = m_VoiceChannels.find(cid);
+        if (it == m_VoiceChannels.end()) return;
+        for (const auto& s : it->second)
+            s->SendShared(buffer, false);
+    }
+
+    std::shared_ptr<std::vector<uint8_t>>
+        TalkMeServer::CreateBroadcastBuffer(PacketType type, const std::string& data) {
+        return CreateBuffer(type, data);
+    }
+
 } // namespace TalkMe

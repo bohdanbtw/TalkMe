@@ -128,8 +128,18 @@ namespace TalkMe {
             om.name = name;
             size_t h = name.find('#');
             if (h != std::string::npos) om.name = name.substr(0, h);
-            om.isMuted = (name == m_CurrentUser.username) && m_SelfMuted;
-            om.isDeafened = (name == m_CurrentUser.username) && m_SelfDeafened;
+
+            if (name == m_CurrentUser.username) {
+                om.isMuted = m_SelfMuted;
+                om.isDeafened = m_SelfDeafened;
+            } else {
+                auto sit = m_UserMuteStates.find(name);
+                if (sit != m_UserMuteStates.end()) {
+                    om.isMuted = sit->second.muted;
+                    om.isDeafened = sit->second.deafened;
+                }
+            }
+
             auto it = m_SpeakingTimers.find(name);
             om.isSpeaking = (it != m_SpeakingTimers.end() && (now - it->second) < 0.5f);
             members.push_back(om);
@@ -426,6 +436,7 @@ namespace TalkMe {
                 if (!m_NetClient.IsConnected() && m_CurrentState == AppState::MainApp) {
                     if (!m_VoiceMembers.empty()) m_VoiceMembers.clear();
                     if (m_ActiveVoiceChannelId != -1) m_ActiveVoiceChannelId = -1;
+                    m_UserMuteStates.clear();
                 }
 
                 // Remove self from voice members when leaving
@@ -539,6 +550,22 @@ namespace TalkMe {
                 }
 
                 m_AudioEngine.Update();
+
+                // Broadcast mute/deafen state changes to voice channel
+                {
+                    static bool s_prevMuted = false;
+                    static bool s_prevDeafened = false;
+                    if (m_ActiveVoiceChannelId != -1 &&
+                        (m_SelfMuted != s_prevMuted || m_SelfDeafened != s_prevDeafened)) {
+                        nlohmann::json muteJ;
+                        muteJ["muted"] = m_SelfMuted;
+                        muteJ["deafened"] = m_SelfDeafened;
+                        m_NetClient.Send(PacketType::Voice_Mute_State, muteJ.dump());
+                        s_prevMuted = m_SelfMuted;
+                        s_prevDeafened = m_SelfDeafened;
+                    }
+                }
+
                 UpdateOverlay();
 
                 // Drain messages again so we never call Present() after user closed the window
@@ -901,7 +928,7 @@ namespace TalkMe {
                         for (const auto& [k, v] : m_UserVolumes) j[k] = v;
                         std::ofstream of(ConfigManager::GetConfigDirectory() + "\\user_volumes.json");
                         if (of) of << j.dump();
-                    }, m_ChatInputBuf, m_SelfMuted, m_SelfDeafened);
+                    }, m_ChatInputBuf, m_SelfMuted, m_SelfDeafened, &m_UserMuteStates);
             }
         }
     }
