@@ -85,7 +85,7 @@ namespace TalkMe {
     }
 
     void GameOverlay::SetCorner(int corner) {
-        m_Corner = corner;
+        m_Corner = std::min(std::max(corner, 0), 3);
         if (m_Enabled && m_Hwnd) Reposition();
     }
 
@@ -108,8 +108,9 @@ namespace TalkMe {
     void GameOverlay::Reposition() {
         if (!m_Hwnd) return;
 
-        int totalH = m_Padding * 2 + (int)m_Members.size() * m_LineHeight;
-        if (totalH < 40) totalH = 40;
+        int headerH = 28;
+        int totalH = headerH + m_Padding + (int)m_Members.size() * m_LineHeight + m_Padding;
+        if (totalH < 50) totalH = 50;
 
         RECT workArea;
         SystemParametersInfo(SPI_GETWORKAREA, 0, &workArea, 0);
@@ -119,10 +120,10 @@ namespace TalkMe {
         int x = 0, y = 0;
 
         switch (m_Corner) {
-            case 0: x = workArea.left + margin;                  y = workArea.top + margin; break;
-            case 1: x = workArea.left + screenW - m_Width - margin; y = workArea.top + margin; break;
-            case 2: x = workArea.left + margin;                  y = workArea.top + screenH - totalH - margin; break;
-            case 3: x = workArea.left + screenW - m_Width - margin; y = workArea.top + screenH - totalH - margin; break;
+            case 0: x = workArea.left + margin;                      y = workArea.top + margin; break;
+            case 1: x = workArea.left + screenW - m_Width - margin;  y = workArea.top + margin; break;
+            case 2: x = workArea.left + margin;                      y = workArea.top + screenH - totalH - margin; break;
+            case 3: x = workArea.left + screenW - m_Width - margin;  y = workArea.top + screenH - totalH - margin; break;
         }
 
         ::SetWindowPos(m_Hwnd, HWND_TOPMOST, x, y, m_Width, totalH,
@@ -132,8 +133,9 @@ namespace TalkMe {
     void GameOverlay::Repaint() {
         if (!m_Hwnd || m_Members.empty()) return;
 
-        int totalH = m_Padding * 2 + (int)m_Members.size() * m_LineHeight;
-        if (totalH < 40) totalH = 40;
+        int headerH = 28;
+        int totalH = headerH + m_Padding + (int)m_Members.size() * m_LineHeight + m_Padding;
+        if (totalH < 50) totalH = 50;
 
         Reposition();
 
@@ -157,53 +159,108 @@ namespace TalkMe {
             gfx.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
             gfx.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
 
-            BYTE bgAlpha = (BYTE)(m_Opacity * 200.0f);
-            Gdiplus::SolidBrush bgBrush(Gdiplus::Color(bgAlpha, 24, 25, 28));
-            Gdiplus::Pen borderPen(Gdiplus::Color(bgAlpha, 50, 52, 55), 1.0f);
+            BYTE bgAlpha = (BYTE)(m_Opacity * 210.0f);
 
-            Gdiplus::RectF bgRect(0.0f, 0.0f, (float)m_Width, (float)totalH);
-            gfx.FillRectangle(&bgBrush, bgRect);
-            gfx.DrawRectangle(&borderPen, bgRect);
+            // Rounded background
+            Gdiplus::GraphicsPath bgPath;
+            float r = 10.0f;
+            float w = (float)m_Width;
+            float h = (float)totalH;
+            bgPath.AddArc(0.0f, 0.0f, r * 2, r * 2, 180, 90);
+            bgPath.AddArc(w - r * 2, 0.0f, r * 2, r * 2, 270, 90);
+            bgPath.AddArc(w - r * 2, h - r * 2, r * 2, r * 2, 0, 90);
+            bgPath.AddArc(0.0f, h - r * 2, r * 2, r * 2, 90, 90);
+            bgPath.CloseFigure();
 
-            Gdiplus::Font font(L"Segoe UI", 11.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-            Gdiplus::Font iconFont(L"Segoe UI", 10.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+            Gdiplus::SolidBrush bgBrush(Gdiplus::Color(bgAlpha, 18, 18, 22));
+            gfx.FillPath(&bgBrush, &bgPath);
+
+            // Subtle border
+            Gdiplus::Pen borderPen(Gdiplus::Color((BYTE)(bgAlpha * 0.5f), 80, 80, 90), 1.0f);
+            gfx.DrawPath(&borderPen, &bgPath);
+
+            // Header bar with accent
+            Gdiplus::SolidBrush headerBrush(Gdiplus::Color((BYTE)(bgAlpha * 0.6f), 40, 42, 48));
+            Gdiplus::GraphicsPath headerPath;
+            headerPath.AddArc(0.0f, 0.0f, r * 2, r * 2, 180, 90);
+            headerPath.AddArc(w - r * 2, 0.0f, r * 2, r * 2, 270, 90);
+            headerPath.AddLine(w, (float)headerH, 0.0f, (float)headerH);
+            headerPath.CloseFigure();
+            gfx.FillPath(&headerBrush, &headerPath);
+
+            // Header text
+            Gdiplus::Font headerFont(L"Segoe UI Semibold", 10.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+            Gdiplus::SolidBrush headerTextBrush(Gdiplus::Color(200, 130, 140, 255));
+            wchar_t headerText[64];
+            _snwprintf_s(headerText, _countof(headerText), _TRUNCATE,
+                L"TALKME  \x2022  %d user%s",
+                (int)m_Members.size(),
+                m_Members.size() == 1 ? L"" : L"s");
+            Gdiplus::RectF headerRect(10.0f, 6.0f, w - 20.0f, (float)headerH - 6.0f);
+            gfx.DrawString(headerText, -1, &headerFont, headerRect, nullptr, &headerTextBrush);
+
+            // Member list
+            Gdiplus::Font nameFont(L"Segoe UI", 12.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+            Gdiplus::Font iconFont(L"Segoe UI Symbol", 11.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
             Gdiplus::StringFormat fmt;
             fmt.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+            fmt.SetLineAlignment(Gdiplus::StringAlignmentCenter);
 
             for (int i = 0; i < (int)m_Members.size(); i++) {
                 const auto& m = m_Members[i];
-                float yPos = (float)(m_Padding + i * m_LineHeight);
+                float yPos = (float)(headerH + m_Padding + i * m_LineHeight);
+
+                // Speaking indicator: bright green circle with glow; idle: dim gray dot
+                float dotX = (float)m_Padding;
+                float dotCY = yPos + (float)m_LineHeight * 0.5f;
+                float dotR = m.isSpeaking ? 5.0f : 3.5f;
+
+                if (m.isSpeaking) {
+                    // Green glow behind the dot
+                    Gdiplus::SolidBrush glowBrush(Gdiplus::Color(60, 80, 220, 100));
+                    gfx.FillEllipse(&glowBrush, dotX - 3.0f, dotCY - dotR - 3.0f,
+                        (dotR + 3.0f) * 2.0f, (dotR + 3.0f) * 2.0f);
+                    Gdiplus::SolidBrush dotBrush(Gdiplus::Color(255, 80, 220, 100));
+                    gfx.FillEllipse(&dotBrush, dotX, dotCY - dotR, dotR * 2.0f, dotR * 2.0f);
+                } else if (m.isMuted || m.isDeafened) {
+                    Gdiplus::SolidBrush dotBrush(Gdiplus::Color(180, 220, 70, 70));
+                    gfx.FillEllipse(&dotBrush, dotX, dotCY - dotR, dotR * 2.0f, dotR * 2.0f);
+                } else {
+                    Gdiplus::SolidBrush dotBrush(Gdiplus::Color(120, 140, 140, 145));
+                    gfx.FillEllipse(&dotBrush, dotX, dotCY - dotR, dotR * 2.0f, dotR * 2.0f);
+                }
+
+                // Name with proper UTF-8 conversion
+                float textX = dotX + 16.0f;
+                float maxNameW = w - textX - 44.0f;
 
                 Gdiplus::Color nameColor(220, 220, 220);
-                if (m.isSpeaking)
-                    nameColor = Gdiplus::Color(100, 220, 120);
+                if (m.isSpeaking) nameColor = Gdiplus::Color(130, 240, 150);
+                else if (m.isMuted || m.isDeafened) nameColor = Gdiplus::Color(160, 160, 165);
 
-                // Status indicator
-                float dotX = (float)m_Padding;
-                float dotY = yPos + 6.0f;
-                Gdiplus::Color dotColor(100, 220, 120);
-                if (m.isMuted || m.isDeafened) dotColor = Gdiplus::Color(220, 80, 80);
-                Gdiplus::SolidBrush dotBrush(dotColor);
-                gfx.FillEllipse(&dotBrush, dotX, dotY, 8.0f, 8.0f);
-
-                // Name
-                float textX = dotX + 14.0f;
-                float maxNameW = (float)(m_Width - (int)textX - m_Padding - 40);
                 Gdiplus::SolidBrush nameBrush(nameColor);
-                Gdiplus::RectF nameRect(textX, yPos + 2.0f, maxNameW, (float)m_LineHeight);
+                Gdiplus::RectF nameRect(textX, yPos, maxNameW, (float)m_LineHeight);
 
-                std::wstring wname(m.name.begin(), m.name.end());
-                gfx.DrawString(wname.c_str(), -1, &font, nameRect, &fmt, &nameBrush);
+                int wlen = MultiByteToWideChar(CP_UTF8, 0, m.name.c_str(), -1, nullptr, 0);
+                std::wstring wname(wlen > 0 ? wlen - 1 : 0, L'\0');
+                if (wlen > 1)
+                    MultiByteToWideChar(CP_UTF8, 0, m.name.c_str(), -1, &wname[0], wlen);
 
-                // Mute/deafen icons
-                float iconX = (float)(m_Width - m_Padding - 36);
+                gfx.DrawString(wname.c_str(), -1, &nameFont, nameRect, &fmt, &nameBrush);
+
+                // Status icons using Unicode symbols (right-aligned)
+                float iconX = w - (float)m_Padding - 32.0f;
                 if (m.isDeafened) {
-                    Gdiplus::SolidBrush redBrush(Gdiplus::Color(220, 80, 80));
-                    gfx.DrawString(L"D", -1, &iconFont, Gdiplus::PointF(iconX + 16, yPos + 3.0f), &redBrush);
+                    Gdiplus::SolidBrush redBrush(Gdiplus::Color(230, 220, 70, 70));
+                    gfx.DrawString(L"\x1F507", -1, &iconFont,
+                        Gdiplus::RectF(iconX + 14.0f, yPos, 18.0f, (float)m_LineHeight),
+                        &fmt, &redBrush);
                 }
                 if (m.isMuted) {
-                    Gdiplus::SolidBrush redBrush(Gdiplus::Color(220, 80, 80));
-                    gfx.DrawString(L"M", -1, &iconFont, Gdiplus::PointF(iconX, yPos + 3.0f), &redBrush);
+                    Gdiplus::SolidBrush orangeBrush(Gdiplus::Color(230, 240, 160, 60));
+                    gfx.DrawString(L"\x1F507", -1, &iconFont,
+                        Gdiplus::RectF(iconX, yPos, 18.0f, (float)m_LineHeight),
+                        &fmt, &orangeBrush);
                 }
             }
         }

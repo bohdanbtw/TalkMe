@@ -128,8 +128,18 @@ namespace TalkMe {
             om.name = name;
             size_t h = name.find('#');
             if (h != std::string::npos) om.name = name.substr(0, h);
-            om.isMuted = (name == m_CurrentUser.username) && m_SelfMuted;
-            om.isDeafened = (name == m_CurrentUser.username) && m_SelfDeafened;
+
+            if (name == m_CurrentUser.username) {
+                om.isMuted = m_SelfMuted;
+                om.isDeafened = m_SelfDeafened;
+            } else {
+                auto sit = m_UserMuteStates.find(name);
+                if (sit != m_UserMuteStates.end()) {
+                    om.isMuted = sit->second.muted;
+                    om.isDeafened = sit->second.deafened;
+                }
+            }
+
             auto it = m_SpeakingTimers.find(name);
             om.isSpeaking = (it != m_SpeakingTimers.end() && (now - it->second) < 0.5f);
             members.push_back(om);
@@ -426,6 +436,7 @@ namespace TalkMe {
                 if (!m_NetClient.IsConnected() && m_CurrentState == AppState::MainApp) {
                     if (!m_VoiceMembers.empty()) m_VoiceMembers.clear();
                     if (m_ActiveVoiceChannelId != -1) m_ActiveVoiceChannelId = -1;
+                    m_UserMuteStates.clear();
                 }
 
                 // Remove self from voice members when leaving
@@ -539,6 +550,22 @@ namespace TalkMe {
                 }
 
                 m_AudioEngine.Update();
+
+                // Broadcast mute/deafen state changes to voice channel
+                {
+                    static bool s_prevMuted = false;
+                    static bool s_prevDeafened = false;
+                    if (m_ActiveVoiceChannelId != -1 &&
+                        (m_SelfMuted != s_prevMuted || m_SelfDeafened != s_prevDeafened)) {
+                        nlohmann::json muteJ;
+                        muteJ["muted"] = m_SelfMuted;
+                        muteJ["deafened"] = m_SelfDeafened;
+                        m_NetClient.Send(PacketType::Voice_Mute_State, muteJ.dump());
+                        s_prevMuted = m_SelfMuted;
+                        s_prevDeafened = m_SelfDeafened;
+                    }
+                }
+
                 UpdateOverlay();
 
                 // Drain messages again so we never call Present() after user closed the window
@@ -634,8 +661,7 @@ namespace TalkMe {
             ImGui::End(); ImGui::PopStyleVar(3);
             return;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_F3))
-            m_ShowFrameTimeOverlay = !m_ShowFrameTimeOverlay;
+        // FPS overlay removed (was F3 toggle) — use external profiling tools instead.
 
         if (m_CurrentState == AppState::Login) RenderLogin();
         else if (m_CurrentState == AppState::Login2FA) RenderLogin2FA();
@@ -643,19 +669,7 @@ namespace TalkMe {
         else if (m_CurrentState == AppState::MainApp) RenderMainApp();
         ImGui::End(); ImGui::PopStyleVar(3);
 
-        // Optional frame-time overlay (F3) for profiling resize/network spikes (§9 Profiling).
-        if (m_ShowFrameTimeOverlay) {
-            const ImGuiViewport* vp = ImGui::GetMainViewport();
-            ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - 100.f, vp->WorkPos.y + 8.f), ImGuiCond_Always);
-            ImGuiWindowFlags overlayFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize
-                | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing;
-            if (ImGui::Begin("##FrameTime", nullptr, overlayFlags)) {
-                ImGuiIO& io = ImGui::GetIO();
-                ImGui::Text("%.2f ms", io.DeltaTime * 1000.f);
-                ImGui::Text("%.0f FPS", io.Framerate);
-            }
-            ImGui::End();
-        }
+        // FPS overlay removed — was debug-only profiling aid.
     }
 
     void Application::RenderLogin() { UI::Views::RenderLogin(m_NetClient, m_CurrentState, m_EmailBuf, m_PasswordBuf, m_StatusMessage, m_ServerIP, m_ServerPort, m_DeviceId, m_ValidatingSession); }
@@ -914,7 +928,26 @@ namespace TalkMe {
                         for (const auto& [k, v] : m_UserVolumes) j[k] = v;
                         std::ofstream of(ConfigManager::GetConfigDirectory() + "\\user_volumes.json");
                         if (of) of << j.dump();
-                    }, m_ChatInputBuf, m_SelfMuted, m_SelfDeafened);
+                    }, m_ChatInputBuf, m_SelfMuted, m_SelfDeafened, &m_UserMuteStates,
+                    &m_TypingUsers,
+                    [this]() {
+                        auto now = std::chrono::steady_clock::now();
+                        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_LastTypingSentTime);
+                        if (elapsed.count() >= 3000 && m_SelectedChannelId != -1) {
+                            nlohmann::json tj; tj["cid"] = m_SelectedChannelId;
+                            m_NetClient.Send(PacketType::Typing_Indicator, tj.dump());
+                            m_LastTypingSentTime = now;
+                        }
+                    },
+                    &m_ReplyingToMessageId,
+                    [this]() -> const std::vector<std::pair<std::string, bool>>* {
+                        static std::vector<std::pair<std::string, bool>> members;
+                        members.clear();
+                        for (const auto& sm : m_ServerMembers)
+                            members.emplace_back(sm.username, sm.online);
+                        return members.empty() ? nullptr : &members;
+                    }(),
+                    &m_ShowMemberList);
             }
         }
     }

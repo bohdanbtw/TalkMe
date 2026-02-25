@@ -139,6 +139,8 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN edited_at DATETIME;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN is_pinned INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN attachment_id TEXT DEFAULT '';", 0, 0, 0);
+        sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN reply_to INTEGER DEFAULT 0;", 0, 0, 0);
+        sqlite3_exec(m_Db, "ALTER TABLE channels ADD COLUMN description TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE server_members ADD COLUMN permissions INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN is_2fa_enabled INTEGER DEFAULT 0;", 0, 0, 0);
@@ -539,12 +541,15 @@ namespace TalkMe {
         std::shared_lock<std::shared_mutex> lock(m_RwMutex);
         json j = json::array();
         sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(m_Db, "SELECT id, name, type FROM channels WHERE server_id = ?;", -1, &stmt, 0) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(m_Db, "SELECT id, name, type, IFNULL(description, '') FROM channels WHERE server_id = ?;", -1, &stmt, 0) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, serverId);
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* n = (const char*)sqlite3_column_text(stmt, 1);
                 const char* t = (const char*)sqlite3_column_text(stmt, 2);
-                j.push_back({ {"id", sqlite3_column_int(stmt, 0)}, {"name", n ? n : ""}, {"type", t ? t : ""} });
+                const char* d = (const char*)sqlite3_column_text(stmt, 3);
+                json entry = { {"id", sqlite3_column_int(stmt, 0)}, {"name", n ? n : ""}, {"type", t ? t : ""} };
+                if (d && d[0] != '\0') entry["desc"] = d;
+                j.push_back(entry);
             }
             sqlite3_finalize(stmt);
         }
@@ -555,7 +560,7 @@ namespace TalkMe {
         std::shared_lock<std::shared_mutex> lock(m_RwMutex);
         json j = json::array();
         sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(m_Db, "SELECT id, channel_id, sender, content, time, IFNULL(edited_at, ''), is_pinned, IFNULL(attachment_id, '') FROM messages WHERE channel_id = ? ORDER BY time ASC LIMIT 50;", -1, &stmt, 0) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(m_Db, "SELECT id, channel_id, sender, content, time, IFNULL(edited_at, ''), is_pinned, IFNULL(attachment_id, ''), IFNULL(reply_to, 0) FROM messages WHERE channel_id = ? ORDER BY time ASC LIMIT 50;", -1, &stmt, 0) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, channelId);
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* u = (const char*)sqlite3_column_text(stmt, 2);
@@ -563,7 +568,10 @@ namespace TalkMe {
                 const char* t = (const char*)sqlite3_column_text(stmt, 4);
                 const char* editVal = (const char*)sqlite3_column_text(stmt, 5);
                 const char* attVal = (const char*)sqlite3_column_text(stmt, 7);
-                j.push_back({ {"mid", sqlite3_column_int(stmt, 0)}, {"cid", sqlite3_column_int(stmt, 1)}, {"u", u ? u : ""}, {"msg", m ? m : ""}, {"time", t ? t : ""}, {"edit", editVal ? editVal : ""}, {"pin", sqlite3_column_int(stmt, 6) != 0}, {"attachment", attVal ? attVal : ""} });
+                int replyTo = sqlite3_column_int(stmt, 8);
+                json entry = { {"mid", sqlite3_column_int(stmt, 0)}, {"cid", sqlite3_column_int(stmt, 1)}, {"u", u ? u : ""}, {"msg", m ? m : ""}, {"time", t ? t : ""}, {"edit", editVal ? editVal : ""}, {"pin", sqlite3_column_int(stmt, 6) != 0}, {"attachment", attVal ? attVal : ""} };
+                if (replyTo > 0) entry["reply_to"] = replyTo;
+                j.push_back(entry);
             }
             sqlite3_finalize(stmt);
         }
@@ -572,34 +580,37 @@ namespace TalkMe {
         return j.dump();
     }
 
-    void Database::SaveMessage(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId) {
+    void Database::SaveMessage(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId, int replyTo) {
         int ch = cid;
         std::string s = sender;
         std::string m = msg;
         std::string aid = attachmentId;
-        Enqueue([this, ch, s, m, aid]() {
+        int rt = replyTo;
+        Enqueue([this, ch, s, m, aid, rt]() {
             std::unique_lock<std::shared_mutex> lock(m_RwMutex);
             sqlite3_stmt* stmt;
-            if (sqlite3_prepare_v2(m_Db, "INSERT INTO messages (channel_id, sender, content, attachment_id) VALUES (?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+            if (sqlite3_prepare_v2(m_Db, "INSERT INTO messages (channel_id, sender, content, attachment_id, reply_to) VALUES (?, ?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
                 sqlite3_bind_int(stmt, 1, ch);
                 sqlite3_bind_text(stmt, 2, s.c_str(), -1, SQLITE_TRANSIENT);
                 sqlite3_bind_text(stmt, 3, m.c_str(), -1, SQLITE_TRANSIENT);
                 sqlite3_bind_text(stmt, 4, aid.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_int(stmt, 5, rt);
                 sqlite3_step(stmt);
                 sqlite3_finalize(stmt);
             }
             });
     }
 
-    int Database::SaveMessageReturnId(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId) {
+    int Database::SaveMessageReturnId(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId, int replyTo) {
         std::unique_lock<std::shared_mutex> lock(m_RwMutex);
         sqlite3_stmt* stmt = nullptr;
         int mid = 0;
-        if (sqlite3_prepare_v2(m_Db, "INSERT INTO messages (channel_id, sender, content, attachment_id) VALUES (?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(m_Db, "INSERT INTO messages (channel_id, sender, content, attachment_id, reply_to) VALUES (?, ?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, cid);
             sqlite3_bind_text(stmt, 2, sender.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(stmt, 3, msg.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(stmt, 4, attachmentId.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 5, replyTo);
             if (sqlite3_step(stmt) == SQLITE_DONE)
                 mid = (int)sqlite3_last_insert_rowid(m_Db);
             sqlite3_finalize(stmt);
@@ -637,6 +648,58 @@ namespace TalkMe {
             sqlite3_finalize(stmt);
         }
         return users;
+    }
+
+    std::vector<std::string> Database::GetServerMembers(int serverId) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        std::vector<std::string> users;
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(m_Db, "SELECT username FROM server_members WHERE server_id = ?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* u = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                if (u) users.push_back(u);
+            }
+            sqlite3_finalize(stmt);
+        }
+        return users;
+    }
+
+    bool Database::DeleteChannel(int channelId, const std::string& username) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        int serverId = 0;
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "SELECT server_id FROM channels WHERE id = ?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, channelId);
+            if (sqlite3_step(stmt) == SQLITE_ROW) serverId = sqlite3_column_int(stmt, 0);
+            sqlite3_finalize(stmt);
+        }
+        if (serverId == 0) return false;
+
+        // Only server owner can delete channels
+        sqlite3_stmt* ownerStmt = nullptr;
+        bool isOwner = false;
+        if (sqlite3_prepare_v2(m_Db, "SELECT 1 FROM servers WHERE id = ? AND owner = ?;", -1, &ownerStmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(ownerStmt, 1, serverId);
+            sqlite3_bind_text(ownerStmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+            isOwner = (sqlite3_step(ownerStmt) == SQLITE_ROW);
+            sqlite3_finalize(ownerStmt);
+        }
+        if (!isOwner) return false;
+
+        sqlite3_stmt* delStmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "DELETE FROM channels WHERE id = ?;", -1, &delStmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(delStmt, 1, channelId);
+            sqlite3_step(delStmt);
+            sqlite3_finalize(delStmt);
+        }
+        sqlite3_stmt* msgStmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "DELETE FROM messages WHERE channel_id = ?;", -1, &msgStmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(msgStmt, 1, channelId);
+            sqlite3_step(msgStmt);
+            sqlite3_finalize(msgStmt);
+        }
+        return true;
     }
 
     uint32_t Database::GetUserPermissions(int serverId, const std::string& username) {

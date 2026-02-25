@@ -88,6 +88,14 @@ namespace TalkMe::UI::Views {
                             netClient.Send(PacketType::Select_Text_Channel, PacketHandler::SelectTextChannelPayload(ch.id));
                         }
                     }
+                    if (ImGui::BeginPopupContextItem(("del_ch_" + std::to_string(ch.id)).c_str())) {
+                        if (ImGui::Selectable("Delete Channel")) {
+                            nlohmann::json dj; dj["cid"] = ch.id; dj["sid"] = selectedServerId;
+                            netClient.Send(PacketType::Delete_Channel_Request, dj.dump());
+                            if (selectedChannelId == ch.id) selectedChannelId = -1;
+                        }
+                        ImGui::EndPopup();
+                    }
                     ImGui::Unindent(10);
                     if (sel) ImGui::PopStyleColor(2);
                 }
@@ -401,6 +409,8 @@ namespace TalkMe::UI::Views {
                 selectedServerId = server.id;
                 showSettings = false;
                 netClient.Send(PacketType::Get_Server_Content_Request, PacketHandler::GetServerContentPayload(server.id));
+                { nlohmann::json mj; mj["sid"] = server.id;
+                  netClient.Send(PacketType::Member_List_Request, mj.dump()); }
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 6));
