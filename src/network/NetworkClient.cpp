@@ -83,7 +83,10 @@ namespace TalkMe {
             if (onResult) onResult(true);
             return;
         }
-        if (m_Impl->m_Connecting.exchange(true)) return;
+        if (m_Impl->m_Connecting.exchange(true)) {
+            if (onResult) onResult(false);
+            return;
+        }
 
         if (m_ConnectThread.joinable()) m_ConnectThread.join();
 

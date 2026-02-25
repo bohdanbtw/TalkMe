@@ -285,6 +285,24 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            if (msg.type == PacketType::Message_Edit) {
+                const int mid = j.value("mid", 0);
+                const std::string newMsg = j.value("msg", "");
+                for (auto& m : m_Messages) {
+                    if (m.id == mid) { m.content = newMsg; break; }
+                }
+                continue;
+            }
+
+            if (msg.type == PacketType::Message_Delete) {
+                const int mid = j.value("mid", 0);
+                m_Messages.erase(
+                    std::remove_if(m_Messages.begin(), m_Messages.end(),
+                                   [mid](const ChatMessage& m) { return m.id == mid; }),
+                    m_Messages.end());
+                continue;
+            }
+
             if (msg.type == PacketType::Message_Text) {
                 m_Messages.push_back({ j.value("mid", 0), j.value("cid", 0),
                                        j.value("u", "??"), j.value("msg", ""),
