@@ -665,6 +665,43 @@ namespace TalkMe {
         return users;
     }
 
+    bool Database::DeleteChannel(int channelId, const std::string& username) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        int serverId = 0;
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "SELECT server_id FROM channels WHERE id = ?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, channelId);
+            if (sqlite3_step(stmt) == SQLITE_ROW) serverId = sqlite3_column_int(stmt, 0);
+            sqlite3_finalize(stmt);
+        }
+        if (serverId == 0) return false;
+
+        // Only server owner can delete channels
+        sqlite3_stmt* ownerStmt = nullptr;
+        bool isOwner = false;
+        if (sqlite3_prepare_v2(m_Db, "SELECT 1 FROM servers WHERE id = ? AND owner = ?;", -1, &ownerStmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(ownerStmt, 1, serverId);
+            sqlite3_bind_text(ownerStmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+            isOwner = (sqlite3_step(ownerStmt) == SQLITE_ROW);
+            sqlite3_finalize(ownerStmt);
+        }
+        if (!isOwner) return false;
+
+        sqlite3_stmt* delStmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "DELETE FROM channels WHERE id = ?;", -1, &delStmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(delStmt, 1, channelId);
+            sqlite3_step(delStmt);
+            sqlite3_finalize(delStmt);
+        }
+        sqlite3_stmt* msgStmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "DELETE FROM messages WHERE channel_id = ?;", -1, &msgStmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(msgStmt, 1, channelId);
+            sqlite3_step(msgStmt);
+            sqlite3_finalize(msgStmt);
+        }
+        return true;
+    }
+
     uint32_t Database::GetUserPermissions(int serverId, const std::string& username) {
         std::shared_lock<std::shared_mutex> lock(m_RwMutex);
         sqlite3_stmt* stmt = nullptr;
