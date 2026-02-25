@@ -366,6 +366,14 @@ FodyWeavers.xsd
 # TalkMe project-specific
 # =============================================================
 
+# Control panel (local / separate deployment)
+**/TalkMeControlPanel/
+
+# Temp / mess files
+COMMIT_MESSAGE.txt
+*_COMPLETION_BANNER.txt
+*COMPLETION*.txt
+
 # Vcpkg installed packages (restore with vcpkg install)
 vcpkg_installed/
 
@@ -399,6 +407,9 @@ imgui.ini
 
 # Cursor IDE
 .cursor/
+
+# Cursor rules and lessons (local workflow, do not commit)
+CURSOR/
 
 # OS junk
 Thumbs.db

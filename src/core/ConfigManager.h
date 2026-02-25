@@ -143,6 +143,51 @@ namespace TalkMe {
             }
         }
 
+        void SaveNoiseSuppressionMode(int mode) {
+            std::string dir = GetConfigDir();
+            CreateDirectoryA(dir.c_str(), NULL);
+            std::ofstream f(dir + "\\noise_suppression.cfg", std::ios::trunc);
+            if (f.is_open()) f << mode;
+        }
+
+        int LoadNoiseSuppressionMode(int defaultMode = 1) {
+            std::ifstream f(GetConfigDir() + "\\noise_suppression.cfg");
+            int mode = defaultMode;
+            if (f.is_open()) {
+                f >> mode;
+                if (mode < 0 || mode > 3) mode = defaultMode;
+            }
+            return mode;
+        }
+
+        /// Returns persistent device ID (16-char hex). Generates and saves to config if missing.
+        std::string GetDeviceId() {
+            std::string path = GetConfigDirectory() + "\\device_id.cfg";
+            std::ifstream f(path);
+            std::string id;
+            if (f.is_open()) {
+                id.assign((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                while (!id.empty() && (id.back() == '\r' || id.back() == '\n' || id.back() == ' ')) id.pop_back();
+            }
+            if (id.size() != 16) {
+                uint8_t buf[8];
+                HCRYPTPROV prov = 0;
+                if (CryptAcquireContextA(&prov, nullptr, nullptr, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT) && prov) {
+                    CryptGenRandom(prov, 8, buf);
+                    CryptReleaseContext(prov, 0);
+                } else {
+                    for (int i = 0; i < 8; ++i) buf[i] = (uint8_t)((GetTickCount() + i * 31) & 0xFF);
+                }
+                static const char hex[] = "0123456789abcdef";
+                id.resize(16);
+                for (int i = 0; i < 8; ++i) { id[i*2] = hex[buf[i]>>4]; id[i*2+1] = hex[buf[i]&0xF]; }
+                CreateDirectoryA(GetConfigDirectory().c_str(), NULL);
+                std::ofstream out(path, std::ios::trunc);
+                if (out.is_open()) out << id;
+            }
+            return id;
+        }
+
         /// Returns AppData\\Local\\TalkMe (same as session.dat folder). Use for imgui.ini etc.
         static std::string GetConfigDirectory() {
             char path[MAX_PATH];

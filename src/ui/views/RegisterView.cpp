@@ -1,7 +1,7 @@
 #include "RegisterView.h"
 #include "../Components.h"
 #include "../Styles.h"
-#include "../../network/PacketHandler.h"
+#include "../../shared/PacketHandler.h"
 
 namespace TalkMe::UI::Views {
 

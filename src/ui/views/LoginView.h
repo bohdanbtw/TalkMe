@@ -4,5 +4,5 @@
 #include "../../app/Application.h"
 
 namespace TalkMe::UI::Views {
-    void RenderLogin(NetworkClient& netClient, AppState& currentState, char* emailBuf, char* passwordBuf, char* statusMessage, const std::string& serverIP, int serverPort);
+    void RenderLogin(NetworkClient& netClient, AppState& currentState, char* emailBuf, char* passwordBuf, char* statusMessage, const std::string& serverIP, int serverPort, const std::string& deviceId, bool validatingSession = false);
 }

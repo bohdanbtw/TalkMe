@@ -4,7 +4,7 @@
 
 namespace TalkMe::UI {
 
-    enum class ThemeId : int { Midnight = 0, Daylight, Ocean, Sakura, Forest, Count };
+    enum class ThemeId : int { Midnight = 0, Daylight, Ocean, Sakura, Forest, Dracula, Nord, Monokai, Solarized, Count };
 
     struct ThemeColors {
         ImVec4 bgMain, bgSidebar, bgChannelList, bgChat, bgFooter, bgPopup, bgAvatar;
