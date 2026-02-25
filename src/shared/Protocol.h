@@ -103,6 +103,8 @@ namespace TalkMe {
 
         // --- DATA ---
         Message_Text,
+        Message_Edit,
+        Message_Delete,
         Message_History_Response,
         File_Transfer_Request,
         File_Transfer_Chunk,
