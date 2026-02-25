@@ -173,6 +173,22 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            if (msg.type == PacketType::Member_List_Response) {
+                m_ServerMembers.clear();
+                for (const auto& item : j) {
+                    ServerMember sm;
+                    sm.username = item.value("u", "");
+                    sm.online = item.value("online", false);
+                    if (!sm.username.empty()) m_ServerMembers.push_back(sm);
+                }
+                std::sort(m_ServerMembers.begin(), m_ServerMembers.end(),
+                    [](const ServerMember& a, const ServerMember& b) {
+                        if (a.online != b.online) return a.online > b.online;
+                        return a.username < b.username;
+                    });
+                continue;
+            }
+
             if (msg.type == PacketType::Presence_Update) {
                 const std::string user = j.value("u", "");
                 if (!user.empty()) {
@@ -274,6 +290,8 @@ void Application::ProcessNetworkMessages() {
                     m_SelectedServerId = m_ServerList[0].id;
                     m_NetClient.Send(PacketType::Get_Server_Content_Request,
                                      PacketHandler::GetServerContentPayload(m_SelectedServerId));
+                    { nlohmann::json mj; mj["sid"] = m_SelectedServerId;
+                      m_NetClient.Send(PacketType::Member_List_Request, mj.dump()); }
                 }
                 continue;
             }

@@ -646,6 +646,21 @@ namespace TalkMe {
         return users;
     }
 
+    std::vector<std::string> Database::GetServerMembers(int serverId) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        std::vector<std::string> users;
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(m_Db, "SELECT username FROM server_members WHERE server_id = ?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* u = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                if (u) users.push_back(u);
+            }
+            sqlite3_finalize(stmt);
+        }
+        return users;
+    }
+
     uint32_t Database::GetUserPermissions(int serverId, const std::string& username) {
         std::shared_lock<std::shared_mutex> lock(m_RwMutex);
         sqlite3_stmt* stmt = nullptr;

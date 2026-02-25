@@ -401,6 +401,8 @@ namespace TalkMe::UI::Views {
                 selectedServerId = server.id;
                 showSettings = false;
                 netClient.Send(PacketType::Get_Server_Content_Request, PacketHandler::GetServerContentPayload(server.id));
+                { nlohmann::json mj; mj["sid"] = server.id;
+                  netClient.Send(PacketType::Member_List_Request, mj.dump()); }
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 6));
