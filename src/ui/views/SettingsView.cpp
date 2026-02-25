@@ -3,6 +3,9 @@
 #include "../Components.h"
 #include "../../core/ConfigManager.h"
 #include "../../audio/AudioEngine.h"
+#include "Version.h"
+#include "qrcodegen.hpp"
+#include <cstring>
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -65,7 +68,7 @@ namespace TalkMe::UI::Views {
         return {};
     }
 
-    static void RenderAppearanceTab(float contentW) {
+    static void RenderAppearanceTab(SettingsContext& ctx, float contentW) {
         ImGui::Text("Theme");
         ImGui::TextDisabled("Choose a color theme");
         ImGui::Dummy(ImVec2(0, 16));
@@ -133,9 +136,51 @@ namespace TalkMe::UI::Views {
 
             ImGui::EndGroup();
         }
+
+        ImGui::Dummy(ImVec2(0, 24));
+        if (ImGui::Button("Reset to defaults")) {
+            if (ctx.onResetToDefaults) ctx.onResetToDefaults();
+        }
     }
 
     static void RenderVoiceTab(SettingsContext& ctx) {
+        ImGui::Text("Microphone Level");
+        ImGui::Dummy(ImVec2(0, 4));
+        const int kMicBarSegments = 50;
+        const float barHeight = 14.0f;
+        const float barWidth = 400.0f;
+        const float segWidth = barWidth / kMicBarSegments;
+        // 0.08 = 100% bar; raw mic speech typically 0.02–0.12 so bar fills appropriately
+        float normalized = ctx.micActivity / 0.08f;
+        if (normalized > 1.0f) normalized = 1.0f;
+        int fillCount = static_cast<int>(normalized * kMicBarSegments + 0.5f);
+        ImVec2 barMin = ImGui::GetCursorScreenPos();
+        ImVec2 barMax = ImVec2(barMin.x + barWidth, barMin.y + barHeight);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImU32 colEmpty = ImGui::ColorConvertFloat4ToU32(Styles::ButtonSubtle());
+        for (int i = 0; i < kMicBarSegments; ++i) {
+            float x0 = barMin.x + i * segWidth;
+            float x1 = x0 + segWidth - 2.0f;
+            if (x1 < x0 + 1.0f) x1 = x0 + 1.0f;
+            ImVec2 s0(x0, barMin.y), s1(x1, barMax.y);
+            bool filled = (i < fillCount);
+            ImU32 col;
+            if (filled) {
+                float t = (float)i / (float)kMicBarSegments;
+                if (t < 0.4f)
+                    col = IM_COL32(255, 180, 60, 255);
+                else if (t < 0.7f)
+                    col = IM_COL32(200, 220, 80, 255);
+                else
+                    col = ImGui::ColorConvertFloat4ToU32(Styles::SpeakingGreen());
+            } else {
+                col = colEmpty;
+            }
+            dl->AddRectFilled(s0, s1, col, 2.0f);
+        }
+        ImGui::Dummy(ImVec2(barWidth, barHeight));
+        ImGui::Dummy(ImVec2(0, 12));
+
         ImGui::Text("Input Device (Microphone)");
         ImGui::Dummy(ImVec2(0, 6));
 
@@ -204,6 +249,42 @@ namespace TalkMe::UI::Views {
         }
         ImGui::PopStyleColor();
         ImGui::PopItemWidth();
+
+        ImGui::Dummy(ImVec2(0, 20));
+        ImGui::Text("Noise Suppression Algorithm");
+        ImGui::Dummy(ImVec2(0, 6));
+
+        const char* nsModes[] = { "Disabled", "RNNoise (AI - Recommended)", "SpeexDSP (Statistical)", "WebRTC APM" };
+        const int nsModeCount = 4;
+        int nsIdx = ctx.noiseSuppressionMode;
+        if (nsIdx < 0 || nsIdx >= nsModeCount) nsIdx = 1;
+        ImGui::PushItemWidth(300);
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, Styles::ButtonSubtle());
+        if (ImGui::BeginCombo("##ns_mode", nsModes[nsIdx])) {
+            for (int i = 0; i < nsModeCount; i++) {
+                bool sel = (ctx.noiseSuppressionMode == i);
+                if (ImGui::Selectable(nsModes[i], sel)) {
+                    ctx.noiseSuppressionMode = i;
+                    if (ctx.onNoiseSuppressionModeChange) ctx.onNoiseSuppressionModeChange(i);
+                }
+                if (sel) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::PopStyleColor();
+        ImGui::PopItemWidth();
+
+        ImGui::Dummy(ImVec2(0, 20));
+        ImGui::Text("Microphone Testing");
+        ImGui::Dummy(ImVec2(0, 6));
+
+        if (ImGui::Checkbox("Test Microphone (Listen to yourself)", &ctx.testMicEnabled)) {
+            if (ctx.onToggleTestMic) ctx.onToggleTestMic(ctx.testMicEnabled);
+        }
+        if (ctx.testMicEnabled) {
+            ImGui::SameLine();
+            ImGui::TextColored(Styles::Accent(), "  Testing active...");
+        }
 
         ImGui::Dummy(ImVec2(0, 16));
         ImGui::TextDisabled("Device changes take effect immediately");
@@ -308,6 +389,11 @@ namespace TalkMe::UI::Views {
         ImGui::PopItemWidth();
 
         ImGui::Dummy(ImVec2(0, 20));
+        if (ImGui::Button("Reset overlay to defaults")) {
+            if (ctx.onResetOverlayToDefaults) ctx.onResetOverlayToDefaults();
+        }
+
+        ImGui::Dummy(ImVec2(0, 20));
         ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
         ImGui::TextWrapped("The overlay uses a standard Windows topmost window. "
             "It does not inject into game processes or hook any APIs, "
@@ -318,16 +404,97 @@ namespace TalkMe::UI::Views {
             ctx.onOverlayChanged();
     }
 
-    static void RenderAccountTab(std::function<void()>& onLogout) {
+    static void RenderAccountTab(SettingsContext& ctx) {
+        ImGui::Text("Security");
+        ImGui::TextDisabled("Two-factor authentication (TOTP)");
+        ImGui::Dummy(ImVec2(0, 8));
+        if (ctx.is2FAEnabled) {
+            ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.2f, 1.0f), "Status: Successfully Connected");
+            ImGui::Dummy(ImVec2(0, 8));
+            if (!ctx.isDisabling2FA) {
+                if (ImGui::Button("Disable Two-Factor Authentication", ImVec2(280, 32))) {
+                    if (ctx.onDisable2FAClick) ctx.onDisable2FAClick();
+                }
+            } else {
+                ImGui::PushItemWidth(140);
+                ImGui::InputText("Confirm 6-Digit Code", ctx.disable2FACodeBuf, ctx.disable2FACodeBufSize, ImGuiInputTextFlags_CharsDecimal);
+                ImGui::PopItemWidth();
+                ImGui::Dummy(ImVec2(0, 6));
+                if (ImGui::Button("Confirm Disable", ImVec2(140, 32))) {
+                    if (ctx.onConfirmDisable2FAClick) ctx.onConfirmDisable2FAClick();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(80, 32))) {
+                    if (ctx.onCancelDisable2FAClick) ctx.onCancelDisable2FAClick();
+                }
+            }
+        } else if (!ctx.isSettingUp2FA) {
+            if (ImGui::Button("Enable Two-Factor Authentication", ImVec2(280, 32))) {
+                if (ctx.onEnable2FAClick) ctx.onEnable2FAClick();
+            }
+        } else {
+            ImGui::TextWrapped("Scan the QR code below with Google Authenticator, or manually enter this secret:");
+            ImGui::TextDisabled("copiable");
+            static char secretCopyBuf[128];
+            if (ctx.twoFASecretStr.size() < sizeof(secretCopyBuf)) {
+                std::memcpy(secretCopyBuf, ctx.twoFASecretStr.c_str(), ctx.twoFASecretStr.size() + 1);
+            } else {
+                std::memcpy(secretCopyBuf, ctx.twoFASecretStr.c_str(), sizeof(secretCopyBuf) - 1);
+                secretCopyBuf[sizeof(secretCopyBuf) - 1] = '\0';
+            }
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.5f, 0.5f, 0.6f, 0.8f));
+            ImGui::InputText("##2FA_secret", secretCopyBuf, sizeof(secretCopyBuf), ImGuiInputTextFlags_ReadOnly);
+            ImGui::SameLine();
+            if (ImGui::Button("Copy")) ImGui::SetClipboardText(ctx.twoFASecretStr.c_str());
+            ImGui::PopStyleColor();
+            ImGui::PopStyleVar();
+            ImGui::Dummy(ImVec2(0, 4));
+            if (!ctx.twoFAUriStr.empty()) {
+                try {
+                    qrcodegen::QrCode qr = qrcodegen::QrCode::encodeText(ctx.twoFAUriStr.c_str(), qrcodegen::QrCode::Ecc::LOW);
+                    ImDrawList* drawList = ImGui::GetWindowDrawList();
+                    ImVec2 p = ImGui::GetCursorScreenPos();
+                    const float sz = 6.0f;
+                    const int border = 2;
+                    const int total = qr.getSize() + border * 2;
+                    const ImU32 black = IM_COL32(0, 0, 0, 255);
+                    const ImU32 white = IM_COL32(255, 255, 255, 255);
+                    for (int j = 0; j < total; j++)
+                        for (int i = 0; i < total; i++) {
+                            int mx = i - border, my = j - border;
+                            bool dark = (mx >= 0 && mx < qr.getSize() && my >= 0 && my < qr.getSize() && qr.getModule(mx, my));
+                            drawList->AddRectFilled(
+                                ImVec2(p.x + (float)i * sz, p.y + (float)j * sz),
+                                ImVec2(p.x + (float)(i + 1) * sz, p.y + (float)(j + 1) * sz),
+                                dark ? black : white);
+                        }
+                    ImGui::Dummy(ImVec2((float)total * sz, (float)total * sz));
+                } catch (...) {}
+            }
+            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::PushItemWidth(120);
+            ImGui::InputText("6-Digit Code", ctx.twoFASetupCodeBuf, ctx.twoFASetupCodeBufSize, ImGuiInputTextFlags_CharsDecimal);
+            ImGui::PopItemWidth();
+            if (ctx.twoFASetupStatusMessage[0]) ImGui::TextDisabled("%s", ctx.twoFASetupStatusMessage);
+            ImGui::Dummy(ImVec2(0, 6));
+            if (ImGui::Button("Verify & Enable", ImVec2(160, 32))) {
+                if (ctx.onVerify2FAClick) ctx.onVerify2FAClick();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(80, 32))) {
+                if (ctx.onCancel2FAClick) ctx.onCancel2FAClick();
+            }
+        }
+        ImGui::Dummy(ImVec2(0, 24));
         ImGui::Text("Sign Out");
         ImGui::TextDisabled("Sign out of your account on this device");
-
         ImGui::Dummy(ImVec2(0, 12));
         ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonDanger());
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::ButtonDangerHover());
         ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextOnAccent());
         if (ImGui::Button("Log Out", ImVec2(200, 38))) {
-            if (onLogout) onLogout();
+            if (ctx.onLogout) ctx.onLogout();
         }
         ImGui::PopStyleColor(3);
     }
@@ -381,7 +548,7 @@ namespace TalkMe::UI::Views {
 
         ImGui::Dummy(ImVec2(0, 20));
         ImGui::Indent(16);
-        ImGui::TextDisabled("TalkMe v1.0");
+        ImGui::TextDisabled("TalkMe v" TALKME_VERSION_STRING);
         ImGui::Unindent(16);
 
         ImGui::EndChild();
@@ -412,11 +579,11 @@ namespace TalkMe::UI::Views {
         ImGui::BeginGroup();
 
         switch (ctx.settingsTab) {
-            case 0: RenderAppearanceTab(contentW); break;
+            case 0: RenderAppearanceTab(ctx, contentW); break;
             case 1: RenderVoiceTab(ctx); break;
             case 2: RenderKeybindsTab(ctx.keyMuteMic, ctx.keyDeafen); break;
             case 3: RenderOverlayTab(ctx); break;
-            case 4: RenderAccountTab(ctx.onLogout); break;
+            case 4: RenderAccountTab(ctx); break;
         }
 
         ImGui::EndGroup();

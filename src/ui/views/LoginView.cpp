@@ -1,13 +1,13 @@
 #include "LoginView.h"
 #include "../Components.h"
 #include "../Styles.h"
-#include "../../network/PacketHandler.h"
+#include "../../shared/PacketHandler.h"
 
 namespace TalkMe::UI::Views {
 
     void RenderLogin(NetworkClient& netClient, AppState& currentState,
         char* emailBuf, char* passwordBuf, char* statusMessage,
-        const std::string& serverIP, int serverPort)
+        const std::string& serverIP, int serverPort, const std::string& deviceId, bool validatingSession)
     {
         float winW = ImGui::GetWindowWidth();
         float winH = ImGui::GetWindowHeight();
@@ -57,7 +57,7 @@ namespace TalkMe::UI::Views {
         ImGui::PopStyleColor();
         ImGui::SetCursorPosX(cx + pad);
         ImGui::PushItemWidth(fieldW);
-        ImGui::InputText("##email", emailBuf, 128);
+        ImGui::InputText("##email", emailBuf, 128, validatingSession ? ImGuiInputTextFlags_ReadOnly : 0);
         ImGui::PopItemWidth();
 
         ImGui::Dummy(ImVec2(0, 14));
@@ -69,24 +69,25 @@ namespace TalkMe::UI::Views {
         ImGui::SetCursorPosX(cx + pad);
         ImGui::PushItemWidth(fieldW);
         bool enterPressed = ImGui::InputText("##password", passwordBuf, 128,
-            ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGuiInputTextFlags_Password | ImGuiInputTextFlags_EnterReturnsTrue | (validatingSession ? ImGuiInputTextFlags_ReadOnly : 0));
         ImGui::PopItemWidth();
 
         ImGui::Dummy(ImVec2(0, 24));
 
         ImGui::SetCursorPosX(cx + pad);
-        if (UI::AccentButton("Sign In", ImVec2(fieldW, 42)) || enterPressed) {
+        bool signInClicked = (UI::AccentButton(validatingSession ? "Signing in..." : "Sign In", ImVec2(fieldW, 42)) || enterPressed) && !validatingSession;
+        if (signInClicked) {
             if (strlen(emailBuf) > 0 && strlen(passwordBuf) > 0) {
                 std::string emailStr(emailBuf);
                 std::string passStr(passwordBuf);
                 if (!netClient.IsConnected()) {
                     strcpy_s(statusMessage, 256, "Connecting...");
                     netClient.ConnectAsync(serverIP, serverPort,
-                        [&netClient, statusMessage, emailStr, passStr](bool success) {
+                        [&netClient, statusMessage, emailStr, passStr, deviceId](bool success) {
                             if (success) {
                                 strcpy_s(statusMessage, 256, "Authenticating...");
                                 netClient.Send(PacketType::Login_Request,
-                                    PacketHandler::CreateLoginPayload(emailStr, passStr));
+                                    PacketHandler::CreateLoginPayload(emailStr, passStr, deviceId));
                             } else {
                                 strcpy_s(statusMessage, 256, "Server offline.");
                             }
@@ -94,7 +95,7 @@ namespace TalkMe::UI::Views {
                 } else {
                     strcpy_s(statusMessage, 256, "Authenticating...");
                     netClient.Send(PacketType::Login_Request,
-                        PacketHandler::CreateLoginPayload(emailStr, passStr));
+                        PacketHandler::CreateLoginPayload(emailStr, passStr, deviceId));
                 }
             } else {
                 strcpy_s(statusMessage, 256, "Please fill all fields.");
@@ -108,7 +109,7 @@ namespace TalkMe::UI::Views {
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0,0,0,0));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0,0,0,0));
         ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
-        if (ImGui::Button("Need an account? Register", ImVec2(fieldW, 28))) {
+        if (ImGui::Button("Need an account? Register", ImVec2(fieldW, 28)) && !validatingSession) {
             currentState = AppState::Register;
             memset(statusMessage, 0, 256);
         }
