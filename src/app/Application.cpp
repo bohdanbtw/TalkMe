@@ -634,8 +634,7 @@ namespace TalkMe {
             ImGui::End(); ImGui::PopStyleVar(3);
             return;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_F3))
-            m_ShowFrameTimeOverlay = !m_ShowFrameTimeOverlay;
+        // FPS overlay removed (was F3 toggle) — use external profiling tools instead.
 
         if (m_CurrentState == AppState::Login) RenderLogin();
         else if (m_CurrentState == AppState::Login2FA) RenderLogin2FA();
@@ -643,19 +642,7 @@ namespace TalkMe {
         else if (m_CurrentState == AppState::MainApp) RenderMainApp();
         ImGui::End(); ImGui::PopStyleVar(3);
 
-        // Optional frame-time overlay (F3) for profiling resize/network spikes (§9 Profiling).
-        if (m_ShowFrameTimeOverlay) {
-            const ImGuiViewport* vp = ImGui::GetMainViewport();
-            ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - 100.f, vp->WorkPos.y + 8.f), ImGuiCond_Always);
-            ImGuiWindowFlags overlayFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize
-                | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing;
-            if (ImGui::Begin("##FrameTime", nullptr, overlayFlags)) {
-                ImGuiIO& io = ImGui::GetIO();
-                ImGui::Text("%.2f ms", io.DeltaTime * 1000.f);
-                ImGui::Text("%.0f FPS", io.Framerate);
-            }
-            ImGui::End();
-        }
+        // FPS overlay removed — was debug-only profiling aid.
     }
 
     void Application::RenderLogin() { UI::Views::RenderLogin(m_NetClient, m_CurrentState, m_EmailBuf, m_PasswordBuf, m_StatusMessage, m_ServerIP, m_ServerPort, m_DeviceId, m_ValidatingSession); }

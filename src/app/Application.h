@@ -193,6 +193,6 @@ namespace TalkMe {
         float m_OverlayOpacity = 0.85f;
         void UpdateOverlay();
 
-        bool m_ShowFrameTimeOverlay = false;  // Toggle with F3; shows frame time (ms) and FPS for profiling.
+        // FPS overlay member removed — use external profiling tools instead.
     };
 }
