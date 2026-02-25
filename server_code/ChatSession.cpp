@@ -254,7 +254,6 @@ namespace TalkMe {
             auto j = json::parse(payload);
 
             if (m_Header.type == PacketType::Register_Request) {
-                if (!j.contains("u") || !j.contains("p")) { SendLocal(PacketType::Register_Failed, ""); return; }
                 std::string new_user = Database::Get().RegisterUser(j.value("e", ""), j["u"], j["p"]);
                 if (!new_user.empty()) {
                     m_Username = new_user;
@@ -402,39 +401,33 @@ namespace TalkMe {
             }
 
             if (m_Header.type == PacketType::Create_Server_Request) {
-                if (!j.contains("name") || !j["name"].is_string()) return;
                 Database::Get().CreateServer(j["name"], m_Username);
                 SendLocal(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
                 return;
             }
 
             if (m_Header.type == PacketType::Join_Server_Request) {
-                if (!j.contains("code") || !j["code"].is_string()) return;
                 Database::Get().JoinServer(m_Username, j["code"]);
                 SendLocal(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
                 return;
             }
             if (m_Header.type == PacketType::Get_Server_Content_Request) {
-                if (!j.contains("sid") || !j["sid"].is_number_integer()) return;
                 SendLocal(PacketType::Server_Content_Response, Database::Get().GetServerContentJSON(j["sid"]));
                 return;
             }
 
             if (m_Header.type == PacketType::Create_Channel_Request) {
-                if (!j.contains("sid") || !j.contains("name") || !j.contains("type")) return;
                 Database::Get().CreateChannel(j["sid"], j["name"], j["type"]);
                 SendLocal(PacketType::Server_Content_Response, Database::Get().GetServerContentJSON(j["sid"]));
                 return;
             }
 
             if (m_Header.type == PacketType::Select_Text_Channel) {
-                if (!j.contains("cid") || !j["cid"].is_number_integer()) return;
                 SendLocal(PacketType::Message_History_Response, Database::Get().GetMessageHistoryJSON(j["cid"]));
                 return;
             }
 
             if (m_Header.type == PacketType::Join_Voice_Channel) {
-                if (!j.contains("cid") || !j["cid"].is_number_integer()) return;
                 int oldCid = m_CurrentVoiceCid;
                 m_CurrentVoiceCid.store(j["cid"], std::memory_order_relaxed);
                 TouchVoiceActivity();
@@ -443,7 +436,6 @@ namespace TalkMe {
             }
 
             if (m_Header.type == PacketType::Delete_Message_Request) {
-                if (!j.contains("mid") || !j.contains("cid")) return;
                 if (Database::Get().DeleteMessage(j["mid"], j["cid"], m_Username)) {
                     int cid = j["cid"];
                     json res;
@@ -455,7 +447,6 @@ namespace TalkMe {
             }
 
             if (m_Header.type == PacketType::Edit_Message_Request) {
-                if (!j.contains("mid") || !j.contains("msg") || !j.contains("cid")) return;
                 if (Database::Get().EditMessage(j["mid"], m_Username, j["msg"])) {
                     int cid = j["cid"];
                     m_Server.BroadcastToAll(PacketType::Message_History_Response, Database::Get().GetMessageHistoryJSON(cid));
@@ -464,7 +455,6 @@ namespace TalkMe {
             }
 
             if (m_Header.type == PacketType::Pin_Message_Request) {
-                if (!j.contains("mid") || !j.contains("cid") || !j.contains("pin")) return;
                 if (Database::Get().PinMessage(j["mid"], j["cid"], m_Username, j["pin"])) {
                     int cid = j["cid"];
                     m_Server.BroadcastToAll(PacketType::Message_History_Response, Database::Get().GetMessageHistoryJSON(cid));
@@ -508,7 +498,6 @@ namespace TalkMe {
             }
 
             if (m_Header.type == PacketType::Message_Text) {
-                if (!j.contains("cid") || !j.contains("msg")) return;
                 int cid = j["cid"];
                 int mid = Database::Get().SaveMessageReturnId(cid, m_Username, j["msg"], j.value("attachment_id", ""));
                 json out;
