@@ -939,7 +939,15 @@ namespace TalkMe {
                             m_LastTypingSentTime = now;
                         }
                     },
-                    &m_ReplyingToMessageId);
+                    &m_ReplyingToMessageId,
+                    [this]() -> const std::vector<std::pair<std::string, bool>>* {
+                        static std::vector<std::pair<std::string, bool>> members;
+                        members.clear();
+                        for (const auto& sm : m_ServerMembers)
+                            members.emplace_back(sm.username, sm.online);
+                        return members.empty() ? nullptr : &members;
+                    }(),
+                    &m_ShowMemberList);
             }
         }
     }

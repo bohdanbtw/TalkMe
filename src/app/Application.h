@@ -122,6 +122,10 @@ namespace TalkMe {
 
         std::set<std::string> m_OnlineUsers;  // set of currently online usernames
         int m_ReplyingToMessageId = 0;  // message ID being replied to (0 = not replying)
+
+        struct ServerMember { std::string username; bool online = false; };
+        std::vector<ServerMember> m_ServerMembers;  // members of currently selected server
+        bool m_ShowMemberList = false;
         std::mutex m_RecentSpeakersMutex;
         std::vector<std::string> m_RecentSpeakers;  // drained each frame to update m_SpeakingTimers
         std::mutex m_VoiceDedupeMutex;

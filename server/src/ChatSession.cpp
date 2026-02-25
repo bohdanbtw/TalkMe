@@ -525,6 +525,23 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Member_List_Request) {
+                if (!j.contains("sid") || !j["sid"].is_number_integer()) return;
+                int sid = j["sid"];
+                auto members = Database::Get().GetServerMembers(sid);
+                auto onlineUsers = m_Server.GetOnlineUsers();
+                std::set<std::string> onlineSet(onlineUsers.begin(), onlineUsers.end());
+                json res = json::array();
+                for (const auto& m : members) {
+                    json entry;
+                    entry["u"] = m;
+                    entry["online"] = onlineSet.count(m) > 0;
+                    res.push_back(entry);
+                }
+                SendLocal(PacketType::Member_List_Response, res.dump());
+                return;
+            }
+
             if (m_Header.type == PacketType::Voice_Mute_State) {
                 int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
                 if (cid == -1) return;

@@ -22,7 +22,9 @@ namespace TalkMe::UI::Views {
         const std::map<std::string, UserVoiceState>* userMuteStates,
         const std::map<std::string, float>* typingUsers,
         std::function<void()> onUserTyping,
-        int* replyingToMessageId)
+        int* replyingToMessageId,
+        const std::vector<std::pair<std::string, bool>>* serverMembers,
+        bool* showMemberList)
     {
         float winH = ImGui::GetWindowHeight();
         float winW = ImGui::GetWindowWidth();
@@ -268,6 +270,13 @@ namespace TalkMe::UI::Views {
                 ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
                 ImGui::Text("Invite: %s", currentServer.inviteCode.c_str());
                 ImGui::PopStyleColor();
+
+                if (showMemberList) {
+                    ImGui::SameLine(areaW - 120);
+                    if (ImGui::SmallButton(*showMemberList ? "Members <<" : "Members >>"))
+                        *showMemberList = !*showMemberList;
+                }
+
                 ImGui::Unindent(36);
 
                 ImGui::Dummy(ImVec2(0, 6));
@@ -430,6 +439,43 @@ namespace TalkMe::UI::Views {
             float cx = (areaW - sz.x) * 0.5f;
             if (cx > 0) { ImGui::Dummy(ImVec2(cx, 0)); ImGui::SameLine(); }
             ImGui::TextDisabled("%s", t);
+        }
+
+        // Member list panel (overlaid on right side of chat area)
+        if (showMemberList && *showMemberList && serverMembers && !serverMembers->empty()) {
+            float panelW = 180.0f;
+            float panelX = areaW - panelW;
+            ImGui::SetCursorPos(ImVec2(panelX, 0));
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, Styles::BgSidebar());
+            ImGui::BeginChild("MemberList", ImVec2(panelW, winH), true);
+
+            ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+            int onlineCount = 0;
+            for (const auto& [_, on] : *serverMembers) if (on) onlineCount++;
+            ImGui::Text("MEMBERS - %d/%d", onlineCount, (int)serverMembers->size());
+            ImGui::PopStyleColor();
+            ImGui::Separator();
+            ImGui::Dummy(ImVec2(0, 4));
+
+            for (const auto& [name, online] : *serverMembers) {
+                std::string disp = name;
+                size_t hp = name.find('#');
+                if (hp != std::string::npos) disp = name.substr(0, hp);
+
+                ImU32 dotCol = online ? IM_COL32(80, 220, 100, 255) : IM_COL32(120, 120, 125, 255);
+                ImVec2 pos = ImGui::GetCursorScreenPos();
+                ImGui::GetWindowDrawList()->AddCircleFilled(
+                    ImVec2(pos.x + 6, pos.y + 8), 4.0f, dotCol);
+                ImGui::Dummy(ImVec2(16, 0));
+                ImGui::SameLine();
+
+                if (!online) ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                ImGui::Text("%s", disp.c_str());
+                if (!online) ImGui::PopStyleColor();
+            }
+
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
         }
 
         ImGui::EndChild();

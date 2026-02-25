@@ -27,6 +27,8 @@ namespace TalkMe::UI::Views {
         const std::map<std::string, UserVoiceState>* userMuteStates = nullptr,
         const std::map<std::string, float>* typingUsers = nullptr,
         std::function<void()> onUserTyping = nullptr,
-        int* replyingToMessageId = nullptr
+        int* replyingToMessageId = nullptr,
+        const std::vector<std::pair<std::string, bool>>* serverMembers = nullptr,
+        bool* showMemberList = nullptr
     );
 }
