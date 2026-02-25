@@ -1,7 +1,7 @@
 #include "SidebarView.h"
 #include "../Components.h"
 #include "../Styles.h"
-#include "../../network/PacketHandler.h"
+#include "../../shared/PacketHandler.h"
 #include "../../core/ConfigManager.h"
 #include <string>
 

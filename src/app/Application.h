@@ -10,16 +10,19 @@
 #include <functional>
 #include <queue>
 #include <thread>
-#include <d3d11.h>
+#include "AppSounds.h"
+#include "AppWindow.h"
+#include "AppGraphics.h"
+#include "VoiceSendPacer.h"
 #include "../core/Logger.h"
-#include "../network/NetworkClient.h" 
+#include "../network/NetworkClient.h"
 #include "../network/VoiceTransport.h"
 #include "../core/ConfigManager.h"
 #include "../audio/AudioEngine.h"
 #include "../overlay/GameOverlay.h"
 
 namespace TalkMe {
-    enum class AppState { Login, Register, MainApp };
+    enum class AppState { Login, Login2FA, Register, MainApp };
     enum class ChannelType { Text, Voice };
 
     struct Channel {
@@ -43,41 +46,22 @@ namespace TalkMe {
         std::string timestamp;
     };
 
-    // Queues outbound voice payloads and drains at 10ms intervals (used when UDP voice is enabled).
-    class VoiceSendPacer {
-    public:
-        using SendFn = std::function<void(const std::vector<uint8_t>&)>;
-        void Start(SendFn fn);
-        void Stop();
-        void Enqueue(std::vector<uint8_t> payload);
-    private:
-        SendFn m_SendFn;
-        std::queue<std::vector<uint8_t>> m_Queue;
-        std::mutex m_Mutex;
-        std::thread m_Thread;
-        std::atomic<bool> m_Running{ false };
-    };
-
     class Application {
     public:
         Application(const std::string& title, int width, int height);
         ~Application();
         bool Initialize();
         void Run();
-        ID3D11Device* GetDevice() { return m_pd3dDevice; }
-        IDXGISwapChain* GetSwapChain() { return m_pSwapChain; }
-        void CreateRenderTarget();
-        void CleanupRenderTarget();
-        void OnWindowResize(UINT width, UINT height);
+        ID3D11Device* GetDevice() { return m_Graphics.GetDevice(); }
+        IDXGISwapChain* GetSwapChain() { return m_Graphics.GetSwapChain(); }
+        void OnWindowResize(UINT width, UINT height) { m_Graphics.OnResize(width, height); }
 
     private:
-        bool InitWindow();
-        bool InitDirectX();
-        bool InitImGui();
         void Cleanup();
         void ProcessNetworkMessages();
         void RenderUI();
         void RenderLogin();
+        void RenderLogin2FA();   // 2FA challenge screen shown after Login_Requires_2FA
         void RenderRegister();
         void RenderMainApp();
 
@@ -86,15 +70,15 @@ namespace TalkMe {
         int m_ServerPort = 5555;
         std::string m_Title;
         int m_Width, m_Height;
-        HWND m_Hwnd = nullptr;
-        ID3D11Device* m_pd3dDevice = nullptr;
-        ID3D11DeviceContext* m_pd3dDeviceContext = nullptr;
-        IDXGISwapChain* m_pSwapChain = nullptr;
-        UINT m_LastResizeWidth = 0;
-        UINT m_LastResizeHeight = 0;
-        ID3D11RenderTargetView* m_mainRenderTargetView = nullptr;
+        AppWindow m_Window;
+        AppGraphics m_Graphics;
+        void* m_NetworkWakeEvent = nullptr;  // HANDLE for MsgWaitForMultipleObjects / SetEvent
+        void* m_QuitEvent = nullptr;         // HANDLE signaled in WndProc on WM_DESTROY so loop exits without relying on WM_QUIT
+        bool m_CleanedUp = false;
 
         AppState m_CurrentState = AppState::Login;
+        bool m_ValidatingSession = false;  // true while auto-login from session.dat is in flight
+        int m_SplashFrames = 0;  // 0..2: draw splash (window hidden), then show window
         NetworkClient m_NetClient;
         AudioEngine m_AudioEngine;
         TalkMe::VoiceTransport m_VoiceTransport;
@@ -110,7 +94,8 @@ namespace TalkMe {
         int m_ActiveVoiceChannelId = -1;
         int m_PrevActiveVoiceChannelId = -2;
         /// Thread-safe: voice callback only pushes when this != -1 (so we never play voice after leaving).
-        std::atomic<int> m_ActiveVoiceChannelIdForVoice{-1};
+        std::atomic<int> m_ActiveVoiceChannelIdForVoice{ -1 };
+        std::atomic<bool> m_ShuttingDown{ false };  // set in Cleanup() so background threads exit
 
         struct VoiceConfig {
             int keepaliveIntervalMs = 8000;
@@ -145,10 +130,10 @@ namespace TalkMe {
         std::vector<uint8_t> m_LastVoiceRedundantPayload;
         std::vector<uint8_t> m_LastVoiceRedundantOpus;
         uint32_t m_LastVoiceRedundantTimestamp = 0;
-        uint32_t m_VoiceTraceSendCount = 0;  // for voice trace rate limit
-        uint32_t m_VoiceTraceRecvCount = 0;
 
-        char m_EmailBuf[128] = ""; // NEW
+        std::string m_DeviceId;
+        char m_EmailBuf[128] = "";
+        char m_2FACodeBuf[8] = "";
         char m_UsernameBuf[128] = "";
         char m_PasswordBuf[128] = "";
         char m_PasswordRepeatBuf[128] = "";
@@ -157,6 +142,14 @@ namespace TalkMe {
         char m_NewServerNameBuf[64] = "";
         char m_NewChannelNameBuf[64] = "";
         bool m_ShowSettings = false;
+        bool m_Is2FAEnabled = false;
+        bool m_IsSettingUp2FA = false;
+        bool m_IsDisabling2FA = false;
+        char m_Disable2FACodeBuf[8] = "";
+        std::string m_2FASecretStr;
+        std::string m_2FAUriStr;
+        char m_2FASetupCodeBuf[8] = "";
+        char m_2FASetupStatusMessage[256] = "";
 
         bool m_SelfMuted = false;
         bool m_SelfDeafened = false;
@@ -165,12 +158,12 @@ namespace TalkMe {
         int m_SettingsTab = 0;
         int m_SelectedInputDevice = -1;
         int m_SelectedOutputDevice = -1;
+        int m_NoiseMode = 1;  // Default RNNoise
+        bool m_TestMicEnabled = false;
 
-        std::vector<uint8_t> m_JoinSound;
-        std::vector<uint8_t> m_LeaveSound;
-        void GenerateSounds();
-        void PlayJoinSound();
-        void PlayLeaveSound();
+        AppSounds m_Sounds;
+        void PlayJoinSound() { m_Sounds.PlayJoin(); }
+        void PlayLeaveSound() { m_Sounds.PlayLeave(); }
 
         static constexpr size_t kEchoLiveHistorySize = 60;
         static constexpr int kEchoLivePacketsPerSecond = 20;
@@ -199,5 +192,7 @@ namespace TalkMe {
         int m_OverlayCorner = 1;
         float m_OverlayOpacity = 0.85f;
         void UpdateOverlay();
+
+        bool m_ShowFrameTimeOverlay = false;  // Toggle with F3; shows frame time (ms) and FPS for profiling.
     };
 }
