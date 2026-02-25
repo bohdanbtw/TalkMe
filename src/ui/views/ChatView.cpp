@@ -343,9 +343,34 @@ namespace TalkMe::UI::Views {
                     ImGui::EndGroup();
 
                     if (msg.id > 0) {
+                        static int s_editingMsgId = 0;
+                        static char s_editBuf[1024] = "";
+
+                        if (s_editingMsgId == msg.id) {
+                            ImGui::PushItemWidth(areaW - 180);
+                            bool submitted = ImGui::InputText(("##edit_" + std::to_string(msg.id)).c_str(),
+                                s_editBuf, sizeof(s_editBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+                            ImGui::PopItemWidth();
+                            ImGui::SameLine();
+                            if (ImGui::SmallButton("Save") || submitted) {
+                                if (strlen(s_editBuf) > 0) {
+                                    nlohmann::json ej;
+                                    ej["mid"] = msg.id; ej["cid"] = selectedChannelId; ej["msg"] = std::string(s_editBuf);
+                                    netClient.Send(PacketType::Edit_Message_Request, ej.dump());
+                                }
+                                s_editingMsgId = 0;
+                            }
+                            ImGui::SameLine();
+                            if (ImGui::SmallButton("Cancel")) s_editingMsgId = 0;
+                        }
+
                         if (ImGui::BeginPopupContextItem(("msg_" + std::to_string(msg.id)).c_str())) {
                             if (replyingToMessageId && ImGui::Selectable("Reply"))
                                 *replyingToMessageId = msg.id;
+                            if (isMe && ImGui::Selectable("Edit Message")) {
+                                s_editingMsgId = msg.id;
+                                strncpy_s(s_editBuf, msg.content.c_str(), sizeof(s_editBuf) - 1);
+                            }
                             if (isMe && ImGui::Selectable("Delete Message"))
                                 netClient.Send(PacketType::Delete_Message_Request,
                                     PacketHandler::CreateDeleteMessagePayload(msg.id, selectedChannelId, currentUser.username));
