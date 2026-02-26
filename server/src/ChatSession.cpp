@@ -534,6 +534,43 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Screen_Share_Start) {
+                int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
+                if (cid == -1) return;
+                json out;
+                out["u"] = m_Username;
+                out["cid"] = cid;
+                out["width"] = j.value("width", 1920);
+                out["height"] = j.value("height", 1080);
+                out["fps"] = j.value("fps", 15);
+                out["action"] = "start";
+                m_Server.BroadcastToChannelMembers(cid, PacketType::Screen_Share_State, out.dump());
+                return;
+            }
+
+            if (m_Header.type == PacketType::Screen_Share_Stop) {
+                int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
+                if (cid == -1) return;
+                json out;
+                out["u"] = m_Username;
+                out["cid"] = cid;
+                out["action"] = "stop";
+                m_Server.BroadcastToChannelMembers(cid, PacketType::Screen_Share_State, out.dump());
+                return;
+            }
+
+            if (m_Header.type == PacketType::Screen_Share_Frame) {
+                int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
+                if (cid == -1) return;
+                PacketHeader h{ PacketType::Screen_Share_Frame, static_cast<uint32_t>(m_Body.size()) };
+                auto buf = std::make_shared<std::vector<uint8_t>>(sizeof(h) + m_Body.size());
+                h.ToNetwork();
+                std::memcpy(buf->data(), &h, sizeof(h));
+                if (!m_Body.empty()) std::memcpy(buf->data() + sizeof(h), m_Body.data(), m_Body.size());
+                m_Server.BroadcastToVoiceChannel(cid, buf);
+                return;
+            }
+
             if (m_Header.type == PacketType::Set_Member_Role) {
                 if (!j.contains("sid") || !j.contains("u") || !j.contains("perms")) return;
                 int sid = j["sid"];
