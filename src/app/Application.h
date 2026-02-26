@@ -21,6 +21,7 @@
 #include "../audio/AudioEngine.h"
 #include "../overlay/GameOverlay.h"
 #include "../game/Chess.h"
+#include "../game/Racing.h"
 
 namespace TalkMe {
     enum class AppState { Login, Login2FA, Register, MainApp };
@@ -146,6 +147,7 @@ namespace TalkMe {
             int selectedRow = -1, selectedCol = -1;
         } m_ChessUI;
         ChessEngine m_ChessEngine;
+        RacingGame m_Racing;
 
         struct ScreenShareState {
             int fps = 30;
