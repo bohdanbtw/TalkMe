@@ -534,6 +534,43 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Call_Request) {
+                std::string target = j.value("to", "");
+                if (target.empty() || !Database::Get().AreFriends(m_Username, target)) return;
+                json out; out["from"] = m_Username; out["state"] = "ringing";
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Call_State, out.dump());
+                SendPacket(PacketType::Call_State, out.dump());
+                std::shared_lock lock(m_Server.GetRoomMutex());
+                for (const auto& s : m_Server.GetAllSessions())
+                    if (s->GetUsername() == target) s->SendShared(buf, false);
+                return;
+            }
+
+            if (m_Header.type == PacketType::Call_Accept) {
+                std::string caller = j.value("from", "");
+                if (caller.empty()) return;
+                json out; out["from"] = caller; out["to"] = m_Username; out["state"] = "active";
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Call_State, out.dump());
+                SendPacket(PacketType::Call_State, out.dump());
+                std::shared_lock lock(m_Server.GetRoomMutex());
+                for (const auto& s : m_Server.GetAllSessions())
+                    if (s->GetUsername() == caller) s->SendShared(buf, false);
+                return;
+            }
+
+            if (m_Header.type == PacketType::Call_Reject) {
+                std::string other = j.value("from", "");
+                if (other.empty()) other = j.value("to", "");
+                if (other.empty()) return;
+                json out; out["from"] = m_Username; out["state"] = "ended";
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Call_State, out.dump());
+                SendPacket(PacketType::Call_State, out.dump());
+                std::shared_lock lock(m_Server.GetRoomMutex());
+                for (const auto& s : m_Server.GetAllSessions())
+                    if (s->GetUsername() == other) s->SendShared(buf, false);
+                return;
+            }
+
             if (m_Header.type == PacketType::DM_Send) {
                 std::string target = j.value("to", "");
                 std::string content = j.value("msg", "");

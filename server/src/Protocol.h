@@ -126,6 +126,12 @@ namespace TalkMe {
         Edit_Message_Request,
         Pin_Message_Request,
 
+        // --- VOICE CALLS ---
+        Call_Request,        // Client -> Server -> Target: initiate 1:1 voice call
+        Call_Accept,         // Client -> Server -> Caller: accept incoming call
+        Call_Reject,         // Client -> Server -> Caller: reject/end call
+        Call_State,          // Server -> Client: call state update (ringing, active, ended)
+
         // --- DIRECT MESSAGES ---
         DM_Send,             // Client -> Server: send direct message to friend
         DM_Receive,          // Server -> Client: incoming direct message

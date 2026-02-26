@@ -344,6 +344,23 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            if (msg.type == PacketType::Call_State) {
+                std::string state = j.value("state", "");
+                std::string from = j.value("from", "");
+                std::string to = j.value("to", "");
+                if (state == "ringing") {
+                    m_CurrentCall.otherUser = from;
+                    m_CurrentCall.state = "ringing";
+                } else if (state == "active") {
+                    m_CurrentCall.otherUser = (from == m_CurrentUser.username) ? to : from;
+                    m_CurrentCall.state = "active";
+                } else if (state == "ended") {
+                    m_CurrentCall.otherUser.clear();
+                    m_CurrentCall.state.clear();
+                }
+                continue;
+            }
+
             if (msg.type == PacketType::DM_Receive) {
                 DirectMessage dm;
                 dm.id = j.value("mid", 0);

@@ -711,6 +711,45 @@ namespace TalkMe {
                     ImGui::Separator();
                 }
 
+                if (!m_CurrentCall.state.empty()) {
+                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.15f, 0.15f, 0.2f, 1.0f));
+                    ImGui::BeginChild("CallBanner", ImVec2(0, 50), true);
+                    std::string callDisp = m_CurrentCall.otherUser;
+                    size_t chp = callDisp.find('#');
+                    if (chp != std::string::npos) callDisp = callDisp.substr(0, chp);
+
+                    if (m_CurrentCall.state == "ringing") {
+                        ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "Incoming call from %s", callDisp.c_str());
+                        if (ImGui::SmallButton("Accept")) {
+                            nlohmann::json aj; aj["from"] = m_CurrentCall.otherUser;
+                            m_NetClient.Send(PacketType::Call_Accept, aj.dump());
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Decline")) {
+                            nlohmann::json rj; rj["from"] = m_CurrentCall.otherUser;
+                            m_NetClient.Send(PacketType::Call_Reject, rj.dump());
+                            m_CurrentCall = {};
+                        }
+                    } else if (m_CurrentCall.state == "calling") {
+                        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1), "Calling %s...", callDisp.c_str());
+                        if (ImGui::SmallButton("Cancel")) {
+                            nlohmann::json rj; rj["to"] = m_CurrentCall.otherUser;
+                            m_NetClient.Send(PacketType::Call_Reject, rj.dump());
+                            m_CurrentCall = {};
+                        }
+                    } else if (m_CurrentCall.state == "active") {
+                        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1), "In call with %s", callDisp.c_str());
+                        if (ImGui::SmallButton("End Call")) {
+                            nlohmann::json rj; rj["to"] = m_CurrentCall.otherUser;
+                            m_NetClient.Send(PacketType::Call_Reject, rj.dump());
+                            m_CurrentCall = {};
+                        }
+                    }
+                    ImGui::EndChild();
+                    ImGui::PopStyleColor();
+                    ImGui::Separator();
+                }
+
                 ImGui::Text("Friends");
                 for (const auto& f : m_Friends) {
                     if (f.status != "accepted") continue;
@@ -723,6 +762,13 @@ namespace TalkMe {
                     ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(pos.x + 6, pos.y + 8), 4.0f, dotCol);
                     ImGui::Dummy(ImVec2(16, 0)); ImGui::SameLine();
                     ImGui::Text("%s", disp.c_str());
+                    ImGui::SameLine();
+                    if (online && m_CurrentCall.state.empty() && ImGui::SmallButton(("Call##" + f.username).c_str())) {
+                        nlohmann::json cj; cj["to"] = f.username;
+                        m_NetClient.Send(PacketType::Call_Request, cj.dump());
+                        m_CurrentCall.otherUser = f.username;
+                        m_CurrentCall.state = "calling";
+                    }
                     ImGui::SameLine();
                     if (ImGui::SmallButton(("Message##" + f.username).c_str())) {
                         m_ActiveDMUser = f.username;
