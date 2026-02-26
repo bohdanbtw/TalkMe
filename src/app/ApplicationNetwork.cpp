@@ -53,14 +53,17 @@ void Application::ProcessNetworkMessages() {
 
             // ── Binary packets (not JSON) — handle before JSON validation ──
             if (msg.type == PacketType::Screen_Share_Frame) {
-                static int s_recvLog = 0;
-                if (s_recvLog < 10)
-                    std::fprintf(stderr, "[Client] Received Screen_Share_Frame: %zu bytes\n", msg.data.size());
-                s_recvLog++;
                 if (!msg.data.empty()) {
-                    m_ScreenShare.someoneSharing = true;
-                    m_ScreenShare.lastFrameData = std::vector<uint8_t>(msg.data.begin(), msg.data.end());
-                    m_ScreenShare.frameUpdated = true;
+                    // Frames come from the currently broadcasting user — find which stream
+                    // For now frames don't contain sender info, so update the viewingStream
+                    std::string streamUser = m_ScreenShare.viewingStream;
+                    if (streamUser.empty() && !m_ScreenShare.activeStreams.empty())
+                        streamUser = m_ScreenShare.activeStreams.begin()->first;
+                    if (!streamUser.empty()) {
+                        auto& si = m_ScreenShare.activeStreams[streamUser];
+                        si.lastFrameData = std::vector<uint8_t>(msg.data.begin(), msg.data.end());
+                        si.frameUpdated = true;
+                    }
                 }
                 continue;
             }
@@ -252,12 +255,19 @@ void Application::ProcessNetworkMessages() {
             if (msg.type == PacketType::Screen_Share_State) {
                 std::string action = j.value("action", "");
                 std::string user = j.value("u", "");
-                if (action == "start" && user != m_CurrentUser.username) {
-                    m_ScreenShare.someoneSharing = true;
-                    m_ScreenShare.sharingUser = user;
-                } else if (action == "stop") {
-                    m_ScreenShare.someoneSharing = false;
-                    m_ScreenShare.sharingUser.clear();
+                if (action == "start" && !user.empty()) {
+                    StreamInfo si;
+                    si.username = user;
+                    m_ScreenShare.activeStreams[user] = si;
+                    if (m_ScreenShare.viewingStream.empty() && user != m_CurrentUser.username)
+                        m_ScreenShare.viewingStream = user;
+                } else if (action == "stop" && !user.empty()) {
+                    m_ScreenShare.activeStreams.erase(user);
+                    if (m_ScreenShare.viewingStream == user) {
+                        m_ScreenShare.viewingStream.clear();
+                        if (!m_ScreenShare.activeStreams.empty())
+                            m_ScreenShare.viewingStream = m_ScreenShare.activeStreams.begin()->first;
+                    }
                 }
                 continue;
             }

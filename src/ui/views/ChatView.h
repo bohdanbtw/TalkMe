@@ -38,6 +38,9 @@ namespace TalkMe::UI::Views {
         bool someoneIsSharing = false,
         void* screenShareTexture = nullptr,
         int screenShareW = 0,
-        int screenShareH = 0
+        int screenShareH = 0,
+        const std::vector<std::string>* activeStreamers = nullptr,
+        std::string* viewingStream = nullptr,
+        bool* streamMaximized = nullptr
     );
 }

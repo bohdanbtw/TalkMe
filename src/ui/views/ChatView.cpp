@@ -34,7 +34,10 @@ namespace TalkMe::UI::Views {
         bool someoneIsSharing,
         void* screenShareTexture,
         int screenShareW,
-        int screenShareH)
+        int screenShareH,
+        const std::vector<std::string>* activeStreamers,
+        std::string* viewingStream,
+        bool* streamMaximized)
     {
         float winH = ImGui::GetWindowHeight();
         float winW = ImGui::GetWindowWidth();
@@ -85,7 +88,32 @@ namespace TalkMe::UI::Views {
                 float userStripH = showingScreenShare ? (gridH - screenViewH) : gridH;
 
                 if (showingScreenShare) {
-                    ImGui::BeginChild("ScreenViewport", ImVec2(areaW, screenViewH), false);
+                    // Stream switcher tabs (when multiple active streams)
+                    if (activeStreamers && activeStreamers->size() > 1 && viewingStream) {
+                        for (size_t i = 0; i < activeStreamers->size(); i++) {
+                            const auto& streamer = (*activeStreamers)[i];
+                            std::string disp = streamer;
+                            size_t hp = disp.find('#');
+                            if (hp != std::string::npos) disp = disp.substr(0, hp);
+                            bool selected = (*viewingStream == streamer);
+                            if (i > 0) ImGui::SameLine();
+                            if (selected) ImGui::PushStyleColor(ImGuiCol_Button, Styles::Accent());
+                            if (ImGui::SmallButton((disp + "##stream").c_str()))
+                                *viewingStream = streamer;
+                            if (selected) ImGui::PopStyleColor();
+                        }
+                    }
+
+                    // Maximize/minimize button
+                    if (streamMaximized) {
+                        float maxBtnX = areaW - 90;
+                        ImGui::SameLine(maxBtnX);
+                        if (ImGui::SmallButton(*streamMaximized ? "Minimize" : "Maximize"))
+                            *streamMaximized = !*streamMaximized;
+                    }
+
+                    float actualViewH = (streamMaximized && *streamMaximized) ? (gridH + userStripH) : screenViewH;
+                    ImGui::BeginChild("ScreenViewport", ImVec2(areaW, actualViewH), false);
                     if (screenShareTexture && screenShareW > 0 && screenShareH > 0) {
                         float viewW = areaW - 20.0f;
                         float viewH = screenViewH - 10.0f;
@@ -117,8 +145,11 @@ namespace TalkMe::UI::Views {
                     ImGui::EndChild();
                 }
 
-                // User strip (always visible)
-                ImGui::BeginChild("VoiceGrid", ImVec2(areaW, userStripH), false, ImGuiWindowFlags_None);
+                // User strip (hidden when stream maximized)
+                bool hideUsers = (streamMaximized && *streamMaximized && showingScreenShare);
+                float actualUserH = hideUsers ? 0.0f : userStripH;
+                if (!hideUsers) {
+                ImGui::BeginChild("VoiceGrid", ImVec2(areaW, actualUserH), false, ImGuiWindowFlags_None);
                 {
 
                 float avatarR = Styles::AvatarRadius;
@@ -290,6 +321,7 @@ namespace TalkMe::UI::Views {
 
                 } // close user grid scope
                 ImGui::EndChild(); // VoiceGrid
+                } // close !hideUsers
 
                 // ====== Bottom action bar: 3 buttons centered ======
                 ImGui::Dummy(ImVec2(0, 8));

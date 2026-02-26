@@ -165,16 +165,21 @@ namespace TalkMe {
             std::string host;
         } m_Cinema;
 
-        struct ScreenShareState {
-            int fps = 30;
-            int quality = 75;
-            bool iAmSharing = false;
-            bool someoneSharing = false;
-            std::string sharingUser;
+        struct StreamInfo {
+            std::string username;
             std::vector<uint8_t> lastFrameData;
             int frameWidth = 0;
             int frameHeight = 0;
             bool frameUpdated = false;
+        };
+
+        struct ScreenShareState {
+            int fps = 30;
+            int quality = 75;
+            bool iAmSharing = false;
+            std::map<std::string, StreamInfo> activeStreams;
+            std::string viewingStream;
+            bool maximized = false;
         } m_ScreenShare;
 
         struct FriendEntry { std::string username; std::string status; std::string direction; };

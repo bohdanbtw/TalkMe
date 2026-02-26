@@ -1,1 +1,1 @@
-{"name":"talkme","version":"0.1.0","description":"TalkMe voice chat client","dependencies":["asio","opus","nlohmann-json","speexdsp"]}
+{"name":"talkme","version":"0.1.0","description":"TalkMe voice chat client","dependencies":["asio","opus","nlohmann-json","speexdsp","libvpx"]}
