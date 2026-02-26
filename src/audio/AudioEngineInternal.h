@@ -145,6 +145,10 @@ namespace TalkMe {
 
         NativeAudioProcessor m_NativeProcessor;
 
+        ma_pcm_rb systemAudioRb;
+        bool systemAudioRbInit = false;
+        std::atomic<float> systemAudioVolume{ 0.5f };
+
         std::thread             m_EncodeThread;
         std::mutex              m_EncodeMutex;
         std::condition_variable m_EncodeCv;
