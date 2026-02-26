@@ -473,47 +473,112 @@ namespace TalkMe::UI::Views {
 
                 ImGui::PopStyleVar();
 
-                // ====== Screen Share Setup Popup ======
-                ImGui::SetNextWindowSize(ImVec2(520, 140), ImGuiCond_Always);
+                // ====== Screen Share Setup — Discord-style centered modal ======
+                ImGui::SetNextWindowSize(ImVec2(480, 340), ImGuiCond_Always);
+                ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(28, 24));
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f);
+                ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.11f, 0.11f, 0.14f, 0.98f));
                 if (ImGui::BeginPopup("ScreenShareSetup")) {
-                    ImGui::Text("Screen Share Settings");
-                    ImGui::Separator();
-                    ImGui::Dummy(ImVec2(0, 4));
-
-                    ImGui::Columns(3, nullptr, false);
-
                     static int s_shareMode = 0;
-                    ImGui::Text("Source:");
-                    ImGui::RadioButton("Full Screen", &s_shareMode, 0);
-                    ImGui::RadioButton("App Window", &s_shareMode, 1);
-
-                    ImGui::NextColumn();
                     static int s_shareFps = 1;
-                    ImGui::Text("FPS:");
-                    ImGui::RadioButton("30", &s_shareFps, 0);
-                    ImGui::RadioButton("60", &s_shareFps, 1);
-                    ImGui::RadioButton("120", &s_shareFps, 2);
+                    static int s_shareQuality = 1;
+
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                    ImGui::SetWindowFontScale(1.2f);
+                    ImGui::Text("Share Your Screen");
+                    ImGui::SetWindowFontScale(1.0f);
+                    ImGui::PopStyleColor();
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.65f, 1));
+                    ImGui::Text("Choose what to share and adjust quality settings");
+                    ImGui::PopStyleColor();
+
+                    ImGui::Dummy(ImVec2(0, 16));
+
+                    // Source selection — large toggle buttons
+                    ImGui::Text("What to share");
+                    ImGui::Dummy(ImVec2(0, 6));
+                    float halfW = (480 - 56 - 12) * 0.5f;
+
+                    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+                    ImVec4 selCol(0.22f, 0.35f, 0.6f, 1.0f);
+                    ImVec4 unselCol(0.16f, 0.16f, 0.2f, 1.0f);
+
+                    ImGui::PushStyleColor(ImGuiCol_Button, s_shareMode == 0 ? selCol : unselCol);
+                    if (ImGui::Button("Entire Screen", ImVec2(halfW, 40))) s_shareMode = 0;
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine(0, 12);
+                    ImGui::PushStyleColor(ImGuiCol_Button, s_shareMode == 1 ? selCol : unselCol);
+                    if (ImGui::Button("Application", ImVec2(halfW, 40))) s_shareMode = 1;
+                    ImGui::PopStyleColor();
+
+                    ImGui::Dummy(ImVec2(0, 16));
+
+                    // FPS and Quality — side by side
+                    ImGui::Columns(2, nullptr, false);
+
+                    ImGui::Text("Frame Rate");
+                    ImGui::Dummy(ImVec2(0, 4));
+                    ImGui::PushStyleColor(ImGuiCol_Button, s_shareFps == 0 ? selCol : unselCol);
+                    if (ImGui::Button("30 FPS", ImVec2(60, 30))) s_shareFps = 0;
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine(0, 6);
+                    ImGui::PushStyleColor(ImGuiCol_Button, s_shareFps == 1 ? selCol : unselCol);
+                    if (ImGui::Button("60 FPS", ImVec2(60, 30))) s_shareFps = 1;
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine(0, 6);
+                    ImGui::PushStyleColor(ImGuiCol_Button, s_shareFps == 2 ? selCol : unselCol);
+                    if (ImGui::Button("120 FPS", ImVec2(60, 30))) s_shareFps = 2;
+                    ImGui::PopStyleColor();
 
                     ImGui::NextColumn();
-                    static int s_shareQuality = 1;
-                    ImGui::Text("Quality:");
-                    ImGui::RadioButton("Low##q", &s_shareQuality, 0);
-                    ImGui::RadioButton("Medium##q", &s_shareQuality, 1);
-                    ImGui::RadioButton("High##q", &s_shareQuality, 2);
+
+                    ImGui::Text("Quality");
+                    ImGui::Dummy(ImVec2(0, 4));
+                    ImGui::PushStyleColor(ImGuiCol_Button, s_shareQuality == 0 ? selCol : unselCol);
+                    if (ImGui::Button("Low##q", ImVec2(55, 30))) s_shareQuality = 0;
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine(0, 6);
+                    ImGui::PushStyleColor(ImGuiCol_Button, s_shareQuality == 1 ? selCol : unselCol);
+                    if (ImGui::Button("Medium##q", ImVec2(65, 30))) s_shareQuality = 1;
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine(0, 6);
+                    ImGui::PushStyleColor(ImGuiCol_Button, s_shareQuality == 2 ? selCol : unselCol);
+                    if (ImGui::Button("High##q", ImVec2(55, 30))) s_shareQuality = 2;
+                    ImGui::PopStyleColor();
 
                     ImGui::Columns(1);
-                    ImGui::Dummy(ImVec2(0, 4));
+                    ImGui::PopStyleVar(); // FrameRounding
 
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.65f, 1.0f));
-                    if (ImGui::Button("Start Sharing", ImVec2(150, 32))) {
+                    ImGui::Dummy(ImVec2(0, 20));
+
+                    // Action buttons — centered
+                    float startW = 160.0f, cancelW = 90.0f, gap = 12.0f;
+                    float totalBtnW = startW + cancelW + gap;
+                    ImGui::SetCursorPosX((480 - 56 - totalBtnW) * 0.5f);
+
+                    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.32f, 0.53f, 0.93f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.38f, 0.58f, 0.98f, 1.0f));
+                    if (ImGui::Button("Go Live", ImVec2(startW, 38))) {
                         int fps[] = { 30, 60, 120 };
                         int quality[] = { 40, 70, 95 };
                         if (onStartScreenShare) onStartScreenShare(fps[s_shareFps], quality[s_shareQuality]);
                         ImGui::CloseCurrentPopup();
                     }
+                    ImGui::PopStyleColor(2);
+
+                    ImGui::SameLine(0, gap);
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.25f, 0.28f, 1.0f));
+                    if (ImGui::Button("Cancel", ImVec2(cancelW, 38)))
+                        ImGui::CloseCurrentPopup();
                     ImGui::PopStyleColor();
+                    ImGui::PopStyleVar(); // FrameRounding
+
                     ImGui::EndPopup();
                 }
+                ImGui::PopStyleColor(); // PopupBg
+                ImGui::PopStyleVar(2); // WindowPadding, WindowRounding
 
                 // ====== Games Picker Popup ======
                 ImGui::SetNextWindowSize(ImVec2(260, 200), ImGuiCond_Always);
