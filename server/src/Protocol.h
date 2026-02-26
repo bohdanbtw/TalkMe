@@ -204,6 +204,11 @@ namespace TalkMe {
         // --- PAGINATION ---
         Message_History_Page,// Client -> Server: request older messages (before_id)
 
+        // --- EPHEMERAL ---
+        Set_Disappearing,    // Client -> Server: set disappearing duration for channel
+        Sticker_Send,        // Client -> Server: send sticker in channel
+        Sticker_List,        // Server -> Client: available sticker packs
+
         // --- SOCIAL ---
         Block_User,          // Client -> Server: block a user
         Unblock_User,        // Client -> Server: unblock a user
