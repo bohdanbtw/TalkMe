@@ -340,6 +340,36 @@ namespace TalkMe::UI::Views {
                     ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextPrimary());
                     ImGui::TextWrapped("%s", msg.content.c_str());
                     ImGui::PopStyleColor();
+
+                    if (!msg.reactions.empty()) {
+                        for (const auto& [emoji, users] : msg.reactions) {
+                            bool iReacted = std::find(users.begin(), users.end(), currentUser.username) != users.end();
+                            if (iReacted) ImGui::PushStyleColor(ImGuiCol_Button, Styles::Accent());
+                            char label[64];
+                            snprintf(label, sizeof(label), "%s %d##r_%s_%d", emoji.c_str(), (int)users.size(), emoji.c_str(), msg.id);
+                            if (ImGui::SmallButton(label)) {
+                                nlohmann::json rj;
+                                rj["mid"] = msg.id; rj["emoji"] = emoji; rj["cid"] = selectedChannelId;
+                                netClient.Send(iReacted ? PacketType::Remove_Reaction : PacketType::Add_Reaction, rj.dump());
+                            }
+                            if (ImGui::IsItemHovered()) {
+                                std::string tip;
+                                for (size_t ui = 0; ui < users.size() && ui < 5; ui++) {
+                                    if (ui > 0) tip += ", ";
+                                    std::string d = users[ui];
+                                    size_t hp2 = d.find('#');
+                                    if (hp2 != std::string::npos) d = d.substr(0, hp2);
+                                    tip += d;
+                                }
+                                if (users.size() > 5) tip += " + " + std::to_string(users.size() - 5) + " more";
+                                ImGui::SetTooltip("%s", tip.c_str());
+                            }
+                            if (iReacted) ImGui::PopStyleColor();
+                            ImGui::SameLine();
+                        }
+                        ImGui::NewLine();
+                    }
+
                     ImGui::EndGroup();
 
                     if (msg.id > 0) {
@@ -367,6 +397,24 @@ namespace TalkMe::UI::Views {
                         if (ImGui::BeginPopupContextItem(("msg_" + std::to_string(msg.id)).c_str())) {
                             if (replyingToMessageId && ImGui::Selectable("Reply"))
                                 *replyingToMessageId = msg.id;
+
+                            ImGui::Separator();
+                            ImGui::Text("React:");
+                            ImGui::SameLine();
+                            const char* quickEmojis[] = { "\xF0\x9F\x91\x8D", "\xE2\x9D\xA4", "\xF0\x9F\x98\x82", "\xF0\x9F\x91\x80", "\xF0\x9F\x94\xA5", "\xF0\x9F\x8E\x89" };
+                            for (int ei = 0; ei < 6; ei++) {
+                                if (ei > 0) ImGui::SameLine();
+                                char eid[32];
+                                snprintf(eid, sizeof(eid), "%s##qr%d", quickEmojis[ei], ei);
+                                if (ImGui::SmallButton(eid)) {
+                                    nlohmann::json rj;
+                                    rj["mid"] = msg.id; rj["emoji"] = quickEmojis[ei]; rj["cid"] = selectedChannelId;
+                                    netClient.Send(PacketType::Add_Reaction, rj.dump());
+                                    ImGui::CloseCurrentPopup();
+                                }
+                            }
+                            ImGui::Separator();
+
                             if (isMe && ImGui::Selectable("Edit Message")) {
                                 s_editingMsgId = msg.id;
                                 strncpy_s(s_editBuf, msg.content.c_str(), sizeof(s_editBuf) - 1);

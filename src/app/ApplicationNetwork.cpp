@@ -323,12 +323,39 @@ void Application::ProcessNetworkMessages() {
                         std::remove_if(m_Messages.begin(), m_Messages.end(),
                                        [cid](const ChatMessage& m) { return m.channelId == cid; }),
                         m_Messages.end());
-                    for (const auto& item : j)
-                        if (item.contains("mid"))
-                            m_Messages.push_back({ item.value("mid", 0), item["cid"],
-                                                   item.value("u", ""), item.value("msg", ""),
-                                                   item.value("time", "Old"),
-                                                   item.value("reply_to", 0) });
+                    for (const auto& item : j) {
+                        if (!item.contains("mid")) continue;
+                        ChatMessage cm{ item.value("mid", 0), item["cid"],
+                                        item.value("u", ""), item.value("msg", ""),
+                                        item.value("time", "Old"),
+                                        item.value("reply_to", 0) };
+                        if (item.contains("reactions") && item["reactions"].is_object()) {
+                            for (auto& [emoji, users] : item["reactions"].items()) {
+                                std::vector<std::string> userList;
+                                for (const auto& u : users) userList.push_back(u.get<std::string>());
+                                cm.reactions[emoji] = userList;
+                            }
+                        }
+                        m_Messages.push_back(std::move(cm));
+                    }
+                }
+                continue;
+            }
+
+            if (msg.type == PacketType::Reaction_Update) {
+                const int mid = j.value("mid", 0);
+                if (mid > 0 && j.contains("reactions")) {
+                    for (auto& m : m_Messages) {
+                        if (m.id == mid) {
+                            m.reactions.clear();
+                            for (auto& [emoji, users] : j["reactions"].items()) {
+                                std::vector<std::string> userList;
+                                for (const auto& u : users) userList.push_back(u.get<std::string>());
+                                m.reactions[emoji] = userList;
+                            }
+                            break;
+                        }
+                    }
                 }
                 continue;
             }

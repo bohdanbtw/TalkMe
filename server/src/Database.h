@@ -51,6 +51,10 @@ namespace TalkMe {
         std::vector<std::string> GetServerMembers(int serverId);
         bool DeleteChannel(int channelId, const std::string& username);
 
+        bool AddReaction(int messageId, const std::string& username, const std::string& emoji);
+        bool RemoveReaction(int messageId, const std::string& username, const std::string& emoji);
+        std::string GetReactionsJSON(int messageId);
+
     private:
         void Enqueue(std::function<void()> task);
         void WorkerLoop();
