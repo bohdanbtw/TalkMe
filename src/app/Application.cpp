@@ -438,7 +438,7 @@ namespace TalkMe {
                     if (!m_VoiceMembers.empty()) m_VoiceMembers.clear();
                     if (m_ActiveVoiceChannelId != -1) m_ActiveVoiceChannelId = -1;
                     m_UserMuteStates.clear();
-                    if (m_ScreenShare.iAmSharing) { m_ScreenCapture.Stop(); m_ScreenShare.iAmSharing = false; }
+                    if (m_ScreenShare.iAmSharing) { m_DXGICapture.Stop(); m_ScreenShare.iAmSharing = false; }
                     m_ScreenShare.someoneSharing = false;
                 }
 
@@ -1609,11 +1609,12 @@ namespace TalkMe {
                         CaptureSettings cs;
                         cs.fps = fps;
                         cs.quality = quality;
-                        m_ScreenCapture.Start(cs, [this](const std::vector<uint8_t>& jpegData, int w, int h) {
-                            std::fprintf(stderr, "[TalkMe] Frame captured: %dx%d, %zu bytes\n", w, h, jpegData.size());
-                            std::fflush(stderr);
-                            m_NetClient.SendRaw(PacketType::Screen_Share_Frame, jpegData);
-                            m_ScreenShare.lastFrameData = jpegData;
+                        DXGICaptureSettings dxSettings;
+                        dxSettings.fps = fps;
+                        dxSettings.quality = quality;
+                        m_DXGICapture.Start(dxSettings, [this](const std::vector<uint8_t>& data, int w, int h, bool isKey) {
+                            m_NetClient.SendRaw(PacketType::Screen_Share_Frame, data);
+                            m_ScreenShare.lastFrameData = data;
                             m_ScreenShare.frameWidth = w;
                             m_ScreenShare.frameHeight = h;
                             m_ScreenShare.frameUpdated = true;
@@ -1625,7 +1626,7 @@ namespace TalkMe {
                         std::fflush(stderr);
                     },
                     [this]() {
-                        m_ScreenCapture.Stop();
+                        m_DXGICapture.Stop();
                         m_ScreenShare.iAmSharing = false;
                         m_NetClient.Send(PacketType::Screen_Share_Stop, "{}");
                     },
