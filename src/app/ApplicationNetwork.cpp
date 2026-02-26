@@ -343,6 +343,31 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            if (msg.type == PacketType::DM_Receive) {
+                DirectMessage dm;
+                dm.id = j.value("mid", 0);
+                dm.sender = j.value("u", "");
+                dm.content = j.value("msg", "");
+                dm.timestamp = GetCurrentTimeStr();
+                m_DirectMessages.push_back(dm);
+                if (dm.sender != m_CurrentUser.username && GetForegroundWindow() != m_Window.GetHwnd())
+                    m_Sounds.PlayMessage();
+                continue;
+            }
+
+            if (msg.type == PacketType::DM_History_Response) {
+                m_DirectMessages.clear();
+                for (const auto& item : j) {
+                    DirectMessage dm;
+                    dm.id = item.value("mid", 0);
+                    dm.sender = item.value("u", "");
+                    dm.content = item.value("msg", "");
+                    dm.timestamp = item.value("time", "");
+                    m_DirectMessages.push_back(dm);
+                }
+                continue;
+            }
+
             if (msg.type == PacketType::Friend_List_Response) {
                 m_Friends.clear();
                 for (const auto& item : j)

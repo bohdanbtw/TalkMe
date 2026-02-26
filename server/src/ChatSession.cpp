@@ -534,6 +534,33 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::DM_Send) {
+                std::string target = j.value("to", "");
+                std::string content = j.value("msg", "");
+                if (target.empty() || content.empty()) return;
+                if (!Database::Get().AreFriends(m_Username, target)) return;
+                int mid = Database::Get().SaveDirectMessage(m_Username, target, content);
+                json out;
+                out["mid"] = mid;
+                out["u"] = m_Username;
+                out["to"] = target;
+                out["msg"] = content;
+                SendPacket(PacketType::DM_Receive, out.dump());
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::DM_Receive, out.dump());
+                std::shared_lock lock(m_Server.GetRoomMutex());
+                for (const auto& s : m_Server.GetAllSessions())
+                    if (s->GetUsername() == target) s->SendShared(buf, false);
+                return;
+            }
+
+            if (m_Header.type == PacketType::DM_History_Request) {
+                std::string target = j.value("u", "");
+                if (target.empty()) return;
+                SendPacket(PacketType::DM_History_Response,
+                    Database::Get().GetDMHistoryJSON(m_Username, target));
+                return;
+            }
+
             if (m_Header.type == PacketType::Friend_Request) {
                 std::string target = j.value("u", "");
                 if (!target.empty() && Database::Get().SendFriendRequest(m_Username, target)) {

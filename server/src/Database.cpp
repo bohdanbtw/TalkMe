@@ -143,6 +143,7 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "ALTER TABLE channels ADD COLUMN description TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS reactions (message_id INTEGER, username TEXT, emoji TEXT, PRIMARY KEY(message_id, username, emoji));", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS friends (user1 TEXT, user2 TEXT, status TEXT DEFAULT 'pending', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user1, user2));", 0, 0, 0);
+        sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS direct_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT, receiver TEXT, content TEXT, time DATETIME DEFAULT CURRENT_TIMESTAMP);", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE server_members ADD COLUMN permissions INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN is_2fa_enabled INTEGER DEFAULT 0;", 0, 0, 0);
@@ -689,6 +690,60 @@ namespace TalkMe {
             sqlite3_finalize(stmt);
         }
         return users;
+    }
+
+    int Database::SaveDirectMessage(const std::string& sender, const std::string& receiver, const std::string& content) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        int mid = 0;
+        if (sqlite3_prepare_v2(m_Db, "INSERT INTO direct_messages (sender, receiver, content) VALUES (?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, sender.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, receiver.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, content.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmt) == SQLITE_DONE) mid = (int)sqlite3_last_insert_rowid(m_Db);
+            sqlite3_finalize(stmt);
+        }
+        return mid;
+    }
+
+    std::string Database::GetDMHistoryJSON(const std::string& user1, const std::string& user2) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        json j = json::array();
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db,
+            "SELECT id, sender, receiver, content, time FROM direct_messages "
+            "WHERE (sender=? AND receiver=?) OR (sender=? AND receiver=?) "
+            "ORDER BY time ASC LIMIT 100;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, user1.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, user2.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, user2.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 4, user1.c_str(), -1, SQLITE_TRANSIENT);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* s = (const char*)sqlite3_column_text(stmt, 1);
+                const char* c = (const char*)sqlite3_column_text(stmt, 3);
+                const char* t = (const char*)sqlite3_column_text(stmt, 4);
+                j.push_back({ {"mid", sqlite3_column_int(stmt, 0)}, {"u", s ? s : ""}, {"msg", c ? c : ""}, {"time", t ? t : ""} });
+            }
+            sqlite3_finalize(stmt);
+        }
+        return j.dump();
+    }
+
+    bool Database::AreFriends(const std::string& user1, const std::string& user2) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool result = false;
+        if (sqlite3_prepare_v2(m_Db,
+            "SELECT 1 FROM friends WHERE ((user1=? AND user2=?) OR (user1=? AND user2=?)) AND status='accepted';",
+            -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, user1.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, user2.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, user2.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 4, user1.c_str(), -1, SQLITE_TRANSIENT);
+            result = (sqlite3_step(stmt) == SQLITE_ROW);
+            sqlite3_finalize(stmt);
+        }
+        return result;
     }
 
     bool Database::SendFriendRequest(const std::string& from, const std::string& toUsername) {
