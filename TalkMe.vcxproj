@@ -152,6 +152,7 @@
     <ClCompile Include="src\overlay\GameOverlay.cpp" />
     <ClCompile Include="src\screen\ScreenCapture.cpp" />
     <ClCompile Include="src\screen\DXGICapture.cpp" />
+    <ClCompile Include="src\screen\H264Encoder.cpp" />
     <ClCompile Include="src\ui\TextureManager.cpp" />
     <ClCompile Include="src\network\VoiceTransport.cpp" />
     <ClCompile Include="src\ui\views\ChatView.cpp" />
@@ -191,6 +192,7 @@
     <ClInclude Include="src\overlay\GameOverlay.h" />
     <ClInclude Include="src\screen\ScreenCapture.h" />
     <ClInclude Include="src\screen\DXGICapture.h" />
+    <ClInclude Include="src\screen\H264Encoder.h" />
     <ClInclude Include="src\ui\TextureManager.h" />
     <ClInclude Include="src\game\Chess.h" />
     <ClInclude Include="src\game\Racing.h" />

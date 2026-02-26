@@ -248,17 +248,38 @@ void DXGICapture::CaptureLoop() {
             }
             m_Context->Unmap(m_StagingTexture, 0);
 
-            // Encode to JPEG (fallback — H.264 MFT can be added later for even better perf)
-            auto jpeg = EncodeRGBAtoJPEG(bgraData.data(), outW, outH, m_Settings.quality);
+            std::vector<uint8_t> encoded;
 
-            if (frameCount < 3) {
-                std::fprintf(stderr, "[DXGICapture] Frame %d: %dx%d, jpeg=%zu bytes\n",
-                    frameCount, outW, outH, jpeg.size());
-                std::fflush(stderr);
+            if (!m_UseJpegFallback && !m_H264Encoder.IsInitialized()) {
+                int bitrate = 1500 + m_Settings.quality * 30;
+                if (!m_H264Encoder.Initialize(outW, outH, m_Settings.fps, bitrate)) {
+                    std::fprintf(stderr, "[DXGICapture] H.264 encoder init failed, using JPEG fallback\n");
+                    m_UseJpegFallback = true;
+                }
             }
 
-            if (!jpeg.empty() && m_OnFrame)
-                m_OnFrame(jpeg, outW, outH, (frameCount % 30 == 0));
+            if (!m_UseJpegFallback && m_H264Encoder.IsInitialized()) {
+                encoded = m_H264Encoder.Encode(bgraData.data(), outW, outH);
+            }
+
+            if (encoded.empty()) {
+                encoded = EncodeRGBAtoJPEG(bgraData.data(), outW, outH, m_Settings.quality);
+                if (m_UseJpegFallback && frameCount < 3) {
+                    std::fprintf(stderr, "[DXGICapture] Frame %d (JPEG fallback): %dx%d, %zu bytes\n",
+                        frameCount, outW, outH, encoded.size());
+                }
+            } else if (frameCount < 3) {
+                std::fprintf(stderr, "[DXGICapture] Frame %d (H.264): %dx%d, %zu bytes\n",
+                    frameCount, outW, outH, encoded.size());
+            }
+
+            if (!encoded.empty() && m_OnFrame) {
+                // Prefix: 1 byte codec type (0=JPEG, 1=H264) + data
+                std::vector<uint8_t> packet(1 + encoded.size());
+                packet[0] = (m_UseJpegFallback || !m_H264Encoder.IsInitialized()) ? 0 : 1;
+                memcpy(packet.data() + 1, encoded.data(), encoded.size());
+                m_OnFrame(packet, outW, outH, (frameCount % 30 == 0));
+            }
 
             frameCount++;
         }
