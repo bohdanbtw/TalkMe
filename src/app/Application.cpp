@@ -661,7 +661,8 @@ namespace TalkMe {
             ImGui::End(); ImGui::PopStyleVar(3);
             return;
         }
-        // FPS overlay removed (was F3 toggle) — use external profiling tools instead.
+        if (ImGui::IsKeyPressed(ImGuiKey_F2))
+            m_ShowFriendList = !m_ShowFriendList;
 
         if (m_CurrentState == AppState::Login) RenderLogin();
         else if (m_CurrentState == AppState::Login2FA) RenderLogin2FA();
@@ -669,7 +670,72 @@ namespace TalkMe {
         else if (m_CurrentState == AppState::MainApp) RenderMainApp();
         ImGui::End(); ImGui::PopStyleVar(3);
 
-        // FPS overlay removed — was debug-only profiling aid.
+        // Friends panel (F2 toggle)
+        if (m_ShowFriendList && m_CurrentState == AppState::MainApp) {
+            ImGui::SetNextWindowSize(ImVec2(320, 400), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin("Friends", &m_ShowFriendList)) {
+                ImGui::PushItemWidth(-1);
+                ImGui::InputTextWithHint("##friend_search", "Add friend (username#tag)...", m_FriendSearchBuf, sizeof(m_FriendSearchBuf));
+                ImGui::PopItemWidth();
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Add") && strlen(m_FriendSearchBuf) > 0) {
+                    nlohmann::json fj; fj["u"] = std::string(m_FriendSearchBuf);
+                    m_NetClient.Send(PacketType::Friend_Request, fj.dump());
+                    memset(m_FriendSearchBuf, 0, sizeof(m_FriendSearchBuf));
+                }
+                ImGui::Separator();
+
+                int pendingCount = 0;
+                for (const auto& f : m_Friends) {
+                    if (f.status == "pending" && f.direction == "received") pendingCount++;
+                }
+                if (pendingCount > 0) {
+                    ImGui::TextColored(ImVec4(1, 0.7f, 0.2f, 1), "Pending Requests (%d)", pendingCount);
+                    for (const auto& f : m_Friends) {
+                        if (f.status != "pending" || f.direction != "received") continue;
+                        std::string disp = f.username;
+                        size_t hp = disp.find('#');
+                        if (hp != std::string::npos) disp = disp.substr(0, hp);
+                        ImGui::Text("%s", disp.c_str());
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton(("Accept##" + f.username).c_str())) {
+                            nlohmann::json aj; aj["u"] = f.username;
+                            m_NetClient.Send(PacketType::Friend_Accept, aj.dump());
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton(("Reject##" + f.username).c_str())) {
+                            nlohmann::json rj; rj["u"] = f.username;
+                            m_NetClient.Send(PacketType::Friend_Reject, rj.dump());
+                        }
+                    }
+                    ImGui::Separator();
+                }
+
+                ImGui::Text("Friends");
+                for (const auto& f : m_Friends) {
+                    if (f.status != "accepted") continue;
+                    std::string disp = f.username;
+                    size_t hp = disp.find('#');
+                    if (hp != std::string::npos) disp = disp.substr(0, hp);
+                    bool online = m_OnlineUsers.count(f.username) > 0;
+                    ImU32 dotCol = online ? IM_COL32(80, 220, 100, 255) : IM_COL32(120, 120, 125, 255);
+                    ImVec2 pos = ImGui::GetCursorScreenPos();
+                    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(pos.x + 6, pos.y + 8), 4.0f, dotCol);
+                    ImGui::Dummy(ImVec2(16, 0)); ImGui::SameLine();
+                    ImGui::Text("%s", disp.c_str());
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton(("Remove##" + f.username).c_str())) {
+                        nlohmann::json rj; rj["u"] = f.username;
+                        m_NetClient.Send(PacketType::Friend_Reject, rj.dump());
+                    }
+                }
+
+                if (m_Friends.empty() || std::none_of(m_Friends.begin(), m_Friends.end(), [](const FriendEntry& f) { return f.status == "accepted"; })) {
+                    ImGui::TextDisabled("No friends yet. Add someone by their username#tag.");
+                }
+            }
+            ImGui::End();
+        }
     }
 
     void Application::RenderLogin() { UI::Views::RenderLogin(m_NetClient, m_CurrentState, m_EmailBuf, m_PasswordBuf, m_StatusMessage, m_ServerIP, m_ServerPort, m_DeviceId, m_ValidatingSession); }

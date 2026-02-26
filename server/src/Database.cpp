@@ -142,6 +142,7 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN reply_to INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE channels ADD COLUMN description TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS reactions (message_id INTEGER, username TEXT, emoji TEXT, PRIMARY KEY(message_id, username, emoji));", 0, 0, 0);
+        sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS friends (user1 TEXT, user2 TEXT, status TEXT DEFAULT 'pending', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user1, user2));", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE server_members ADD COLUMN permissions INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN is_2fa_enabled INTEGER DEFAULT 0;", 0, 0, 0);
@@ -688,6 +689,80 @@ namespace TalkMe {
             sqlite3_finalize(stmt);
         }
         return users;
+    }
+
+    bool Database::SendFriendRequest(const std::string& from, const std::string& toUsername) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        if (from == toUsername) return false;
+        sqlite3_stmt* chk = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "SELECT 1 FROM friends WHERE (user1=? AND user2=?) OR (user1=? AND user2=?);", -1, &chk, 0) == SQLITE_OK) {
+            sqlite3_bind_text(chk, 1, from.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(chk, 2, toUsername.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(chk, 3, toUsername.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(chk, 4, from.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(chk) == SQLITE_ROW) { sqlite3_finalize(chk); return false; }
+            sqlite3_finalize(chk);
+        }
+        sqlite3_stmt* stmt = nullptr;
+        bool ok = false;
+        if (sqlite3_prepare_v2(m_Db, "INSERT INTO friends (user1, user2, status) VALUES (?, ?, 'pending');", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, from.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, toUsername.c_str(), -1, SQLITE_TRANSIENT);
+            ok = (sqlite3_step(stmt) == SQLITE_DONE);
+            sqlite3_finalize(stmt);
+        }
+        return ok;
+    }
+
+    bool Database::AcceptFriendRequest(const std::string& user, const std::string& friendUser) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool ok = false;
+        if (sqlite3_prepare_v2(m_Db, "UPDATE friends SET status='accepted' WHERE user1=? AND user2=? AND status='pending';", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, friendUser.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, user.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            ok = (sqlite3_changes(m_Db) > 0);
+            sqlite3_finalize(stmt);
+        }
+        return ok;
+    }
+
+    bool Database::RejectOrRemoveFriend(const std::string& user, const std::string& friendUser) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "DELETE FROM friends WHERE (user1=? AND user2=?) OR (user1=? AND user2=?);", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, user.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, friendUser.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, friendUser.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 4, user.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+        return true;
+    }
+
+    std::string Database::GetFriendListJSON(const std::string& username) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        json j = json::array();
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db,
+            "SELECT CASE WHEN user1=? THEN user2 ELSE user1 END AS friend, status, "
+            "CASE WHEN user1=? THEN 'sent' ELSE 'received' END AS direction "
+            "FROM friends WHERE user1=? OR user2=?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, username.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 4, username.c_str(), -1, SQLITE_TRANSIENT);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* f = (const char*)sqlite3_column_text(stmt, 0);
+                const char* s = (const char*)sqlite3_column_text(stmt, 1);
+                const char* d = (const char*)sqlite3_column_text(stmt, 2);
+                if (f && s) j.push_back({ {"u", f}, {"status", s}, {"direction", d ? d : ""} });
+            }
+            sqlite3_finalize(stmt);
+        }
+        return j.dump();
     }
 
     bool Database::AddReaction(int messageId, const std::string& username, const std::string& emoji) {

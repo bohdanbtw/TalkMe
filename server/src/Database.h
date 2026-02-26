@@ -51,6 +51,11 @@ namespace TalkMe {
         std::vector<std::string> GetServerMembers(int serverId);
         bool DeleteChannel(int channelId, const std::string& username);
 
+        bool SendFriendRequest(const std::string& from, const std::string& toUsername);
+        bool AcceptFriendRequest(const std::string& user, const std::string& friendUser);
+        bool RejectOrRemoveFriend(const std::string& user, const std::string& friendUser);
+        std::string GetFriendListJSON(const std::string& username);
+
         bool AddReaction(int messageId, const std::string& username, const std::string& emoji);
         bool RemoveReaction(int messageId, const std::string& username, const std::string& emoji);
         std::string GetReactionsJSON(int messageId);
