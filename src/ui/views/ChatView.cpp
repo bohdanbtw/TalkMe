@@ -5,6 +5,7 @@
 #include "../../shared/PacketHandler.h"
 #include <string>
 #include <algorithm>
+#include <shellapi.h>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -374,9 +375,62 @@ namespace TalkMe::UI::Views {
                         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "[pinned]");
                     }
 
-                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextPrimary());
-                    ImGui::TextWrapped("%s", msg.content.c_str());
-                    ImGui::PopStyleColor();
+                    {
+                        const std::string& text = msg.content;
+                        size_t pos = 0;
+                        bool hasUrl = false;
+                        while (pos < text.size()) {
+                            size_t urlStart = std::string::npos;
+                            for (const char* prefix : {"https://", "http://"}) {
+                                size_t f = text.find(prefix, pos);
+                                if (f != std::string::npos && (urlStart == std::string::npos || f < urlStart))
+                                    urlStart = f;
+                            }
+                            if (urlStart == std::string::npos) {
+                                std::string rest = text.substr(pos);
+                                if (!rest.empty()) {
+                                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextPrimary());
+                                    ImGui::TextWrapped("%s", rest.c_str());
+                                    ImGui::PopStyleColor();
+                                }
+                                break;
+                            }
+                            if (urlStart > pos) {
+                                std::string before = text.substr(pos, urlStart - pos);
+                                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextPrimary());
+                                ImGui::TextWrapped("%s", before.c_str());
+                                ImGui::PopStyleColor();
+                            }
+                            size_t urlEnd = text.find_first_of(" \t\n\r", urlStart);
+                            if (urlEnd == std::string::npos) urlEnd = text.size();
+                            std::string url = text.substr(urlStart, urlEnd - urlStart);
+
+                            bool isImage = false;
+                            std::string lower = url;
+                            for (auto& c : lower) c = (char)std::tolower((unsigned char)c);
+                            for (const char* ext : {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
+                                if (lower.size() > strlen(ext) && lower.compare(lower.size() - strlen(ext), strlen(ext), ext) == 0)
+                                    isImage = true;
+
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.6f, 1.0f, 1.0f));
+                            ImGui::TextWrapped("%s", url.c_str());
+                            ImGui::PopStyleColor();
+                            if (ImGui::IsItemHovered()) {
+                                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                                ImGui::SetTooltip(isImage ? "Click to open image in browser" : "Click to open link");
+                            }
+                            if (ImGui::IsItemClicked())
+                                ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+
+                            if (isImage) {
+                                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                                ImGui::Text("[Image: %s]", url.substr(url.find_last_of("/\\") + 1).c_str());
+                                ImGui::PopStyleColor();
+                            }
+                            hasUrl = true;
+                            pos = urlEnd;
+                        }
+                    }
 
                     if (!msg.reactions.empty()) {
                         for (const auto& [emoji, users] : msg.reactions) {
