@@ -91,8 +91,15 @@ namespace TalkMe::UI::Views {
                 float userStripH = showingScreenShare ? (gridH - screenViewH) : gridH;
 
                 if (showingScreenShare) {
-                    // Stream switcher tabs (when multiple active streams)
-                    if (activeStreamers && activeStreamers->size() > 1 && viewingStream) {
+                    bool isMaximized = streamMaximized && *streamMaximized;
+                    bool canMaximize = !isScreenSharing && streamMaximized; // viewers only
+
+                    // When maximized: take the ENTIRE voice area (grid + user strip + button bar)
+                    float fullH = winH - ImGui::GetCursorPosY();
+                    float actualViewH = isMaximized ? fullH : screenViewH;
+
+                    // Stream switcher tabs (only when not maximized or when multiple streams)
+                    if (!isMaximized && activeStreamers && activeStreamers->size() > 1 && viewingStream) {
                         for (size_t i = 0; i < activeStreamers->size(); i++) {
                             const auto& streamer = (*activeStreamers)[i];
                             std::string disp = streamer;
@@ -105,47 +112,64 @@ namespace TalkMe::UI::Views {
                                 *viewingStream = streamer;
                             if (selected) ImGui::PopStyleColor();
                         }
+                        actualViewH -= ImGui::GetTextLineHeightWithSpacing() + 4;
                     }
 
-                    // Maximize/minimize button
-                    if (streamMaximized) {
-                        float maxBtnX = areaW - 90;
-                        ImGui::SameLine(maxBtnX);
-                        if (ImGui::SmallButton(*streamMaximized ? "Minimize" : "Maximize"))
-                            *streamMaximized = !*streamMaximized;
-                    }
-
-                    float actualViewH = (streamMaximized && *streamMaximized) ? (gridH + userStripH) : screenViewH;
+                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.05f, 0.05f, 0.07f, 1.0f));
                     ImGui::BeginChild("ScreenViewport", ImVec2(areaW, actualViewH), false);
+
                     if (screenShareTexture && screenShareW > 0 && screenShareH > 0) {
-                        float viewW = areaW - 20.0f;
-                        float viewH = screenViewH - 10.0f;
+                        float viewW = areaW - 10.0f;
+                        float viewH = actualViewH - 10.0f;
                         float aspect = (float)screenShareW / (float)screenShareH;
                         float fitW = viewW;
                         float fitH = fitW / aspect;
                         if (fitH > viewH) { fitH = viewH; fitW = fitH * aspect; }
                         float padX = (areaW - fitW) * 0.5f;
-                        ImGui::SetCursorPos(ImVec2(padX, 5.0f));
+                        float padY = (actualViewH - fitH) * 0.5f;
+                        ImGui::SetCursorPos(ImVec2(padX, padY));
                         ImGui::Image((ImTextureID)screenShareTexture, ImVec2(fitW, fitH));
+
+                        // Maximize/minimize button overlaid on bottom-right of the stream image
+                        if (canMaximize) {
+                            float btnX = padX + fitW - 80;
+                            float btnY = padY + fitH - 30;
+                            ImGui::SetCursorPos(ImVec2(btnX, btnY));
+                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.6f));
+                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.2f, 0.2f, 0.8f));
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 0.9f));
+                            if (ImGui::Button(isMaximized ? "Exit" : "Fullscreen", ImVec2(72, 24)))
+                                *streamMaximized = !*streamMaximized;
+                            ImGui::PopStyleColor(3);
+                        }
                     } else {
-                        ImGui::Dummy(ImVec2(0, screenViewH * 0.35f));
-                        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.08f, 0.1f, 1.0f));
-                        float placeholderW = areaW * 0.6f;
-                        float placeholderH = screenViewH * 0.4f;
+                        float phH = actualViewH * 0.4f;
+                        ImGui::Dummy(ImVec2(0, (actualViewH - phH) * 0.5f - 20));
+                        float placeholderW = areaW * 0.5f;
                         ImGui::SetCursorPosX((areaW - placeholderW) * 0.5f);
-                        ImGui::BeginChild("##placeholder", ImVec2(placeholderW, placeholderH), true);
-                        ImGui::Dummy(ImVec2(0, placeholderH * 0.3f));
+                        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.08f, 0.1f, 1.0f));
+                        ImGui::BeginChild("##placeholder", ImVec2(placeholderW, phH), true);
+                        ImGui::Dummy(ImVec2(0, phH * 0.3f));
                         std::string sharerName = isScreenSharing ? "You" : "Someone";
-                        std::string msg = sharerName + " is sharing their screen...";
-                        ImVec2 sz = ImGui::CalcTextSize(msg.c_str());
-                        ImGui::SetCursorPosX((placeholderW - sz.x) * 0.5f);
-                        ImGui::TextColored(ImVec4(0.5f, 0.7f, 1.0f, 1.0f), "%s", msg.c_str());
+                        std::string msg2 = sharerName + " is sharing their screen...";
+                        ImVec2 sz2 = ImGui::CalcTextSize(msg2.c_str());
+                        ImGui::SetCursorPosX((placeholderW - sz2.x) * 0.5f);
+                        ImGui::TextColored(ImVec4(0.5f, 0.7f, 1.0f, 1.0f), "%s", msg2.c_str());
                         ImGui::SetCursorPosX((placeholderW - 140) * 0.5f);
                         ImGui::TextDisabled("Waiting for video stream...");
                         ImGui::EndChild();
                         ImGui::PopStyleColor();
                     }
+
                     ImGui::EndChild();
+                    ImGui::PopStyleColor();
+
+                    // When maximized: skip everything below (users, buttons)
+                    if (isMaximized) {
+                        ImGui::EndChild(); // ChatArea
+                        ImGui::PopStyleColor();
+                        return;
+                    }
                 }
 
                 // User strip (hidden when stream maximized)
