@@ -1,6 +1,6 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "TextureManager.h"
-#include "../../vendor/stb_image.h"
+#include <stb_image.h>
 #include <cstring>
 #include <algorithm>
 
