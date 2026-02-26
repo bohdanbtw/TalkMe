@@ -100,6 +100,7 @@ namespace TalkMe {
         // Access session registry (callers must lock m_RoomMutex).
         std::shared_mutex& GetRoomMutex() { return m_RoomMutex; }
         const std::set<std::shared_ptr<ChatSession>>& GetAllSessions() const { return m_AllSessions; }
+        const std::unordered_map<int, std::set<std::shared_ptr<ChatSession>>>& GetVoiceChannels() const { return m_VoiceChannels; }
 
         // Broadcast user online/offline presence to all sessions.
         void BroadcastPresence(const std::string& username, bool online);

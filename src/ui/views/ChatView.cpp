@@ -79,34 +79,47 @@ namespace TalkMe::UI::Views {
                 float gridH = winH - gridTop - leaveBarH;
                 if (gridH < 100.0f) gridH = 100.0f;
 
-                ImGui::BeginChild("VoiceGrid", ImVec2(areaW, gridH), false, ImGuiWindowFlags_None);
+                // When screen sharing: split into screen viewport (top) + user strip (bottom)
+                bool showingScreenShare = (someoneIsSharing || isScreenSharing);
+                float screenViewH = showingScreenShare ? (gridH * 0.7f) : 0.0f;
+                float userStripH = showingScreenShare ? (gridH - screenViewH) : gridH;
 
-                // Screen share viewport (takes priority over user grid when active)
-                if ((someoneIsSharing || isScreenSharing) && screenShareTexture) {
-                    float viewW = areaW - 40.0f;
-                    float viewH = gridH - 40.0f;
-                    if (screenShareW > 0 && screenShareH > 0) {
+                if (showingScreenShare) {
+                    ImGui::BeginChild("ScreenViewport", ImVec2(areaW, screenViewH), false);
+                    if (screenShareTexture && screenShareW > 0 && screenShareH > 0) {
+                        float viewW = areaW - 20.0f;
+                        float viewH = screenViewH - 10.0f;
                         float aspect = (float)screenShareW / (float)screenShareH;
                         float fitW = viewW;
                         float fitH = fitW / aspect;
                         if (fitH > viewH) { fitH = viewH; fitW = fitH * aspect; }
                         float padX = (areaW - fitW) * 0.5f;
-                        float padY = 10.0f;
-                        ImGui::SetCursorPos(ImVec2(padX, padY));
+                        ImGui::SetCursorPos(ImVec2(padX, 5.0f));
                         ImGui::Image((ImTextureID)screenShareTexture, ImVec2(fitW, fitH));
+                    } else {
+                        ImGui::Dummy(ImVec2(0, screenViewH * 0.35f));
+                        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.08f, 0.1f, 1.0f));
+                        float placeholderW = areaW * 0.6f;
+                        float placeholderH = screenViewH * 0.4f;
+                        ImGui::SetCursorPosX((areaW - placeholderW) * 0.5f);
+                        ImGui::BeginChild("##placeholder", ImVec2(placeholderW, placeholderH), true);
+                        ImGui::Dummy(ImVec2(0, placeholderH * 0.3f));
+                        std::string sharerName = isScreenSharing ? "You" : "Someone";
+                        std::string msg = sharerName + " is sharing their screen...";
+                        ImVec2 sz = ImGui::CalcTextSize(msg.c_str());
+                        ImGui::SetCursorPosX((placeholderW - sz.x) * 0.5f);
+                        ImGui::TextColored(ImVec4(0.5f, 0.7f, 1.0f, 1.0f), "%s", msg.c_str());
+                        ImGui::SetCursorPosX((placeholderW - 140) * 0.5f);
+                        ImGui::TextDisabled("Waiting for video stream...");
+                        ImGui::EndChild();
+                        ImGui::PopStyleColor();
                     }
+                    ImGui::EndChild();
+                }
 
-                    ImGui::EndChild(); // VoiceGrid
-                } else if (someoneIsSharing && !screenShareTexture) {
-                    float cx = areaW * 0.5f;
-                    ImGui::Dummy(ImVec2(0, gridH * 0.3f));
-                    std::string shareMsg = "Screen share active";
-                    ImVec2 sz = ImGui::CalcTextSize(shareMsg.c_str());
-                    ImGui::SetCursorPosX((areaW - sz.x) * 0.5f);
-                    ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "%s", shareMsg.c_str());
-
-                    ImGui::EndChild(); // VoiceGrid
-                } else {
+                // User strip (always visible)
+                ImGui::BeginChild("VoiceGrid", ImVec2(areaW, userStripH), false, ImGuiWindowFlags_None);
+                {
 
                 float avatarR = Styles::AvatarRadius;
                 float itemW   = Styles::VoiceItemWidth;
@@ -275,8 +288,8 @@ namespace TalkMe::UI::Views {
                 ImGui::PopStyleColor();
                 ImGui::PopStyleVar();
 
-                ImGui::EndChild(); // VoiceGrid (user grid branch)
-                } // close else block for screen share vs user grid
+                } // close user grid scope
+                ImGui::EndChild(); // VoiceGrid
 
                 // ====== Bottom action bar: 3 buttons centered ======
                 ImGui::Dummy(ImVec2(0, 8));

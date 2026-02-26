@@ -249,6 +249,28 @@ namespace TalkMe {
             return;
         }
 
+        // Screen share frame is binary (BMP), must be handled before JSON parse
+        if (m_Header.type == PacketType::Screen_Share_Frame) {
+            int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
+            if (cid == -1 || m_Body.empty()) return;
+            PacketHeader h{ PacketType::Screen_Share_Frame, static_cast<uint32_t>(m_Body.size()) };
+            h.ToNetwork();
+            auto buf = std::make_shared<std::vector<uint8_t>>(sizeof(h) + m_Body.size());
+            std::memcpy(buf->data(), &h, sizeof(h));
+            std::memcpy(buf->data() + sizeof(h), m_Body.data(), m_Body.size());
+            // Broadcast to all voice channel members except sender
+            {
+                std::shared_lock lock(m_Server.GetRoomMutex());
+                auto it = m_Server.GetVoiceChannels().find(cid);
+                if (it != m_Server.GetVoiceChannels().end()) {
+                    for (const auto& s : it->second)
+                        if (s.get() != this)
+                            s->SendShared(buf, true);
+                }
+            }
+            return;
+        }
+
         std::string payload(m_Body.begin(), m_Body.end());
         try {
             auto j = json::parse(payload);
@@ -764,17 +786,7 @@ namespace TalkMe {
                 return;
             }
 
-            if (m_Header.type == PacketType::Screen_Share_Frame) {
-                int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
-                if (cid == -1) return;
-                PacketHeader h{ PacketType::Screen_Share_Frame, static_cast<uint32_t>(m_Body.size()) };
-                auto buf = std::make_shared<std::vector<uint8_t>>(sizeof(h) + m_Body.size());
-                h.ToNetwork();
-                std::memcpy(buf->data(), &h, sizeof(h));
-                if (!m_Body.empty()) std::memcpy(buf->data() + sizeof(h), m_Body.data(), m_Body.size());
-                m_Server.BroadcastToVoiceChannel(cid, buf);
-                return;
-            }
+            // Screen_Share_Frame handled above (binary, before JSON parse)
 
             if (m_Header.type == PacketType::Set_Member_Role) {
                 if (!j.contains("sid") || !j.contains("u") || !j.contains("perms")) return;
