@@ -288,7 +288,9 @@ namespace TalkMe {
             return;
         }
 
+        if (m_Body.empty()) return; // Skip empty packets
         std::string payload(m_Body.begin(), m_Body.end());
+        if (payload.empty() || (payload[0] != '{' && payload[0] != '[')) return; // Not JSON
         try {
             auto j = json::parse(payload);
 
@@ -1154,7 +1156,8 @@ namespace TalkMe {
         }
         catch (const json::exception& e) {
             VoiceTrace::log(std::string("step=json_error msg=") + e.what());
-            std::fprintf(stderr, "[TalkMe Server] ProcessPacket json_error: %s\n", e.what());
+            std::fprintf(stderr, "[TalkMe Server] ProcessPacket json_error: type=%d size=%zu user=%s err=%s\n",
+                (int)m_Header.type, m_Body.size(), m_Username.c_str(), e.what());
             if (m_Header.type == PacketType::Login_Request)
                 SendPacket(PacketType::Login_Failed, "");
         }
