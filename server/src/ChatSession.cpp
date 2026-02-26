@@ -725,6 +725,24 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Set_Avatar) {
+                std::string avatarData = j.value("data", "");
+                if (avatarData.size() > 500000) return; // 500KB max base64
+                Database::Get().SetAvatar(m_Username, avatarData);
+                json res; res["ok"] = true;
+                SendPacket(PacketType::Avatar_Response, res.dump());
+                return;
+            }
+
+            if (m_Header.type == PacketType::Get_Avatar) {
+                std::string target = j.value("u", "");
+                if (target.empty()) return;
+                std::string avatar = Database::Get().GetAvatar(target);
+                json res; res["u"] = target; res["data"] = avatar;
+                SendPacket(PacketType::Avatar_Response, res.dump());
+                return;
+            }
+
             if (m_Header.type == PacketType::Bot_Register) {
                 if (!j.contains("sid") || !j.contains("name")) return;
                 int sid = j["sid"];

@@ -486,6 +486,52 @@ namespace TalkMe::UI::Views {
                 if (ctx.onCancel2FAClick) ctx.onCancel2FAClick();
             }
         }
+        // Profile Picture
+        ImGui::Dummy(ImVec2(0, 24));
+        ImGui::Text("Profile Picture");
+        ImGui::TextDisabled("Upload a JPEG or PNG image (max 200KB)");
+        ImGui::Dummy(ImVec2(0, 8));
+
+        if (ctx.currentAvatarTexture) {
+            ImGui::Image((ImTextureID)ctx.currentAvatarTexture, ImVec2(80, 80));
+            ImGui::SameLine();
+        }
+
+        if (ImGui::Button("Change Avatar", ImVec2(140, 32))) {
+            char filePath[MAX_PATH] = {};
+            OPENFILENAMEA ofn = {};
+            ofn.lStructSize = sizeof(ofn);
+            ofn.lpstrFilter = "Images\0*.png;*.jpg;*.jpeg\0";
+            ofn.lpstrFile = filePath;
+            ofn.nMaxFile = MAX_PATH;
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+            if (GetOpenFileNameA(&ofn) && strlen(filePath) > 0) {
+                FILE* fp = fopen(filePath, "rb");
+                if (fp) {
+                    fseek(fp, 0, SEEK_END);
+                    long sz = ftell(fp);
+                    fseek(fp, 0, SEEK_SET);
+                    if (sz > 0 && sz < 200 * 1024) {
+                        std::vector<uint8_t> data(sz);
+                        fread(data.data(), 1, sz, fp);
+                        // Base64 encode
+                        static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                        std::string encoded;
+                        encoded.reserve((sz + 2) / 3 * 4);
+                        for (int i = 0; i < sz; i += 3) {
+                            int n = (data[i] << 16) | (i + 1 < sz ? data[i + 1] << 8 : 0) | (i + 2 < sz ? data[i + 2] : 0);
+                            encoded += b64[(n >> 18) & 63];
+                            encoded += b64[(n >> 12) & 63];
+                            encoded += (i + 1 < sz) ? b64[(n >> 6) & 63] : '=';
+                            encoded += (i + 2 < sz) ? b64[n & 63] : '=';
+                        }
+                        if (ctx.onSetAvatar) ctx.onSetAvatar(encoded);
+                    }
+                    fclose(fp);
+                }
+            }
+        }
+
         ImGui::Dummy(ImVec2(0, 24));
         ImGui::Text("Sign Out");
         ImGui::TextDisabled("Sign out of your account on this device");

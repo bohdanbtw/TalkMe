@@ -204,6 +204,11 @@ namespace TalkMe {
         // --- PAGINATION ---
         Message_History_Page,// Client -> Server: request older messages (before_id)
 
+        // --- PROFILE ---
+        Set_Avatar,          // Client -> Server: upload avatar (base64 JPEG)
+        Get_Avatar,          // Client -> Server: request avatar for a user
+        Avatar_Response,     // Server -> Client: avatar data for a user
+
         // --- BOT API ---
         Bot_Register,        // Client -> Server: register a bot (owner only)
         Bot_Message,         // Server -> Bot / Bot -> Server: bot message relay

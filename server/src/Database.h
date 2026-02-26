@@ -51,6 +51,9 @@ namespace TalkMe {
         std::vector<std::string> GetServerMembers(int serverId);
         bool DeleteChannel(int channelId, const std::string& username);
 
+        bool SetAvatar(const std::string& username, const std::string& avatarBase64);
+        std::string GetAvatar(const std::string& username);
+
         std::string RegisterBot(int serverId, const std::string& owner, const std::string& botName);
         std::string GetServerBotsJSON(int serverId);
 
