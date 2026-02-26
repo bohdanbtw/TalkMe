@@ -74,7 +74,7 @@ void TenorAPI::Search(const std::string& query, int limit, ResultCallback onResu
         }
 
         std::string url = std::string(kBaseUrl) + "/search?q=" + encoded +
-            "&key=" + kApiKey + "&limit=" + std::to_string(limit) +
+            "&key=" + std::string(GetApiKey()) + "&limit=" + std::to_string(limit) +
             "&media_filter=gif,tinygif";
 
         std::string response = HttpGet(url);
@@ -129,7 +129,7 @@ void TenorAPI::Trending(int limit, ResultCallback onResult) {
     m_Searching.store(true);
 
     std::thread([this, limit, onResult]() {
-        std::string url = std::string(kBaseUrl) + "/featured?key=" + kApiKey +
+        std::string url = std::string(kBaseUrl) + "/featured?key=" + std::string(GetApiKey()) +
             "&limit=" + std::to_string(limit) + "&media_filter=gif,tinygif";
 
         std::string response = HttpGet(url);
