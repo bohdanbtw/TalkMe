@@ -297,6 +297,65 @@ namespace TalkMe::UI::Views {
                     }
 
                     ImGui::EndGroup();
+
+                    // Admin right-click context menu on member cards
+                    if (!isMe && ImGui::BeginPopupContextItem(("admin_" + member).c_str())) {
+                        std::string dName = member;
+                        size_t hp2 = dName.find('#');
+                        if (hp2 != std::string::npos) dName = dName.substr(0, hp2);
+                        ImGui::TextDisabled("%s", dName.c_str());
+                        ImGui::Separator();
+
+                        if (ImGui::Selectable("Mute User")) {
+                            nlohmann::json aj; aj["sid"] = currentServer.id; aj["u"] = member; aj["state"] = true;
+                            netClient.Send(PacketType::Admin_Force_Mute, aj.dump());
+                        }
+                        if (ImGui::Selectable("Deafen User")) {
+                            nlohmann::json aj; aj["sid"] = currentServer.id; aj["u"] = member; aj["state"] = true;
+                            netClient.Send(PacketType::Admin_Force_Deafen, aj.dump());
+                        }
+                        if (ImGui::Selectable("Disconnect from Voice")) {
+                            nlohmann::json aj; aj["sid"] = currentServer.id; aj["u"] = member;
+                            netClient.Send(PacketType::Admin_Disconnect_User, aj.dump());
+                        }
+                        ImGui::Separator();
+
+                        // Move to another voice channel
+                        if (ImGui::BeginMenu("Move to Channel")) {
+                            for (const auto& ch : currentServer.channels) {
+                                if (ch.type != ChannelType::Voice || ch.id == activeVoiceChannelId) continue;
+                                if (ImGui::MenuItem(ch.name.c_str())) {
+                                    nlohmann::json aj; aj["sid"] = currentServer.id; aj["u"] = member; aj["cid"] = ch.id;
+                                    netClient.Send(PacketType::Admin_Move_User, aj.dump());
+                                }
+                            }
+                            ImGui::EndMenu();
+                        }
+
+                        ImGui::Separator();
+                        if (ImGui::Selectable("Chat Mute (10 min)")) {
+                            nlohmann::json aj; aj["sid"] = currentServer.id; aj["u"] = member;
+                            aj["type"] = "chat_mute"; aj["reason"] = "Admin action"; aj["duration_minutes"] = 10;
+                            netClient.Send(PacketType::Admin_Sanction_User, aj.dump());
+                        }
+                        if (ImGui::Selectable("Chat Mute (1 hour)")) {
+                            nlohmann::json aj; aj["sid"] = currentServer.id; aj["u"] = member;
+                            aj["type"] = "chat_mute"; aj["reason"] = "Admin action"; aj["duration_minutes"] = 60;
+                            netClient.Send(PacketType::Admin_Sanction_User, aj.dump());
+                        }
+
+                        ImGui::Separator();
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.7f, 1.0f, 1.0f));
+                        if (ImGui::Selectable("Grant Admin")) {
+                            nlohmann::json aj; aj["sid"] = currentServer.id; aj["u"] = member;
+                            aj["perms"] = 0xF; // All permissions
+                            netClient.Send(PacketType::Set_Member_Role, aj.dump());
+                        }
+                        ImGui::PopStyleColor();
+
+                        ImGui::EndPopup();
+                    }
+
                     ImGui::PopID();
 
                     col++;
@@ -1122,6 +1181,22 @@ namespace TalkMe::UI::Views {
                 if (!online) ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
                 ImGui::Text("%s", disp.c_str());
                 if (!online) ImGui::PopStyleColor();
+
+                // Right-click for admin actions on members
+                if (name != currentUser.username && ImGui::BeginPopupContextItem(("ml_admin_" + name).c_str())) {
+                    ImGui::TextDisabled("%s", disp.c_str());
+                    ImGui::Separator();
+                    if (ImGui::Selectable("Chat Mute (10 min)")) {
+                        nlohmann::json aj; aj["sid"] = currentServer.id; aj["u"] = name;
+                        aj["type"] = "chat_mute"; aj["reason"] = "Admin"; aj["duration_minutes"] = 10;
+                        netClient.Send(PacketType::Admin_Sanction_User, aj.dump());
+                    }
+                    if (ImGui::Selectable("Grant Admin")) {
+                        nlohmann::json aj; aj["sid"] = currentServer.id; aj["u"] = name; aj["perms"] = 0xF;
+                        netClient.Send(PacketType::Set_Member_Role, aj.dump());
+                    }
+                    ImGui::EndPopup();
+                }
             }
 
             ImGui::EndChild();
