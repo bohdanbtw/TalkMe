@@ -567,7 +567,8 @@ namespace TalkMe::UI::Views {
             ofn.nMaxFile = MAX_PATH;
             ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
             if (GetOpenFileNameA(&ofn) && strlen(filePath) > 0) {
-                FILE* fp = fopen(filePath, "rb");
+                FILE* fp = nullptr;
+                fopen_s(&fp, filePath, "rb");
                 if (fp) {
                     fseek(fp, 0, SEEK_END);
                     long sz = ftell(fp);
