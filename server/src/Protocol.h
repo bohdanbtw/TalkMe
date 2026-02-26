@@ -126,6 +126,13 @@ namespace TalkMe {
         Edit_Message_Request,
         Pin_Message_Request,
 
+        // --- FRIENDS ---
+        Friend_Request,      // Client -> Server: send friend request
+        Friend_Accept,       // Client -> Server: accept friend request
+        Friend_Reject,       // Client -> Server: reject/remove friend
+        Friend_List_Response,// Server -> Client: full friend list with status
+        Friend_Update,       // Server -> Client: single friend status change
+
         // --- REACTIONS ---
         Add_Reaction,        // Client -> Server: add emoji reaction to message
         Remove_Reaction,     // Client -> Server: remove own reaction

@@ -342,6 +342,25 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            if (msg.type == PacketType::Friend_List_Response) {
+                m_Friends.clear();
+                for (const auto& item : j)
+                    m_Friends.push_back({ item.value("u", ""), item.value("status", ""), item.value("direction", "") });
+                continue;
+            }
+
+            if (msg.type == PacketType::Friend_Update) {
+                const std::string user = j.value("u", "");
+                const std::string status = j.value("status", "");
+                const std::string direction = j.value("direction", "");
+                bool found = false;
+                for (auto& f : m_Friends) {
+                    if (f.username == user) { f.status = status; f.direction = direction; found = true; break; }
+                }
+                if (!found) m_Friends.push_back({ user, status, direction });
+                continue;
+            }
+
             if (msg.type == PacketType::Reaction_Update) {
                 const int mid = j.value("mid", 0);
                 if (mid > 0 && j.contains("reactions")) {

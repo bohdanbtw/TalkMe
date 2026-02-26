@@ -97,6 +97,10 @@ namespace TalkMe {
         // Create a shared buffer suitable for broadcasting (public wrapper).
         std::shared_ptr<std::vector<uint8_t>> CreateBroadcastBuffer(PacketType type, const std::string& data);
 
+        // Access session registry (callers must lock m_RoomMutex).
+        std::shared_mutex& GetRoomMutex() { return m_RoomMutex; }
+        const std::set<std::shared_ptr<ChatSession>>& GetAllSessions() const { return m_AllSessions; }
+
         // Broadcast user online/offline presence to all sessions.
         void BroadcastPresence(const std::string& username, bool online);
 

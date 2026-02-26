@@ -290,6 +290,7 @@ namespace TalkMe {
                                     SendPacket(PacketType::Login_Success, res.dump());
                                     if (!serversJson.empty())
                                         SendPacket(PacketType::Server_List_Response, serversJson);
+                                    SendPacket(PacketType::Friend_List_Response, Database::Get().GetFriendListJSON(m_Username));
                                     m_Server.BroadcastPresence(m_Username, true);
                                 }
                                 else if (loginResult == 2) {
@@ -530,6 +531,42 @@ namespace TalkMe {
                     res.push_back(entry);
                 }
                 SendPacket(PacketType::Member_List_Response, res.dump());
+                return;
+            }
+
+            if (m_Header.type == PacketType::Friend_Request) {
+                std::string target = j.value("u", "");
+                if (!target.empty() && Database::Get().SendFriendRequest(m_Username, target)) {
+                    SendPacket(PacketType::Friend_List_Response, Database::Get().GetFriendListJSON(m_Username));
+                    // Notify the target if they're online
+                    json notify; notify["u"] = m_Username; notify["status"] = "pending"; notify["direction"] = "received";
+                    auto buf = m_Server.CreateBroadcastBuffer(PacketType::Friend_Update, notify.dump());
+                    std::shared_lock lock(m_Server.GetRoomMutex());
+                    for (const auto& s : m_Server.GetAllSessions())
+                        if (s->GetUsername() == target) s->SendShared(buf, false);
+                }
+                return;
+            }
+
+            if (m_Header.type == PacketType::Friend_Accept) {
+                std::string target = j.value("u", "");
+                if (!target.empty() && Database::Get().AcceptFriendRequest(m_Username, target)) {
+                    SendPacket(PacketType::Friend_List_Response, Database::Get().GetFriendListJSON(m_Username));
+                    json notify; notify["u"] = m_Username; notify["status"] = "accepted"; notify["direction"] = "sent";
+                    auto buf = m_Server.CreateBroadcastBuffer(PacketType::Friend_Update, notify.dump());
+                    std::shared_lock lock(m_Server.GetRoomMutex());
+                    for (const auto& s : m_Server.GetAllSessions())
+                        if (s->GetUsername() == target) s->SendShared(buf, false);
+                }
+                return;
+            }
+
+            if (m_Header.type == PacketType::Friend_Reject) {
+                std::string target = j.value("u", "");
+                if (!target.empty()) {
+                    Database::Get().RejectOrRemoveFriend(m_Username, target);
+                    SendPacket(PacketType::Friend_List_Response, Database::Get().GetFriendListJSON(m_Username));
+                }
                 return;
             }
 
