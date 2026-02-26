@@ -67,7 +67,7 @@ namespace TalkMe::UI::Views {
                 ImGui::PopStyleColor();
                 ImGui::Dummy(ImVec2(0, 16));
 
-                float leaveBarH = 80.0f;
+                float leaveBarH = 120.0f;
                 float gridTop = ImGui::GetCursorPosY();
                 float gridH = winH - gridTop - leaveBarH;
                 if (gridH < 100.0f) gridH = 100.0f;
@@ -243,90 +243,140 @@ namespace TalkMe::UI::Views {
 
                 ImGui::EndChild(); // VoiceGrid
 
-                // Voice channel toolbar
-                ImGui::Dummy(ImVec2(0, 4));
-                float toolX = (areaW - 350.0f) * 0.5f;
-                if (toolX < 20.0f) toolX = 20.0f;
-                // Leave Voice Chat button FIRST (most important)
-                ImGui::Dummy(ImVec2(0, 4));
-                float leaveBtnW = 220.0f;
-                float leaveBtnH = 42.0f;
-                float leaveBtnX = (areaW - leaveBtnW) * 0.5f;
-                if (leaveBtnX < 20.0f) leaveBtnX = 20.0f;
-                ImGui::SetCursorPosX(leaveBtnX);
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-                ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonDanger());
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::ButtonDangerHover());
-                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextOnAccent());
-                if (ImGui::Button("Leave Voice Chat", ImVec2(leaveBtnW, leaveBtnH))) {
+                // ====== Bottom action bar: 3 buttons centered ======
+                ImGui::Dummy(ImVec2(0, 8));
+                float btnBarW = 380.0f;
+                float btnBarX = (areaW - btnBarW) * 0.5f;
+                if (btnBarX < 10.0f) btnBarX = 10.0f;
+                ImGui::SetCursorPosX(btnBarX);
+
+                float actionBtnH = 38.0f;
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+
+                // Button 1: Leave (red)
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.12f, 0.12f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.18f, 0.18f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                if (ImGui::Button("Leave", ImVec2(100, actionBtnH))) {
                     activeVoiceChannelId = -1;
                     netClient.Send(PacketType::Join_Voice_Channel, PacketHandler::JoinVoiceChannelPayload(-1));
                 }
                 ImGui::PopStyleColor(3);
+
+                // Button 2: Screen Share (blue)
+                ImGui::SameLine(0, 12);
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.65f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.42f, 0.75f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                if (ImGui::Button("Screen Share", ImVec2(130, actionBtnH))) {
+                    ImGui::OpenPopup("ScreenShareSetup");
+                }
+                ImGui::PopStyleColor(3);
+
+                // Button 3: Games (green)
+                ImGui::SameLine(0, 12);
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.55f, 0.25f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                if (ImGui::Button("Games", ImVec2(100, actionBtnH))) {
+                    ImGui::OpenPopup("GamesPicker");
+                }
+                ImGui::PopStyleColor(3);
+
                 ImGui::PopStyleVar();
 
-                // Activity toolbar (below leave button)
-                ImGui::Dummy(ImVec2(0, 6));
-                float toolX2 = (areaW - 320.0f) * 0.5f;
-                if (toolX2 < 20.0f) toolX2 = 20.0f;
-                ImGui::SetCursorPosX(toolX2);
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
-                ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonSubtle());
-                if (ImGui::Button("Screen Share", ImVec2(100, 26))) {
-                    nlohmann::json sj; sj["width"] = 1920; sj["height"] = 1080; sj["fps"] = 30;
-                    netClient.Send(PacketType::Screen_Share_Start, sj.dump());
-                }
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Start sharing your screen");
-                ImGui::SameLine(0, 4);
-                if (ImGui::Button("Cinema", ImVec2(65, 26))) {
-                    ImGui::OpenPopup("CinemaPopup");
-                }
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Start a watch party");
-                ImGui::SameLine(0, 4);
-                if (ImGui::Button("Chess", ImVec2(55, 26))) {
-                    ImGui::OpenPopup("ChessTargetPopup");
-                }
-                ImGui::SameLine(0, 4);
-                if (ImGui::Button("Racing", ImVec2(60, 26))) {
-                    ImGui::OpenPopup("RaceTargetPopup");
-                }
-                ImGui::PopStyleColor();
-                ImGui::PopStyleVar();
+                // ====== Screen Share Setup Popup ======
+                ImGui::SetNextWindowSize(ImVec2(340, 220), ImGuiCond_Always);
+                if (ImGui::BeginPopup("ScreenShareSetup")) {
+                    ImGui::Text("Screen Share Settings");
+                    ImGui::Separator();
+                    ImGui::Dummy(ImVec2(0, 6));
 
-                if (ImGui::BeginPopup("ChessTargetPopup")) {
-                    ImGui::Text("Challenge to Chess:");
-                    for (const auto& m : voiceMembers) {
-                        if (m == currentUser.username) continue;
-                        std::string d = m; size_t h = d.find('#'); if (h != std::string::npos) d = d.substr(0, h);
-                        if (ImGui::Selectable(d.c_str())) {
-                            nlohmann::json cj; cj["to"] = m; cj["game"] = "chess";
-                            netClient.Send(PacketType::Game_Challenge, cj.dump());
-                        }
-                    }
-                    ImGui::EndPopup();
-                }
-                if (ImGui::BeginPopup("RaceTargetPopup")) {
-                    ImGui::Text("Challenge to Race:");
-                    for (const auto& m : voiceMembers) {
-                        if (m == currentUser.username) continue;
-                        std::string d = m; size_t h = d.find('#'); if (h != std::string::npos) d = d.substr(0, h);
-                        if (ImGui::Selectable(d.c_str())) {
-                            nlohmann::json cj; cj["to"] = m; cj["game"] = "racing";
-                            netClient.Send(PacketType::Game_Challenge, cj.dump());
-                        }
-                    }
-                    ImGui::EndPopup();
-                }
-                if (ImGui::BeginPopup("CinemaPopup")) {
-                    static char s_cinemaUrl[512] = "";
-                    ImGui::Text("Start Watch Party");
-                    ImGui::InputTextWithHint("##cinema_url", "Video URL...", s_cinemaUrl, sizeof(s_cinemaUrl));
-                    if (ImGui::Button("Start", ImVec2(80, 26)) && strlen(s_cinemaUrl) > 0) {
-                        nlohmann::json cj; cj["url"] = std::string(s_cinemaUrl); cj["title"] = "Watch Party";
-                        netClient.Send(PacketType::Cinema_Start, cj.dump());
-                        memset(s_cinemaUrl, 0, sizeof(s_cinemaUrl));
+                    static int s_shareMode = 0;
+                    ImGui::RadioButton("Entire Screen", &s_shareMode, 0);
+                    ImGui::SameLine();
+                    ImGui::RadioButton("Application Window", &s_shareMode, 1);
+
+                    ImGui::Dummy(ImVec2(0, 4));
+                    static int s_shareFps = 1;
+                    ImGui::Text("Frame Rate:");
+                    ImGui::RadioButton("30 FPS", &s_shareFps, 0); ImGui::SameLine();
+                    ImGui::RadioButton("60 FPS", &s_shareFps, 1); ImGui::SameLine();
+                    ImGui::RadioButton("120 FPS", &s_shareFps, 2);
+
+                    ImGui::Dummy(ImVec2(0, 4));
+                    static int s_shareQuality = 1;
+                    ImGui::Text("Quality:");
+                    ImGui::RadioButton("Low", &s_shareQuality, 0); ImGui::SameLine();
+                    ImGui::RadioButton("Medium", &s_shareQuality, 1); ImGui::SameLine();
+                    ImGui::RadioButton("High", &s_shareQuality, 2);
+
+                    ImGui::Dummy(ImVec2(0, 8));
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.65f, 1.0f));
+                    if (ImGui::Button("Start Sharing", ImVec2(150, 32))) {
+                        int fps[] = { 30, 60, 120 };
+                        int quality[] = { 40, 70, 95 };
+                        nlohmann::json sj;
+                        sj["width"] = 1920; sj["height"] = 1080;
+                        sj["fps"] = fps[s_shareFps];
+                        sj["quality"] = quality[s_shareQuality];
+                        sj["mode"] = s_shareMode == 0 ? "screen" : "window";
+                        netClient.Send(PacketType::Screen_Share_Start, sj.dump());
                         ImGui::CloseCurrentPopup();
                     }
+                    ImGui::PopStyleColor();
+                    ImGui::EndPopup();
+                }
+
+                // ====== Games Picker Popup ======
+                ImGui::SetNextWindowSize(ImVec2(260, 200), ImGuiCond_Always);
+                if (ImGui::BeginPopup("GamesPicker")) {
+                    ImGui::Text("Choose a Game");
+                    ImGui::Separator();
+                    ImGui::Dummy(ImVec2(0, 6));
+
+                    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+
+                    if (ImGui::Button("Chess", ImVec2(230, 34))) {
+                        ImGui::OpenPopup("ChessTarget");
+                    }
+                    ImGui::Dummy(ImVec2(0, 2));
+                    if (ImGui::Button("Car Racing", ImVec2(230, 34))) {
+                        ImGui::OpenPopup("RacingTarget");
+                    }
+
+                    ImGui::PopStyleVar();
+
+                    // Chess opponent picker (nested popup)
+                    if (ImGui::BeginPopup("ChessTarget")) {
+                        ImGui::Text("Challenge to Chess:");
+                        for (const auto& m : voiceMembers) {
+                            if (m == currentUser.username) continue;
+                            std::string d = m; size_t h = d.find('#'); if (h != std::string::npos) d = d.substr(0, h);
+                            if (ImGui::Selectable(d.c_str())) {
+                                nlohmann::json cj; cj["to"] = m; cj["game"] = "chess";
+                                netClient.Send(PacketType::Game_Challenge, cj.dump());
+                            }
+                        }
+                        if (voiceMembers.size() <= 1) ImGui::TextDisabled("No other users in channel");
+                        ImGui::EndPopup();
+                    }
+
+                    // Racing opponent picker (nested popup)
+                    if (ImGui::BeginPopup("RacingTarget")) {
+                        ImGui::Text("Challenge to Race:");
+                        for (const auto& m : voiceMembers) {
+                            if (m == currentUser.username) continue;
+                            std::string d = m; size_t h = d.find('#'); if (h != std::string::npos) d = d.substr(0, h);
+                            if (ImGui::Selectable(d.c_str())) {
+                                nlohmann::json cj; cj["to"] = m; cj["game"] = "racing";
+                                netClient.Send(PacketType::Game_Challenge, cj.dump());
+                            }
+                        }
+                        if (voiceMembers.size() <= 1) ImGui::TextDisabled("No other users in channel");
+                        ImGui::EndPopup();
+                    }
+
                     ImGui::EndPopup();
                 }
             }
