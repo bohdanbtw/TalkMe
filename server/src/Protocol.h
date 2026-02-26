@@ -150,6 +150,12 @@ namespace TalkMe {
         Remove_Reaction,     // Client -> Server: remove own reaction
         Reaction_Update,     // Server -> Client: broadcast reaction change
 
+        // --- SCREEN SHARING ---
+        Screen_Share_Start,  // Client -> Server: start sharing screen (resolution, fps)
+        Screen_Share_Stop,   // Client -> Server: stop sharing screen
+        Screen_Share_Frame,  // Client -> Server -> Viewers: compressed frame data
+        Screen_Share_State,  // Server -> Client: notify viewers of share start/stop
+
         // --- ROLES ---
         Set_Member_Role,     // Client -> Server: set permissions for a member
         Get_Member_Role,     // Client -> Server: get permissions for a member
