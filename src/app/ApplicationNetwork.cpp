@@ -249,13 +249,7 @@ void Application::ProcessNetworkMessages() {
             }
 
             if (msg.type == PacketType::Screen_Share_Frame) {
-                if (m_ScreenShare.someoneSharing && !msg.data.empty() && msg.data.size() > 54) {
-                    // Parse BMP dimensions from header
-                    int w = *(int*)&msg.data[18];
-                    int h = *(int*)&msg.data[22];
-                    if (h < 0) h = -h;
-                    m_ScreenShare.frameWidth = w;
-                    m_ScreenShare.frameHeight = h;
+                if (m_ScreenShare.someoneSharing && !msg.data.empty()) {
                     m_ScreenShare.lastFrameData = std::vector<uint8_t>(msg.data.begin(), msg.data.end());
                     m_ScreenShare.frameUpdated = true;
                 }

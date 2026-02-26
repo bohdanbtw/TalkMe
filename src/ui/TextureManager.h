@@ -16,6 +16,7 @@ public:
 
     ID3D11ShaderResourceView* LoadFromBMP(const std::string& id, const uint8_t* bmpData, int dataSize);
     ID3D11ShaderResourceView* LoadFromRGBA(const std::string& id, const uint8_t* rgba, int width, int height);
+    ID3D11ShaderResourceView* LoadFromMemory(const std::string& id, const uint8_t* data, int dataSize, int* outW = nullptr, int* outH = nullptr);
     ID3D11ShaderResourceView* GetTexture(const std::string& id);
     void RemoveTexture(const std::string& id);
     void Clear();
