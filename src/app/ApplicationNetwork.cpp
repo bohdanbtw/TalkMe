@@ -359,7 +359,12 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
         }
-        catch (...) {}
+        catch (const std::exception& e) {
+            LOG_ERROR(std::string("ProcessNetworkMessages: ") + e.what());
+        }
+        catch (...) {
+            LOG_ERROR("ProcessNetworkMessages: unknown exception");
+        }
     }
 }
 

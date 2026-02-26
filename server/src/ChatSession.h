@@ -37,6 +37,7 @@ namespace TalkMe {
         void ProcessPacket();
         void DoWrite();
         void Disconnect();
+        void SendPacket(TalkMe::PacketType type, const std::string& data);
 
         asio::ip::tcp::socket m_Socket;
         TalkMeServer& m_Server;
