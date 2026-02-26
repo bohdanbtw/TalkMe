@@ -491,6 +491,7 @@ void Application::ProcessNetworkMessages() {
                             const std::string typeStr = item.value("type", "text");
                             if (typeStr == "voice") ch.type = ChannelType::Voice;
                             else if (typeStr == "cinema") ch.type = ChannelType::Cinema;
+                            else if (typeStr == "announcement") ch.type = ChannelType::Announcement;
                             else ch.type = ChannelType::Text;
                             ch.description = item.value("desc", "");
                             ch.userLimit = item.value("limit", 0);

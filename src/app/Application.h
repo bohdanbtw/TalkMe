@@ -20,6 +20,7 @@
 #include "../network/VoiceTransport.h"
 #include "../core/ConfigManager.h"
 #include "../audio/AudioEngine.h"
+#include "../audio/Soundboard.h"
 #include "../overlay/GameOverlay.h"
 #include "../game/Chess.h"
 #include "../screen/ScreenCapture.h"
@@ -33,7 +34,7 @@
 
 namespace TalkMe {
     enum class AppState { Login, Login2FA, Register, MainApp };
-    enum class ChannelType { Text, Voice, Cinema };
+    enum class ChannelType { Text, Voice, Cinema, Announcement };
 
     struct Channel {
         int id;
@@ -171,6 +172,8 @@ namespace TalkMe {
         float m_FontScale = 1.0f;
         std::unordered_set<std::string> m_BlockedUsers;
         bool m_IsInvisible = false;
+        Soundboard m_Soundboard;
+        bool m_ShowSoundboard = false;
 
         struct ChessGameState {
             bool active = false;

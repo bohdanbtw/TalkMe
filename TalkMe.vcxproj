@@ -199,6 +199,7 @@
     <ClInclude Include="src\game\Chess.h" />
     <ClInclude Include="src\game\FlappyBird.h" />
     <ClInclude Include="src\game\TicTacToe.h" />
+    <ClInclude Include="src\audio\Soundboard.h" />
     <ClInclude Include="src\ui\MarkdownRenderer.h" />
     <ClInclude Include="src\game\Racing.h" />
     <ClInclude Include="src\network\VoiceTransport.h" />

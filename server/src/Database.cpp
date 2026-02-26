@@ -149,6 +149,7 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN is_2fa_enabled INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT '';", 0, 0, 0);
+        sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN bio TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS trusted_devices (username TEXT, device_id TEXT, PRIMARY KEY(username, device_id));", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS sanctions (id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER, username TEXT, type TEXT, reason TEXT, expires_at DATETIME, created_by TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS roles (id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER, name TEXT, permissions INTEGER DEFAULT 0, color TEXT DEFAULT '#FFFFFF', position INTEGER DEFAULT 0);", 0, 0, 0);

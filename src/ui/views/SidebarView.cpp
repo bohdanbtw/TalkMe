@@ -185,6 +185,40 @@ namespace TalkMe::UI::Views {
                         if (sel) ImGui::PopStyleColor(2);
                     }
                 }
+
+                // Announcement channels
+                bool hasAnnounce = false;
+                for (const auto& ch : cur->channels) if (ch.type == ChannelType::Announcement) { hasAnnounce = true; break; }
+                if (hasAnnounce) {
+                    ImGui::Dummy(ImVec2(0, Styles::SectionPadding));
+                    ImGui::Indent(16);
+                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                    ImGui::Text("ANNOUNCEMENTS");
+                    ImGui::PopStyleColor();
+                    ImGui::Unindent(16);
+                    ImGui::Dummy(ImVec2(0, 4));
+
+                    for (const auto& ch : cur->channels) {
+                        if (ch.type != ChannelType::Announcement) continue;
+                        bool sel = (selectedChannelId == ch.id);
+                        std::string label = "  ! " + ch.name;
+                        if (sel) {
+                            ImGui::PushStyleColor(ImGuiCol_Header, Styles::ButtonSubtle());
+                            ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
+                        }
+                        ImGui::Indent(10);
+                        if (ImGui::Selectable(label.c_str(), sel, 0, ImVec2(sW - 30, 26))) {
+                            if (selectedChannelId != ch.id) {
+                                selectedChannelId = ch.id;
+                                showSettings = false;
+                                netClient.Send(PacketType::Select_Text_Channel, PacketHandler::SelectTextChannelPayload(ch.id));
+                                if (unreadCounts) (*unreadCounts)[ch.id] = 0;
+                            }
+                        }
+                        ImGui::Unindent(10);
+                        if (sel) ImGui::PopStyleColor(2);
+                    }
+                }
             }
         }
 
@@ -204,10 +238,12 @@ namespace TalkMe::UI::Views {
             ImGui::RadioButton("Voice", &type, 1);
             ImGui::SameLine();
             ImGui::RadioButton("Cinema", &type, 2);
+            ImGui::SameLine();
+            ImGui::RadioButton("Announce", &type, 3);
             ImGui::Dummy(ImVec2(0, 6));
             if (UI::AccentButton("Create", ImVec2(220, 30))) {
                 if (selectedServerId != -1 && strlen(newChannelNameBuf) > 0) {
-                    std::string tStr = (type == 2) ? "cinema" : (type == 1) ? "voice" : "text";
+                    std::string tStr = (type == 3) ? "announcement" : (type == 2) ? "cinema" : (type == 1) ? "voice" : "text";
                     netClient.Send(PacketType::Create_Channel_Request, PacketHandler::CreateChannelPayload(selectedServerId, newChannelNameBuf, tStr));
                     memset(newChannelNameBuf, 0, 64);
                     ImGui::CloseCurrentPopup();
