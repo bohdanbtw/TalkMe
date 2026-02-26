@@ -336,6 +336,10 @@ namespace TalkMe::UI::Views {
 
                     ImGui::SameLine();
                     ImGui::TextDisabled("%s", msg.timestamp.c_str());
+                    if (msg.pinned) {
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "[pinned]");
+                    }
 
                     ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextPrimary());
                     ImGui::TextWrapped("%s", msg.content.c_str());
@@ -415,6 +419,11 @@ namespace TalkMe::UI::Views {
                             }
                             ImGui::Separator();
 
+                            if (ImGui::Selectable(msg.pinned ? "Unpin Message" : "Pin Message")) {
+                                nlohmann::json pj;
+                                pj["mid"] = msg.id; pj["cid"] = selectedChannelId; pj["pin"] = !msg.pinned;
+                                netClient.Send(PacketType::Pin_Message_Request, pj.dump());
+                            }
                             if (isMe && ImGui::Selectable("Edit Message")) {
                                 s_editingMsgId = msg.id;
                                 strncpy_s(s_editBuf, msg.content.c_str(), sizeof(s_editBuf) - 1);

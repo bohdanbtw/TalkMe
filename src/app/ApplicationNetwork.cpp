@@ -328,7 +328,8 @@ void Application::ProcessNetworkMessages() {
                         ChatMessage cm{ item.value("mid", 0), item["cid"],
                                         item.value("u", ""), item.value("msg", ""),
                                         item.value("time", "Old"),
-                                        item.value("reply_to", 0) };
+                                        item.value("reply_to", 0),
+                                        item.value("pin", false) };
                         if (item.contains("reactions") && item["reactions"].is_object()) {
                             for (auto& [emoji, users] : item["reactions"].items()) {
                                 std::vector<std::string> userList;
