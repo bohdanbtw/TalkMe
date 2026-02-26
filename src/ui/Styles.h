@@ -1,5 +1,5 @@
 #pragma once
-#include "../../vendor/imgui.h"
+#include <imgui.h>
 #include <string>
 
 namespace TalkMe::UI {

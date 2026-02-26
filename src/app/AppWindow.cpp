@@ -1,8 +1,8 @@
 #include "AppWindow.h"
 #include "resource.h"
 #include "../core/ConfigManager.h"
-#include "../../vendor/imgui.h"
-#include "../../vendor/imgui_impl_win32.h"
+#include <imgui.h>
+#include <imgui_impl_win32.h>
 #include <tchar.h>
 #include <cstring>
 

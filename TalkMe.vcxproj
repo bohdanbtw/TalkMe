@@ -174,12 +174,7 @@
     <ClCompile Include="src\ui\Components.cpp" />
     <ClCompile Include="src\ui\Styles.cpp" />
     <ClCompile Include="src\ui\Theme.cpp" />
-    <ClCompile Include="vendor\imgui.cpp" />
-    <ClCompile Include="vendor\imgui_draw.cpp" />
-    <ClCompile Include="vendor\imgui_impl_dx11.cpp" />
-    <ClCompile Include="vendor\imgui_impl_win32.cpp" />
-    <ClCompile Include="vendor\imgui_tables.cpp" />
-    <ClCompile Include="vendor\imgui_widgets.cpp" />
+    <!-- ImGui now provided by vcpkg (imgui with dx11-binding and win32-binding features) -->
     <ClCompile Include="vendor\qrcodegen.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -217,16 +212,8 @@
     <ClInclude Include="src\ui\Components.h" />
     <ClInclude Include="src\ui\Styles.h" />
     <ClInclude Include="src\ui\Theme.h" />
-    <ClInclude Include="vendor\imconfig.h" />
-    <ClInclude Include="vendor\imgui.h" />
-    <ClInclude Include="vendor\imgui_impl_dx11.h" />
-    <ClInclude Include="vendor\imgui_impl_win32.h" />
-    <ClInclude Include="vendor\imgui_internal.h" />
-    <ClInclude Include="vendor\imstb_rectpack.h" />
-    <ClInclude Include="vendor\imstb_textedit.h" />
-    <ClInclude Include="vendor\imstb_truetype.h" />
+    <!-- ImGui, stb_image headers now from vcpkg -->
     <ClInclude Include="vendor\miniaudio.h" />
-    <ClInclude Include="vendor\stb_image.h" />
     <ClInclude Include="vendor\qrcodegen.hpp" />
   </ItemGroup>
   <ItemGroup>

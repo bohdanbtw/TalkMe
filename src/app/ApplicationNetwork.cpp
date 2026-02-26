@@ -4,7 +4,7 @@
 #include "../shared/Protocol.h"
 #include "../shared/PacketHandler.h"
 #include "../core/ConfigManager.h"
-#include "../../vendor/imgui.h"
+#include <imgui.h>
 #include <nlohmann/json.hpp>
 #include <cstring>
 #include <algorithm>

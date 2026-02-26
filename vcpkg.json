@@ -1,1 +1,17 @@
-{"name":"talkme","version":"0.1.0","description":"TalkMe voice chat client","dependencies":["asio","opus","nlohmann-json","speexdsp","libvpx"]}
+{
+  "name": "talkme",
+  "version": "0.1.0",
+  "description": "TalkMe voice chat client",
+  "dependencies": [
+    "asio",
+    "opus",
+    "nlohmann-json",
+    "speexdsp",
+    "libvpx",
+    "stb",
+    {
+      "name": "imgui",
+      "features": ["dx11-binding", "win32-binding"]
+    }
+  ]
+}

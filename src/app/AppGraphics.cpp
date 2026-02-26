@@ -5,9 +5,9 @@
 #include "../core/Logger.h"
 #include "../ui/Theme.h"
 #include "../ui/Styles.h"
-#include "../../vendor/imgui.h"
-#include "../../vendor/imgui_impl_win32.h"
-#include "../../vendor/imgui_impl_dx11.h"
+#include <imgui.h>
+#include <imgui_impl_win32.h>
+#include <imgui_impl_dx11.h>
 #include <cstdio>
 
 namespace TalkMe {
