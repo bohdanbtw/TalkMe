@@ -137,6 +137,25 @@ namespace TalkMe {
         bool m_ShowSearch = false;
         bool m_ShowShortcuts = false;
 
+        struct ChessGame {
+            bool active = false;
+            std::string opponent;
+            bool myTurn = false;
+            bool isWhite = true;
+            char board[8][8] = {
+                {'r','n','b','q','k','b','n','r'},
+                {'p','p','p','p','p','p','p','p'},
+                {' ',' ',' ',' ',' ',' ',' ',' '},
+                {' ',' ',' ',' ',' ',' ',' ',' '},
+                {' ',' ',' ',' ',' ',' ',' ',' '},
+                {' ',' ',' ',' ',' ',' ',' ',' '},
+                {'P','P','P','P','P','P','P','P'},
+                {'R','N','B','Q','K','B','N','R'}
+            };
+            int selectedRow = -1, selectedCol = -1;
+            std::string result;
+        } m_Chess;
+
         struct ScreenShareSettings {
             int fps = 30;
             int quality = 75;
