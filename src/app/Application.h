@@ -140,6 +140,9 @@ namespace TalkMe {
         bool m_ShowFriendList = false;
         char m_FriendSearchBuf[128] = "";
 
+        struct CallState { std::string otherUser; std::string state; };
+        CallState m_CurrentCall;
+
         struct DirectMessage { int id; std::string sender; std::string content; std::string timestamp; };
         std::vector<DirectMessage> m_DirectMessages;
         std::string m_ActiveDMUser;
