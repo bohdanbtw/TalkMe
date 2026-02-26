@@ -208,28 +208,48 @@ void Application::ProcessNetworkMessages() {
             }
 
             if (msg.type == PacketType::Game_Challenge) {
-                m_ChessUI.opponent = j.value("from", "");
-                m_ChessUI.active = false;
+                std::string game = j.value("game", "chess");
+                std::string from = j.value("from", "");
+                if (game == "racing") {
+                    // Auto-accept racing for now (show popup later)
+                    m_Racing.Reset(m_CurrentUser.username, from);
+                } else {
+                    m_ChessUI.opponent = from;
+                    m_ChessUI.active = false;
+                }
                 continue;
             }
 
             if (msg.type == PacketType::Game_State) {
                 if (j.contains("action") && j["action"] == "accept") {
-                    m_ChessEngine.Reset();
-                    m_ChessUI.active = true;
-                    m_ChessUI.isWhite = (j.value("from", "") != m_CurrentUser.username);
-                    m_ChessUI.myTurn = m_ChessUI.isWhite;
-                    m_ChessUI.selectedRow = -1;
-                    m_ChessUI.selectedCol = -1;
+                    std::string game = j.value("game", "chess");
+                    if (game == "racing") {
+                        m_Racing.Reset(m_CurrentUser.username, j.value("from", ""));
+                    } else {
+                        m_ChessEngine.Reset();
+                        m_ChessUI.active = true;
+                        m_ChessUI.isWhite = (j.value("from", "") != m_CurrentUser.username);
+                        m_ChessUI.myTurn = m_ChessUI.isWhite;
+                        m_ChessUI.selectedRow = -1;
+                        m_ChessUI.selectedCol = -1;
+                    }
                 }
                 continue;
             }
 
             if (msg.type == PacketType::Game_Move) {
+                // Chess moves
                 if (m_ChessUI.active && j.contains("fr") && j.contains("fc") && j.contains("tr") && j.contains("tc")) {
                     int fr = j["fr"], fc = j["fc"], tr = j["tr"], tc = j["tc"];
                     m_ChessEngine.MakeMove(fr, fc, tr, tc);
                     m_ChessUI.myTurn = true;
+                }
+                // Racing position updates
+                if (m_Racing.active && j.contains("x") && j.contains("y")) {
+                    m_Racing.UpdateOpponent(
+                        j.value("x", 0.0f), j.value("y", 0.0f),
+                        j.value("angle", 0.0f), j.value("speed", 0.0f),
+                        j.value("lap", 0), j.value("cp", 0));
                 }
                 continue;
             }

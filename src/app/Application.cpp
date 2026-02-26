@@ -1469,6 +1469,16 @@ namespace TalkMe {
             ImGui::SetWindowFontScale(1.0f);
             ImGui::PopStyleColor();
 
+            // Custom status
+            ImGui::PushItemWidth(friendW - 140);
+            if (ImGui::InputTextWithHint("##status_input", "Set your status...", m_StatusBuf, sizeof(m_StatusBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+                nlohmann::json sj; sj["status"] = std::string(m_StatusBuf);
+                m_NetClient.Send(PacketType::Set_Status, sj.dump());
+            }
+            ImGui::PopItemWidth();
+            ImGui::SameLine();
+            ImGui::TextDisabled("Enter to set");
+
             ImGui::Dummy(ImVec2(0, 8));
             ImGui::PushItemWidth(friendW - 180);
             ImGui::InputTextWithHint("##friend_add", "Add friend (username#tag)...", m_FriendSearchBuf, sizeof(m_FriendSearchBuf));
@@ -1532,6 +1542,11 @@ namespace TalkMe {
                 ImVec2 pos = ImGui::GetCursorScreenPos();
                 ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(pos.x + 42, pos.y + 8), 5.0f, IM_COL32(80, 220, 100, 255));
                 ImGui::Text("      %s", disp.c_str());
+                auto statusIt = m_UserStatuses.find(f.username);
+                if (statusIt != m_UserStatuses.end() && !statusIt->second.empty()) {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("- %s", statusIt->second.c_str());
+                }
                 ImGui::SameLine();
                 if (m_CurrentCall.state.empty() && ImGui::SmallButton(("Call##" + f.username).c_str())) {
                     nlohmann::json cj; cj["to"] = f.username;
@@ -1781,7 +1796,8 @@ namespace TalkMe {
                         return streamers.empty() ? nullptr : &streamers;
                     }(),
                     &m_ScreenShare.viewingStream,
-                    &m_ScreenShare.maximized);
+                    &m_ScreenShare.maximized,
+                    &m_ShowGifPicker);
             }
         }
     }

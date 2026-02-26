@@ -147,6 +147,7 @@ namespace TalkMe {
         bool m_ShowGifPicker = false;
         char m_GifSearchBuf[128] = "";
         TenorAPI m_TenorAPI;
+        char m_StatusBuf[128] = "";
 
         struct ChessGameState {
             bool active = false;
