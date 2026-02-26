@@ -830,6 +830,93 @@ namespace TalkMe {
             ImGui::End();
         }
 
+        if (m_Chess.active) {
+            ImGui::SetNextWindowSize(ImVec2(380, 440), ImGuiCond_FirstUseEver);
+            bool chessOpen = m_Chess.active;
+            if (ImGui::Begin("Chess", &chessOpen)) {
+                std::string oppDisp = m_Chess.opponent;
+                size_t hp = oppDisp.find('#');
+                if (hp != std::string::npos) oppDisp = oppDisp.substr(0, hp);
+                ImGui::Text("vs %s  |  You are %s  |  %s",
+                    oppDisp.c_str(),
+                    m_Chess.isWhite ? "White" : "Black",
+                    m_Chess.myTurn ? "Your turn" : "Waiting...");
+
+                float cellSz = 40.0f;
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                ImVec2 origin = ImGui::GetCursorScreenPos();
+
+                for (int r = 0; r < 8; r++) {
+                    for (int c = 0; c < 8; c++) {
+                        ImVec2 p0(origin.x + c * cellSz, origin.y + r * cellSz);
+                        ImVec2 p1(p0.x + cellSz, p0.y + cellSz);
+                        bool light = ((r + c) % 2 == 0);
+                        ImU32 bgCol = light ? IM_COL32(238, 238, 210, 255) : IM_COL32(118, 150, 86, 255);
+                        if (m_Chess.selectedRow == r && m_Chess.selectedCol == c)
+                            bgCol = IM_COL32(255, 255, 100, 255);
+                        dl->AddRectFilled(p0, p1, bgCol);
+
+                        char piece = m_Chess.board[r][c];
+                        if (piece != ' ') {
+                            char label[2] = { piece, 0 };
+                            ImVec2 tsz = ImGui::CalcTextSize(label);
+                            ImU32 pcol = (piece >= 'A' && piece <= 'Z') ? IM_COL32(255, 255, 255, 255) : IM_COL32(30, 30, 30, 255);
+                            dl->AddText(ImVec2(p0.x + (cellSz - tsz.x) * 0.5f, p0.y + (cellSz - tsz.y) * 0.5f), pcol, label);
+                        }
+                    }
+                }
+
+                ImGui::InvisibleButton("##chessboard", ImVec2(8 * cellSz, 8 * cellSz));
+                if (m_Chess.myTurn && ImGui::IsItemClicked()) {
+                    ImVec2 mouse = ImGui::GetMousePos();
+                    int clickCol = (int)((mouse.x - origin.x) / cellSz);
+                    int clickRow = (int)((mouse.y - origin.y) / cellSz);
+                    if (clickRow >= 0 && clickRow < 8 && clickCol >= 0 && clickCol < 8) {
+                        if (m_Chess.selectedRow == -1) {
+                            char piece = m_Chess.board[clickRow][clickCol];
+                            bool isMyPiece = m_Chess.isWhite ? (piece >= 'A' && piece <= 'Z') : (piece >= 'a' && piece <= 'z');
+                            if (isMyPiece) { m_Chess.selectedRow = clickRow; m_Chess.selectedCol = clickCol; }
+                        } else {
+                            nlohmann::json mj;
+                            mj["opponent"] = m_Chess.opponent;
+                            mj["fr"] = m_Chess.selectedRow; mj["fc"] = m_Chess.selectedCol;
+                            mj["tr"] = clickRow; mj["tc"] = clickCol;
+                            m_Chess.board[clickRow][clickCol] = m_Chess.board[m_Chess.selectedRow][m_Chess.selectedCol];
+                            m_Chess.board[m_Chess.selectedRow][m_Chess.selectedCol] = ' ';
+                            m_Chess.myTurn = false;
+                            m_Chess.selectedRow = -1; m_Chess.selectedCol = -1;
+                            m_NetClient.Send(PacketType::Game_Move, mj.dump());
+                        }
+                    }
+                }
+
+                if (!m_Chess.result.empty()) ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "%s", m_Chess.result.c_str());
+                if (ImGui::Button("Resign")) { m_Chess.active = false; m_Chess.opponent.clear(); }
+            }
+            ImGui::End();
+            if (!chessOpen) { m_Chess.active = false; m_Chess.opponent.clear(); }
+        }
+
+        if (!m_Chess.active && !m_Chess.opponent.empty()) {
+            ImGui::SetNextWindowSize(ImVec2(280, 80), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin("Game Challenge", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+                std::string challenger = m_Chess.opponent;
+                size_t hp = challenger.find('#');
+                if (hp != std::string::npos) challenger = challenger.substr(0, hp);
+                ImGui::Text("%s challenges you to Chess!", challenger.c_str());
+                if (ImGui::Button("Accept")) {
+                    nlohmann::json aj; aj["to"] = m_Chess.opponent; aj["action"] = "accept"; aj["game"] = "chess";
+                    m_NetClient.Send(PacketType::Game_Accept, aj.dump());
+                    m_Chess.active = true;
+                    m_Chess.isWhite = false;
+                    m_Chess.myTurn = false;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Decline")) { m_Chess.opponent.clear(); }
+            }
+            ImGui::End();
+        }
+
         if (m_ShowShortcuts) {
             ImGui::SetNextWindowSize(ImVec2(300, 250), ImGuiCond_FirstUseEver);
             if (ImGui::Begin("Keyboard Shortcuts", &m_ShowShortcuts)) {

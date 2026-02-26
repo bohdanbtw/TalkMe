@@ -189,6 +189,45 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            if (msg.type == PacketType::Game_Challenge) {
+                m_Chess.opponent = j.value("from", "");
+                m_Chess.active = false;
+                continue;
+            }
+
+            if (msg.type == PacketType::Game_State) {
+                if (j.contains("action") && j["action"] == "accept") {
+                    m_Chess.active = true;
+                    m_Chess.isWhite = (j.value("from", "") != m_CurrentUser.username);
+                    m_Chess.myTurn = m_Chess.isWhite;
+                    m_Chess.result.clear();
+                    char init[8][8] = {
+                        {'r','n','b','q','k','b','n','r'},
+                        {'p','p','p','p','p','p','p','p'},
+                        {' ',' ',' ',' ',' ',' ',' ',' '},
+                        {' ',' ',' ',' ',' ',' ',' ',' '},
+                        {' ',' ',' ',' ',' ',' ',' ',' '},
+                        {' ',' ',' ',' ',' ',' ',' ',' '},
+                        {'P','P','P','P','P','P','P','P'},
+                        {'R','N','B','Q','K','B','N','R'}
+                    };
+                    memcpy(m_Chess.board, init, sizeof(init));
+                }
+                continue;
+            }
+
+            if (msg.type == PacketType::Game_Move) {
+                if (m_Chess.active && j.contains("fr") && j.contains("fc") && j.contains("tr") && j.contains("tc")) {
+                    int fr = j["fr"], fc = j["fc"], tr = j["tr"], tc = j["tc"];
+                    if (fr >= 0 && fr < 8 && fc >= 0 && fc < 8 && tr >= 0 && tr < 8 && tc >= 0 && tc < 8) {
+                        m_Chess.board[tr][tc] = m_Chess.board[fr][fc];
+                        m_Chess.board[fr][fc] = ' ';
+                        m_Chess.myTurn = true;
+                    }
+                }
+                continue;
+            }
+
             if (msg.type == PacketType::Screen_Share_State) {
                 std::string action = j.value("action", "");
                 std::string user = j.value("u", "");

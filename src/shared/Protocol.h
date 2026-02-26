@@ -185,6 +185,12 @@ namespace TalkMe {
         Member_List_Request, // Client -> Server: request member list for a server
         Member_List_Response,// Server -> Client: list of members in a server with online status
 
+        // --- MINIGAMES ---
+        Game_Challenge,      // Client -> Server -> Target: challenge someone to a game
+        Game_Accept,         // Client -> Server -> Challenger: accept game
+        Game_Move,           // Client -> Server -> Opponent: make a move
+        Game_State,          // Server -> Client: game state update (board, turn, result)
+
         // --- PAGINATION ---
         Message_History_Page,// Client -> Server: request older messages (before_id)
 
