@@ -126,6 +126,12 @@ namespace TalkMe {
         Edit_Message_Request,
         Pin_Message_Request,
 
+        // --- DIRECT MESSAGES ---
+        DM_Send,             // Client -> Server: send direct message to friend
+        DM_Receive,          // Server -> Client: incoming direct message
+        DM_History_Request,  // Client -> Server: request DM history with a user
+        DM_History_Response, // Server -> Client: DM history with a user
+
         // --- FRIENDS ---
         Friend_Request,      // Client -> Server: send friend request
         Friend_Accept,       // Client -> Server: accept friend request

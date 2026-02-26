@@ -724,6 +724,13 @@ namespace TalkMe {
                     ImGui::Dummy(ImVec2(16, 0)); ImGui::SameLine();
                     ImGui::Text("%s", disp.c_str());
                     ImGui::SameLine();
+                    if (ImGui::SmallButton(("Message##" + f.username).c_str())) {
+                        m_ActiveDMUser = f.username;
+                        m_DirectMessages.clear();
+                        nlohmann::json hj; hj["u"] = f.username;
+                        m_NetClient.Send(PacketType::DM_History_Request, hj.dump());
+                    }
+                    ImGui::SameLine();
                     if (ImGui::SmallButton(("Remove##" + f.username).c_str())) {
                         nlohmann::json rj; rj["u"] = f.username;
                         m_NetClient.Send(PacketType::Friend_Reject, rj.dump());
@@ -732,6 +739,44 @@ namespace TalkMe {
 
                 if (m_Friends.empty() || std::none_of(m_Friends.begin(), m_Friends.end(), [](const FriendEntry& f) { return f.status == "accepted"; })) {
                     ImGui::TextDisabled("No friends yet. Add someone by their username#tag.");
+                }
+
+                if (!m_ActiveDMUser.empty()) {
+                    ImGui::Separator();
+                    std::string dmDisp = m_ActiveDMUser;
+                    size_t dhp = dmDisp.find('#');
+                    if (dhp != std::string::npos) dmDisp = dmDisp.substr(0, dhp);
+                    ImGui::Text("DM: %s", dmDisp.c_str());
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("X##closedm")) m_ActiveDMUser.clear();
+
+                    ImGui::BeginChild("DMMessages", ImVec2(0, -32), true);
+                    for (const auto& dm : m_DirectMessages) {
+                        bool isMe = (dm.sender == m_CurrentUser.username);
+                        std::string senderDisp = dm.sender;
+                        size_t shp = senderDisp.find('#');
+                        if (shp != std::string::npos) senderDisp = senderDisp.substr(0, shp);
+                        ImGui::TextColored(isMe ? ImVec4(0.4f, 0.6f, 1.0f, 1.0f) : ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+                            "%s", senderDisp.c_str());
+                        ImGui::SameLine();
+                        ImGui::TextDisabled("%s", dm.timestamp.c_str());
+                        ImGui::TextWrapped("%s", dm.content.c_str());
+                        ImGui::Dummy(ImVec2(0, 4));
+                    }
+                    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
+                    ImGui::EndChild();
+
+                    ImGui::PushItemWidth(-60);
+                    bool dmSend = ImGui::InputText("##dm_in", m_DMInputBuf, sizeof(m_DMInputBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+                    ImGui::PopItemWidth();
+                    ImGui::SameLine();
+                    if ((ImGui::SmallButton("Send##dm") || dmSend) && strlen(m_DMInputBuf) > 0) {
+                        nlohmann::json dj;
+                        dj["to"] = m_ActiveDMUser;
+                        dj["msg"] = std::string(m_DMInputBuf);
+                        m_NetClient.Send(PacketType::DM_Send, dj.dump());
+                        memset(m_DMInputBuf, 0, sizeof(m_DMInputBuf));
+                    }
                 }
             }
             ImGui::End();

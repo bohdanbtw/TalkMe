@@ -138,6 +138,11 @@ namespace TalkMe {
         std::vector<FriendEntry> m_Friends;
         bool m_ShowFriendList = false;
         char m_FriendSearchBuf[128] = "";
+
+        struct DirectMessage { int id; std::string sender; std::string content; std::string timestamp; };
+        std::vector<DirectMessage> m_DirectMessages;
+        std::string m_ActiveDMUser;
+        char m_DMInputBuf[1024] = "";
         std::mutex m_RecentSpeakersMutex;
         std::vector<std::string> m_RecentSpeakers;  // drained each frame to update m_SpeakingTimers
         std::mutex m_VoiceDedupeMutex;
