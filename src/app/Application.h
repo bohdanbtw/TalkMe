@@ -25,6 +25,7 @@
 #include "../screen/DXGICapture.h"
 #include "../screen/H264Encoder.h"
 #include "../screen/AudioLoopback.h"
+#include "../network/TenorAPI.h"
 #include "../game/Racing.h"
 
 namespace TalkMe {
@@ -143,6 +144,9 @@ namespace TalkMe {
         char m_SearchBuf[256] = "";
         bool m_ShowSearch = false;
         bool m_ShowShortcuts = false;
+        bool m_ShowGifPicker = false;
+        char m_GifSearchBuf[128] = "";
+        TenorAPI m_TenorAPI;
 
         struct ChessGameState {
             bool active = false;

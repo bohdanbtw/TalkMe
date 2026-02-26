@@ -713,6 +713,8 @@ namespace TalkMe {
             m_ShowShortcuts = !m_ShowShortcuts;
         if (ImGui::IsKeyPressed(ImGuiKey_F2))
             m_ShowFriendList = !m_ShowFriendList;
+        if (ImGui::IsKeyPressed(ImGuiKey_F4))
+            m_ShowGifPicker = !m_ShowGifPicker;
 
         if (m_CurrentState == AppState::Login) RenderLogin();
         else if (m_CurrentState == AppState::Login2FA) RenderLogin2FA();
@@ -1135,6 +1137,75 @@ namespace TalkMe {
             }
             ImGui::End();
             if (!raceOpen) m_Racing.active = false;
+        }
+
+        // GIF Picker (Tenor)
+        if (m_ShowGifPicker && m_CurrentState == AppState::MainApp) {
+            ImGui::SetNextWindowSize(ImVec2(420, 350), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin("GIF Search (Tenor)", &m_ShowGifPicker)) {
+                ImGui::PushItemWidth(-70);
+                bool searchEnter = ImGui::InputTextWithHint("##gif_search", "Search GIFs...", m_GifSearchBuf, sizeof(m_GifSearchBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+                ImGui::PopItemWidth();
+                ImGui::SameLine();
+                if ((ImGui::Button("Search", ImVec2(60, 0)) || searchEnter) && strlen(m_GifSearchBuf) > 0) {
+                    m_TenorAPI.Search(m_GifSearchBuf, 20, nullptr);
+                }
+
+                if (m_TenorAPI.IsSearching()) {
+                    ImGui::TextDisabled("Searching...");
+                }
+
+                ImGui::Separator();
+                ImGui::BeginChild("GifResults", ImVec2(0, 0), false);
+
+                auto results = m_TenorAPI.GetCachedResults();
+                if (results.empty() && !m_TenorAPI.IsSearching()) {
+                    ImGui::TextDisabled("Search for GIFs above, or click Trending");
+                    ImGui::Dummy(ImVec2(0, 4));
+                    if (ImGui::Button("Trending GIFs")) {
+                        m_TenorAPI.Trending(20, nullptr);
+                    }
+                }
+
+                float colW = 190.0f;
+                int cols = (std::max)(1, (int)(ImGui::GetContentRegionAvail().x / colW));
+                int col = 0;
+
+                for (const auto& gif : results) {
+                    ImGui::PushID(gif.id.c_str());
+
+                    std::string label = gif.title;
+                    if (label.size() > 25) label = label.substr(0, 24) + "...";
+                    if (label.empty()) label = "GIF";
+
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.2f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.25f, 0.35f, 1.0f));
+                    if (ImGui::Button(label.c_str(), ImVec2(colW - 10, 50))) {
+                        // Send GIF URL as a chat message
+                        if (m_SelectedChannelId != -1) {
+                            nlohmann::json msgJ;
+                            msgJ["cid"] = m_SelectedChannelId;
+                            msgJ["u"] = m_CurrentUser.username;
+                            msgJ["msg"] = gif.gifUrl;
+                            m_NetClient.Send(PacketType::Message_Text, msgJ.dump());
+                            m_ShowGifPicker = false;
+                        }
+                    }
+                    ImGui::PopStyleColor(2);
+                    if (ImGui::IsItemHovered() && !gif.gifUrl.empty()) {
+                        ImGui::SetTooltip("%s\n%s", gif.title.c_str(), gif.gifUrl.c_str());
+                    }
+
+                    col++;
+                    if (col < cols) ImGui::SameLine();
+                    else col = 0;
+
+                    ImGui::PopID();
+                }
+
+                ImGui::EndChild();
+            }
+            ImGui::End();
         }
 
         if (m_ShowShortcuts) {
