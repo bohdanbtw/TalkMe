@@ -1213,6 +1213,59 @@ namespace TalkMe {
             if (!flappyOpen) m_FlappyBird.active = false;
         }
 
+        // Tic-Tac-Toe
+        if (m_TicTacToe.active) {
+            ImGui::SetNextWindowSize(ImVec2(250, 310), ImGuiCond_FirstUseEver);
+            bool tttOpen = m_TicTacToe.active;
+            if (ImGui::Begin("Tic-Tac-Toe", &tttOpen)) {
+                std::string opp = m_TicTacToe.opponent;
+                size_t hp = opp.find('#'); if (hp != std::string::npos) opp = opp.substr(0, hp);
+                ImGui::Text("vs %s  |  You: %c  |  %s", opp.c_str(), m_TicTacToe.MyPiece(),
+                    m_TicTacToe.result.empty() ? (m_TicTacToe.myTurn ? "Your turn" : "Waiting...") : m_TicTacToe.result.c_str());
+                ImGui::Dummy(ImVec2(0, 8));
+
+                float cellSz = 65.0f;
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                ImVec2 origin = ImGui::GetCursorScreenPos();
+
+                for (int r = 0; r < 3; r++) {
+                    for (int c = 0; c < 3; c++) {
+                        int idx = r * 3 + c;
+                        ImVec2 p0(origin.x + c * cellSz, origin.y + r * cellSz);
+                        ImVec2 p1(p0.x + cellSz - 2, p0.y + cellSz - 2);
+                        dl->AddRectFilled(p0, p1, IM_COL32(35, 35, 42, 255), 4.0f);
+
+                        if (m_TicTacToe.board[idx] == 'X') {
+                            dl->AddLine(ImVec2(p0.x + 12, p0.y + 12), ImVec2(p1.x - 12, p1.y - 12), IM_COL32(100, 180, 255, 255), 3.0f);
+                            dl->AddLine(ImVec2(p1.x - 12, p0.y + 12), ImVec2(p0.x + 12, p1.y - 12), IM_COL32(100, 180, 255, 255), 3.0f);
+                        } else if (m_TicTacToe.board[idx] == 'O') {
+                            float cx = (p0.x + p1.x) * 0.5f, cy = (p0.y + p1.y) * 0.5f;
+                            dl->AddCircle(ImVec2(cx, cy), 20.0f, IM_COL32(255, 100, 100, 255), 0, 3.0f);
+                        }
+                    }
+                }
+
+                ImGui::InvisibleButton("##ttt", ImVec2(cellSz * 3, cellSz * 3));
+                if (m_TicTacToe.myTurn && m_TicTacToe.result.empty() && ImGui::IsItemClicked()) {
+                    ImVec2 mouse = ImGui::GetMousePos();
+                    int col = (int)((mouse.x - origin.x) / cellSz);
+                    int row = (int)((mouse.y - origin.y) / cellSz);
+                    if (col >= 0 && col < 3 && row >= 0 && row < 3) {
+                        int cell = row * 3 + col;
+                        if (m_TicTacToe.MakeMove(cell, m_TicTacToe.MyPiece())) {
+                            m_TicTacToe.myTurn = false;
+                            nlohmann::json mj; mj["opponent"] = m_TicTacToe.opponent; mj["cell"] = cell;
+                            m_NetClient.Send(PacketType::Game_Move, mj.dump());
+                        }
+                    }
+                }
+
+                if (ImGui::Button("Quit")) m_TicTacToe.active = false;
+            }
+            ImGui::End();
+            if (!tttOpen) m_TicTacToe.active = false;
+        }
+
         // GIF Picker (Tenor)
         if (m_ShowGifPicker && m_CurrentState == AppState::MainApp) {
             ImGui::SetNextWindowSize(ImVec2(420, 350), ImGuiCond_FirstUseEver);

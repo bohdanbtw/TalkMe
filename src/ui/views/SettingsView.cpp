@@ -138,8 +138,41 @@ namespace TalkMe::UI::Views {
         }
 
         ImGui::Dummy(ImVec2(0, 24));
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0, 12));
+
+        ImGui::Text("Font Size");
+        ImGui::TextDisabled("Adjust the UI text scale");
+        ImGui::Dummy(ImVec2(0, 4));
+        static float s_fontScale = ImGui::GetIO().FontGlobalScale;
+        if (ImGui::SliderFloat("##fontscale", &s_fontScale, 0.7f, 1.5f, "%.1fx")) {
+            ImGui::GetIO().FontGlobalScale = s_fontScale;
+        }
+
+        ImGui::Dummy(ImVec2(0, 12));
+        ImGui::Text("Layout");
+        ImGui::Dummy(ImVec2(0, 4));
+        static bool s_compact = false;
+        if (ImGui::Checkbox("Compact Mode", &s_compact)) {
+            ImGuiStyle& st = ImGui::GetStyle();
+            if (s_compact) {
+                st.ItemSpacing = ImVec2(6, 4);
+                st.FramePadding = ImVec2(8, 4);
+                st.WindowPadding = ImVec2(8, 8);
+            } else {
+                st.ItemSpacing = ImVec2(10, 8);
+                st.FramePadding = ImVec2(12, 8);
+                st.WindowPadding = ImVec2(14, 14);
+            }
+        }
+        ImGui::TextDisabled("Reduce padding between UI elements");
+
+        ImGui::Dummy(ImVec2(0, 24));
         if (ImGui::Button("Reset to defaults")) {
             if (ctx.onResetToDefaults) ctx.onResetToDefaults();
+            s_fontScale = 1.0f;
+            ImGui::GetIO().FontGlobalScale = 1.0f;
+            s_compact = false;
         }
     }
 
