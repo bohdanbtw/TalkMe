@@ -533,6 +533,39 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Add_Reaction) {
+                if (!j.contains("mid") || !j.contains("emoji")) return;
+                int mid = j["mid"];
+                std::string emoji = j["emoji"];
+                if (emoji.size() > 16) return;
+                Database::Get().AddReaction(mid, m_Username, emoji);
+                json out;
+                out["mid"] = mid;
+                out["emoji"] = emoji;
+                out["u"] = m_Username;
+                out["action"] = "add";
+                out["reactions"] = json::parse(Database::Get().GetReactionsJSON(mid));
+                if (j.contains("cid"))
+                    m_Server.BroadcastToChannelMembers(j["cid"], PacketType::Reaction_Update, out.dump());
+                return;
+            }
+
+            if (m_Header.type == PacketType::Remove_Reaction) {
+                if (!j.contains("mid") || !j.contains("emoji")) return;
+                int mid = j["mid"];
+                std::string emoji = j["emoji"];
+                Database::Get().RemoveReaction(mid, m_Username, emoji);
+                json out;
+                out["mid"] = mid;
+                out["emoji"] = emoji;
+                out["u"] = m_Username;
+                out["action"] = "remove";
+                out["reactions"] = json::parse(Database::Get().GetReactionsJSON(mid));
+                if (j.contains("cid"))
+                    m_Server.BroadcastToChannelMembers(j["cid"], PacketType::Reaction_Update, out.dump());
+                return;
+            }
+
             if (m_Header.type == PacketType::Delete_Channel_Request) {
                 if (!j.contains("cid") || !j.contains("sid")) return;
                 if (Database::Get().DeleteChannel(j["cid"], m_Username)) {

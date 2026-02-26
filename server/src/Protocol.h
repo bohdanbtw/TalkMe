@@ -126,6 +126,11 @@ namespace TalkMe {
         Edit_Message_Request,
         Pin_Message_Request,
 
+        // --- REACTIONS ---
+        Add_Reaction,        // Client -> Server: add emoji reaction to message
+        Remove_Reaction,     // Client -> Server: remove own reaction
+        Reaction_Update,     // Server -> Client: broadcast reaction change
+
         // --- PRESENCE ---
         Voice_Mute_State,    // Client -> Server -> All: user muted/deafened state change
         Typing_Indicator,    // Client -> Server -> Channel: user is typing

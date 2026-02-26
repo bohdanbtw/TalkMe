@@ -46,6 +46,7 @@ namespace TalkMe {
         std::string content;
         std::string timestamp;
         int replyToId = 0;
+        std::map<std::string, std::vector<std::string>> reactions;
     };
 
     class Application {

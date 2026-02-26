@@ -141,6 +141,7 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN attachment_id TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN reply_to INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE channels ADD COLUMN description TEXT DEFAULT '';", 0, 0, 0);
+        sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS reactions (message_id INTEGER, username TEXT, emoji TEXT, PRIMARY KEY(message_id, username, emoji));", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE server_members ADD COLUMN permissions INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN is_2fa_enabled INTEGER DEFAULT 0;", 0, 0, 0);
@@ -569,8 +570,32 @@ namespace TalkMe {
                 const char* editVal = (const char*)sqlite3_column_text(stmt, 5);
                 const char* attVal = (const char*)sqlite3_column_text(stmt, 7);
                 int replyTo = sqlite3_column_int(stmt, 8);
-                json entry = { {"mid", sqlite3_column_int(stmt, 0)}, {"cid", sqlite3_column_int(stmt, 1)}, {"u", u ? u : ""}, {"msg", m ? m : ""}, {"time", t ? t : ""}, {"edit", editVal ? editVal : ""}, {"pin", sqlite3_column_int(stmt, 6) != 0}, {"attachment", attVal ? attVal : ""} };
+                int mid = sqlite3_column_int(stmt, 0);
+                json entry = { {"mid", mid}, {"cid", sqlite3_column_int(stmt, 1)}, {"u", u ? u : ""}, {"msg", m ? m : ""}, {"time", t ? t : ""}, {"edit", editVal ? editVal : ""}, {"pin", sqlite3_column_int(stmt, 6) != 0}, {"attachment", attVal ? attVal : ""} };
                 if (replyTo > 0) entry["reply_to"] = replyTo;
+
+                sqlite3_stmt* rStmt = nullptr;
+                if (sqlite3_prepare_v2(m_Db, "SELECT emoji, GROUP_CONCAT(username) FROM reactions WHERE message_id = ? GROUP BY emoji;", -1, &rStmt, 0) == SQLITE_OK) {
+                    sqlite3_bind_int(rStmt, 1, mid);
+                    json reactions = json::object();
+                    while (sqlite3_step(rStmt) == SQLITE_ROW) {
+                        const char* em = (const char*)sqlite3_column_text(rStmt, 0);
+                        const char* us = (const char*)sqlite3_column_text(rStmt, 1);
+                        if (em && us) {
+                            json arr = json::array();
+                            std::string uStr(us);
+                            size_t p = 0;
+                            while ((p = uStr.find(',')) != std::string::npos) {
+                                arr.push_back(uStr.substr(0, p));
+                                uStr.erase(0, p + 1);
+                            }
+                            if (!uStr.empty()) arr.push_back(uStr);
+                            reactions[em] = arr;
+                        }
+                    }
+                    sqlite3_finalize(rStmt);
+                    if (!reactions.empty()) entry["reactions"] = reactions;
+                }
                 j.push_back(entry);
             }
             sqlite3_finalize(stmt);
@@ -663,6 +688,60 @@ namespace TalkMe {
             sqlite3_finalize(stmt);
         }
         return users;
+    }
+
+    bool Database::AddReaction(int messageId, const std::string& username, const std::string& emoji) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool ok = false;
+        if (sqlite3_prepare_v2(m_Db, "INSERT OR IGNORE INTO reactions (message_id, username, emoji) VALUES (?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, messageId);
+            sqlite3_bind_text(stmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, emoji.c_str(), -1, SQLITE_TRANSIENT);
+            ok = (sqlite3_step(stmt) == SQLITE_DONE);
+            sqlite3_finalize(stmt);
+        }
+        return ok;
+    }
+
+    bool Database::RemoveReaction(int messageId, const std::string& username, const std::string& emoji) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool ok = false;
+        if (sqlite3_prepare_v2(m_Db, "DELETE FROM reactions WHERE message_id = ? AND username = ? AND emoji = ?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, messageId);
+            sqlite3_bind_text(stmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, emoji.c_str(), -1, SQLITE_TRANSIENT);
+            ok = (sqlite3_step(stmt) == SQLITE_DONE);
+            sqlite3_finalize(stmt);
+        }
+        return ok;
+    }
+
+    std::string Database::GetReactionsJSON(int messageId) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        json j = json::object();
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "SELECT emoji, GROUP_CONCAT(username) FROM reactions WHERE message_id = ? GROUP BY emoji;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, messageId);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* emoji = (const char*)sqlite3_column_text(stmt, 0);
+                const char* users = (const char*)sqlite3_column_text(stmt, 1);
+                if (emoji && users) {
+                    json arr = json::array();
+                    std::string userStr(users);
+                    size_t pos = 0;
+                    while ((pos = userStr.find(',')) != std::string::npos) {
+                        arr.push_back(userStr.substr(0, pos));
+                        userStr.erase(0, pos + 1);
+                    }
+                    if (!userStr.empty()) arr.push_back(userStr);
+                    j[emoji] = arr;
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+        return j.dump();
     }
 
     bool Database::DeleteChannel(int channelId, const std::string& username) {
