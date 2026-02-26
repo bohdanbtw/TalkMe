@@ -19,6 +19,8 @@ public:
     /// Register callbacks before Create. onDestroy is called on WM_DESTROY (after clearing handle).
     void SetOnDestroy(std::function<void()> fn) { m_OnDestroy = std::move(fn); }
     void SetOnResize(std::function<void(UINT, UINT)> fn) { m_OnResize = std::move(fn); }
+    void SetOnRenderFrame(std::function<void()> fn) { m_OnRenderFrame = std::move(fn); }
+    bool IsResizing() const { return m_IsResizing; }
 
     /// Create window and load icons. Ensures assets dir exists and has icons. Returns false on failure.
     bool Create(int width, int height, const std::string& title);
@@ -40,6 +42,8 @@ private:
     HICON m_HiconBig = nullptr;
     std::function<void()> m_OnDestroy;
     std::function<void(UINT, UINT)> m_OnResize;
+    std::function<void()> m_OnRenderFrame;
+    bool m_IsResizing = false;
 };
 
 } // namespace TalkMe

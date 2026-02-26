@@ -132,6 +132,23 @@ LRESULT AppWindow::HandleMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
         if (wParam != SIZE_MINIMIZED && m_OnResize)
             m_OnResize((UINT)LOWORD(lParam), (UINT)HIWORD(lParam));
         return 0;
+    case WM_ENTERSIZEMOVE:
+        m_IsResizing = true;
+        SetTimer(hWnd, 1, 16, nullptr); // 60fps timer during resize
+        return 0;
+    case WM_EXITSIZEMOVE:
+        m_IsResizing = false;
+        KillTimer(hWnd, 1);
+        // Final resize with current size
+        if (m_OnResize) {
+            RECT rc; GetClientRect(hWnd, &rc);
+            m_OnResize((UINT)(rc.right - rc.left), (UINT)(rc.bottom - rc.top));
+        }
+        return 0;
+    case WM_TIMER:
+        if (wParam == 1 && m_IsResizing && m_OnRenderFrame)
+            m_OnRenderFrame();
+        return 0;
     case WM_SYSCOMMAND:
         if ((wParam & 0xfff0) == SC_KEYMENU) return 0;
         break;
