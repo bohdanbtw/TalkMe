@@ -149,6 +149,15 @@ namespace TalkMe {
         ChessEngine m_ChessEngine;
         RacingGame m_Racing;
 
+        struct CinemaState {
+            bool active = false;
+            std::string url;
+            std::string title;
+            bool playing = false;
+            float currentTime = 0.0f;
+            std::string host;
+        } m_Cinema;
+
         struct ScreenShareState {
             int fps = 30;
             int quality = 75;
