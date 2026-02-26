@@ -147,11 +147,11 @@ namespace TalkMe {
         } m_ChessUI;
         ChessEngine m_ChessEngine;
 
-        struct ScreenShareSettings {
+        struct ScreenShareState {
             int fps = 30;
             int quality = 75;
-            bool active = false;
-            std::string viewer;
+            bool sharing = false;
+            std::string viewingUser;
         } m_ScreenShare;
 
         struct FriendEntry { std::string username; std::string status; std::string direction; };
