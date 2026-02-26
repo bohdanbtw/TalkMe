@@ -48,6 +48,7 @@ namespace {
 #include "../../vendor/imgui.h"
 #include "../../vendor/imgui_impl_win32.h"
 #include "../../vendor/imgui_impl_dx11.h"
+#include "../ui/TextureManager.h"
 #include <nlohmann/json.hpp>
 
 #include "../ui/Theme.h"
@@ -569,6 +570,17 @@ namespace TalkMe {
                 }
 
                 UpdateOverlay();
+
+                // Update screen share texture from incoming frames
+                if (m_ScreenShare.frameUpdated && !m_ScreenShare.lastFrameData.empty()) {
+                    auto& tm = TalkMe::TextureManager::Get();
+                    if (!tm.GetTexture("screenshare"))
+                        tm.SetDevice(m_Graphics.GetDevice());
+                    tm.LoadFromBMP("screenshare",
+                        m_ScreenShare.lastFrameData.data(),
+                        (int)m_ScreenShare.lastFrameData.size());
+                    m_ScreenShare.frameUpdated = false;
+                }
 
                 // Drain messages again so we never call Present() after user closed the window
                 while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
@@ -1605,7 +1617,9 @@ namespace TalkMe {
                     },
                     m_ScreenShare.iAmSharing,
                     m_ScreenShare.someoneSharing,
-                    nullptr, 0, 0);
+                    (void*)TalkMe::TextureManager::Get().GetTexture("screenshare"),
+                    m_ScreenShare.frameWidth,
+                    m_ScreenShare.frameHeight);
             }
         }
     }
