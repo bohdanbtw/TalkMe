@@ -279,6 +279,10 @@ namespace TalkMe::UI::Views {
                 ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
                 ImGui::Text("Invite: %s", currentServer.inviteCode.c_str());
                 ImGui::PopStyleColor();
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Copy")) {
+                    ImGui::SetClipboardText(currentServer.inviteCode.c_str());
+                }
 
                 float headerBtnX = areaW - 120;
                 if (showSearch) {

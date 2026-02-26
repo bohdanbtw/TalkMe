@@ -428,6 +428,12 @@ namespace TalkMe::UI::Views {
             if (ImGui::BeginPopupContextItem()) {
                 if (ImGui::Selectable("Copy Invite Code"))
                     ImGui::SetClipboardText(server.inviteCode.c_str());
+                ImGui::Separator();
+                ImGui::PushStyleColor(ImGuiCol_Text, Styles::Error());
+                if (ImGui::Selectable("Leave Server")) {
+                    // TODO: Add Leave_Server_Request packet when server supports it
+                }
+                ImGui::PopStyleColor();
                 ImGui::EndPopup();
             }
             ImGui::PopID();
