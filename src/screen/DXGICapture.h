@@ -31,6 +31,7 @@ public:
 
 private:
     void CaptureLoop();
+    void GDIFallbackLoop();
     bool InitDXGI();
     bool InitEncoder(int width, int height);
     std::vector<uint8_t> EncodeFrame(ID3D11Texture2D* texture);

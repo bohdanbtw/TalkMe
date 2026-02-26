@@ -92,35 +92,40 @@ std::vector<uint8_t> EncodeRGBAtoJPEG(const uint8_t* bgra, int w, int h, int qua
 } // namespace
 
 void DXGICapture::Start(const DXGICaptureSettings& settings, FrameCallback onFrame) {
-    if (m_Running.load()) return;
+    Stop(); // ensure previous session is fully cleaned up
     m_Settings = settings;
     m_OnFrame = std::move(onFrame);
+    m_UseJpegFallback = false;
     m_Running.store(true);
 
     m_Thread = std::thread([this]() {
-        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         Gdiplus::GdiplusStartupInput gdipInput;
         ULONG_PTR gdipToken = 0;
         Gdiplus::GdiplusStartup(&gdipToken, &gdipInput, nullptr);
 
-        if (InitDXGI()) {
+        bool dxgiOk = InitDXGI();
+        if (dxgiOk) {
             std::fprintf(stderr, "[DXGICapture] DXGI initialized: %dx%d\n", m_CaptureWidth, m_CaptureHeight);
             std::fflush(stderr);
             CaptureLoop();
         } else {
-            std::fprintf(stderr, "[DXGICapture] DXGI init failed\n");
+            std::fprintf(stderr, "[DXGICapture] DXGI init failed, falling back to GDI capture\n");
             std::fflush(stderr);
+            GDIFallbackLoop();
         }
 
         Cleanup();
         Gdiplus::GdiplusShutdown(gdipToken);
         CoUninitialize();
+        m_Running.store(false);
     });
 }
 
 void DXGICapture::Stop() {
     m_Running.store(false);
     if (m_Thread.joinable()) m_Thread.join();
+    m_H264Encoder.Shutdown();
 }
 
 bool DXGICapture::InitDXGI() {
@@ -283,6 +288,81 @@ void DXGICapture::CaptureLoop() {
 
             frameCount++;
         }
+
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        int sleepMs = intervalMs - (int)std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+        if (sleepMs > 0) Sleep(sleepMs);
+    }
+}
+
+void DXGICapture::GDIFallbackLoop() {
+    int intervalMs = 1000 / (std::max)(1, m_Settings.fps);
+    int frameCount = 0;
+
+    CLSID jpegClsid;
+    if (GetJpegEncoderClsid(&jpegClsid) < 0) { m_Running.store(false); return; }
+
+    Gdiplus::EncoderParameters params;
+    params.Count = 1;
+    params.Parameter[0].Guid = Gdiplus::EncoderQuality;
+    params.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
+    params.Parameter[0].NumberOfValues = 1;
+    ULONG quality = (ULONG)m_Settings.quality;
+    params.Parameter[0].Value = &quality;
+
+    while (m_Running.load()) {
+        auto start = std::chrono::steady_clock::now();
+
+        HDC screenDC = GetDC(nullptr);
+        if (!screenDC) { Sleep(100); continue; }
+        int screenW = GetSystemMetrics(SM_CXSCREEN);
+        int screenH = GetSystemMetrics(SM_CYSCREEN);
+        float scale = 1.0f;
+        if (screenW > m_Settings.maxWidth || screenH > m_Settings.maxHeight)
+            scale = (std::min)((float)m_Settings.maxWidth / screenW, (float)m_Settings.maxHeight / screenH);
+        int outW = (int)(screenW * scale);
+        int outH = (int)(screenH * scale);
+
+        HDC memDC = CreateCompatibleDC(screenDC);
+        HBITMAP hBmp = CreateCompatibleBitmap(screenDC, outW, outH);
+        HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, hBmp);
+        SetStretchBltMode(memDC, HALFTONE);
+        StretchBlt(memDC, 0, 0, outW, outH, screenDC, 0, 0, screenW, screenH, SRCCOPY);
+        SelectObject(memDC, oldBmp);
+
+        IStream* pStream = nullptr;
+        CreateStreamOnHGlobal(nullptr, TRUE, &pStream);
+        if (pStream) {
+            Gdiplus::Bitmap bmp(hBmp, nullptr);
+            if (bmp.Save(pStream, &jpegClsid, &params) == Gdiplus::Ok) {
+                LARGE_INTEGER zero = {};
+                pStream->Seek(zero, STREAM_SEEK_SET, nullptr);
+                STATSTG stat = {};
+                pStream->Stat(&stat, STATFLAG_NONAME);
+                ULONG sz = (ULONG)stat.cbSize.QuadPart;
+                if (sz > 0) {
+                    std::vector<uint8_t> jpeg(sz);
+                    ULONG read = 0;
+                    pStream->Read(jpeg.data(), sz, &read);
+                    if (read > 0 && m_OnFrame) {
+                        std::vector<uint8_t> packet(1 + read);
+                        packet[0] = 0; // JPEG codec
+                        memcpy(packet.data() + 1, jpeg.data(), read);
+                        m_OnFrame(packet, outW, outH, (frameCount % 30 == 0));
+                        if (frameCount < 3) {
+                            std::fprintf(stderr, "[DXGICapture] GDI Frame %d: %dx%d, jpeg=%lu bytes\n", frameCount, outW, outH, read);
+                            std::fflush(stderr);
+                        }
+                    }
+                }
+            }
+            pStream->Release();
+        }
+
+        DeleteObject(hBmp);
+        DeleteDC(memDC);
+        ReleaseDC(nullptr, screenDC);
+        frameCount++;
 
         auto elapsed = std::chrono::steady_clock::now() - start;
         int sleepMs = intervalMs - (int)std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
