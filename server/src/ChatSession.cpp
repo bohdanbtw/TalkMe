@@ -138,6 +138,16 @@ namespace TalkMe {
         m_VoicePacketCount = 0;
     }
 
+    void ChatSession::SendPacket(TalkMe::PacketType type, const std::string& data) {
+        uint32_t size = static_cast<uint32_t>(data.size());
+        TalkMe::PacketHeader header = { type, size };
+        header.ToNetwork();
+        auto buffer = std::make_shared<std::vector<uint8_t>>(sizeof(header) + size);
+        std::memcpy(buffer->data(), &header, sizeof(header));
+        if (size > 0) std::memcpy(buffer->data() + sizeof(header), data.data(), size);
+        SendShared(buffer, false);
+    }
+
     void ChatSession::ProcessPacket() {
         using namespace TalkMe;
 
@@ -239,32 +249,22 @@ namespace TalkMe {
             return;
         }
 
-        auto SendLocal = [this](PacketType type, const std::string& data) {
-            uint32_t size = static_cast<uint32_t>(data.size());
-            PacketHeader header = { type, size };
-            header.ToNetwork();
-            auto buffer = std::make_shared<std::vector<uint8_t>>(sizeof(header) + size);
-            std::memcpy(buffer->data(), &header, sizeof(header));
-            if (size > 0) std::memcpy(buffer->data() + sizeof(header), data.data(), size);
-            SendShared(buffer, false);
-            };
-
         std::string payload(m_Body.begin(), m_Body.end());
         try {
             auto j = json::parse(payload);
 
             if (m_Header.type == PacketType::Register_Request) {
-                if (!j.contains("u") || !j.contains("p")) { SendLocal(PacketType::Register_Failed, ""); return; }
+                if (!j.contains("u") || !j.contains("p")) { SendPacket(PacketType::Register_Failed, ""); return; }
                 std::string new_user = Database::Get().RegisterUser(j.value("e", ""), j["u"], j["p"]);
                 if (!new_user.empty()) {
                     m_Username = new_user;
                     Database::Get().AddUserToDefaultServer(new_user);
                     json res; res["u"] = new_user;
-                    SendLocal(PacketType::Register_Success, res.dump());
-                    SendLocal(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(new_user));
+                    SendPacket(PacketType::Register_Success, res.dump());
+                    SendPacket(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(new_user));
                 }
                 else {
-                    SendLocal(PacketType::Register_Failed, "");
+                    SendPacket(PacketType::Register_Failed, "");
                 }
                 return;
             }
@@ -282,32 +282,23 @@ namespace TalkMe {
                     [this, self, hwid](int loginResult, std::string username, std::string serversJson, bool has2fa) {
                         asio::post(m_Strand, [this, self, loginResult, username = std::move(username),
                             serversJson = std::move(serversJson), has2fa, hwid]() {
-                                auto sendResp = [this](PacketType type, const std::string& data) {
-                                    uint32_t size = static_cast<uint32_t>(data.size());
-                                    PacketHeader header = { type, size };
-                                    header.ToNetwork();
-                                    auto buffer = std::make_shared<std::vector<uint8_t>>(sizeof(header) + size);
-                                    std::memcpy(buffer->data(), &header, sizeof(header));
-                                    if (size > 0) std::memcpy(buffer->data() + sizeof(header), data.data(), size);
-                                    SendShared(buffer, false);
-                                    };
                                 std::fprintf(stderr, "[TalkMe Server] LoginUserAsync returned %d\n", loginResult);
                                 std::fflush(stderr);
                                 if (loginResult == 1) {
                                     m_Username = username;
                                     json res; res["u"] = username; res["2fa_enabled"] = has2fa;
-                                    sendResp(PacketType::Login_Success, res.dump());
+                                    SendPacket(PacketType::Login_Success, res.dump());
                                     if (!serversJson.empty())
-                                        sendResp(PacketType::Server_List_Response, serversJson);
+                                        SendPacket(PacketType::Server_List_Response, serversJson);
                                     m_Server.BroadcastPresence(m_Username, true);
                                 }
                                 else if (loginResult == 2) {
                                     m_PendingHWID = hwid;
                                     json res; res["u"] = username;
-                                    sendResp(PacketType::Login_Requires_2FA, res.dump());
+                                    SendPacket(PacketType::Login_Requires_2FA, res.dump());
                                 }
                                 else {
-                                    sendResp(PacketType::Login_Failed, "");
+                                    SendPacket(PacketType::Login_Failed, "");
                                 }
                             });
                     });
@@ -319,18 +310,18 @@ namespace TalkMe {
                 if (!u.empty()) {
                     m_Username = u;
                     json res; res["valid"] = true; res["u"] = u;
-                    SendLocal(PacketType::Validate_Session_Response, res.dump());
+                    SendPacket(PacketType::Validate_Session_Response, res.dump());
                     // Bug fix: the old code stopped here. A reconnecting client
                     // (network switch, brief drop) needs the server/channel list
                     // to restore its full UI state. Without it every reconnect
                     // appeared as a blank slate. Send the list immediately after
                     // confirming the session, mirroring the Login_Success flow.
-                    SendLocal(PacketType::Server_List_Response,
+                    SendPacket(PacketType::Server_List_Response,
                         Database::Get().GetUserServersJSON(u));
                 }
                 else {
                     json res; res["valid"] = false;
-                    SendLocal(PacketType::Validate_Session_Response, res.dump());
+                    SendPacket(PacketType::Validate_Session_Response, res.dump());
                 }
                 return;
             }
@@ -346,7 +337,7 @@ namespace TalkMe {
                 std::string username;
                 std::string secret = Database::Get().GetUserTOTPSecret(email, &username);
                 if (secret.empty() || !VerifyTOTP(secret, code)) {
-                    SendLocal(PacketType::Login_Failed, "");
+                    SendPacket(PacketType::Login_Failed, "");
                 }
                 else {
                     m_Username = username;
@@ -354,8 +345,8 @@ namespace TalkMe {
                         std::fprintf(stderr, "[TalkMe] 2FA verified but no HWID present — device will not be trusted; user will be prompted for 2FA on next login.\n");
                     Database::Get().TrustDevice(username, m_PendingHWID);
                     json res; res["u"] = m_Username; res["2fa_enabled"] = true;
-                    SendLocal(PacketType::Login_Success, res.dump());
-                    SendLocal(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
+                    SendPacket(PacketType::Login_Success, res.dump());
+                    SendPacket(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
                     m_Server.BroadcastPresence(m_Username, true);
                 }
                 return;
@@ -368,7 +359,7 @@ namespace TalkMe {
                 std::string secret = Database::Get().GetUserTOTPSecret(m_Username, nullptr);
                 bool ok = (!secret.empty() && VerifyTOTP(secret, code)) && Database::Get().DisableUser2FA(m_Username);
                 json res; res["ok"] = ok;
-                SendLocal(PacketType::Disable_2FA_Response, res.dump());
+                SendPacket(PacketType::Disable_2FA_Response, res.dump());
                 return;
             }
 
@@ -379,26 +370,26 @@ namespace TalkMe {
                 std::string label = "TalkMe:" + UrlEncode(displayName);
                 std::string uri = "otpauth://totp/" + label + "?secret=" + m_Pending2FASecret + "&issuer=TalkMe";
                 json res; res["secret"] = m_Pending2FASecret; res["uri"] = uri;
-                SendLocal(PacketType::Generate_2FA_Secret_Response, res.dump());
+                SendPacket(PacketType::Generate_2FA_Secret_Response, res.dump());
                 return;
             }
 
             if (m_Header.type == PacketType::Verify_2FA_Setup_Request) {
                 std::string code = j.value("code", "");
                 if (m_Pending2FASecret.empty()) {
-                    json res; res["ok"] = false; SendLocal(PacketType::Verify_2FA_Setup_Request, res.dump());
+                    json res; res["ok"] = false; SendPacket(PacketType::Verify_2FA_Setup_Request, res.dump());
                 }
                 else if (VerifyTOTP(m_Pending2FASecret, code)) {
                     if (Database::Get().EnableUser2FA(m_Username, m_Pending2FASecret)) {
                         m_Pending2FASecret.clear();
-                        json res; res["ok"] = true; SendLocal(PacketType::Verify_2FA_Setup_Request, res.dump());
+                        json res; res["ok"] = true; SendPacket(PacketType::Verify_2FA_Setup_Request, res.dump());
                     }
                     else {
-                        json res; res["ok"] = false; SendLocal(PacketType::Verify_2FA_Setup_Request, res.dump());
+                        json res; res["ok"] = false; SendPacket(PacketType::Verify_2FA_Setup_Request, res.dump());
                     }
                 }
                 else {
-                    json res; res["ok"] = false; SendLocal(PacketType::Verify_2FA_Setup_Request, res.dump());
+                    json res; res["ok"] = false; SendPacket(PacketType::Verify_2FA_Setup_Request, res.dump());
                 }
                 return;
             }
@@ -406,32 +397,32 @@ namespace TalkMe {
             if (m_Header.type == PacketType::Create_Server_Request) {
                 if (!j.contains("name") || !j["name"].is_string()) return;
                 Database::Get().CreateServer(j["name"], m_Username);
-                SendLocal(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
+                SendPacket(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
                 return;
             }
 
             if (m_Header.type == PacketType::Join_Server_Request) {
                 if (!j.contains("code") || !j["code"].is_string()) return;
                 Database::Get().JoinServer(m_Username, j["code"]);
-                SendLocal(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
+                SendPacket(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
                 return;
             }
             if (m_Header.type == PacketType::Get_Server_Content_Request) {
                 if (!j.contains("sid") || !j["sid"].is_number_integer()) return;
-                SendLocal(PacketType::Server_Content_Response, Database::Get().GetServerContentJSON(j["sid"]));
+                SendPacket(PacketType::Server_Content_Response, Database::Get().GetServerContentJSON(j["sid"]));
                 return;
             }
 
             if (m_Header.type == PacketType::Create_Channel_Request) {
                 if (!j.contains("sid") || !j.contains("name") || !j.contains("type")) return;
                 Database::Get().CreateChannel(j["sid"], j["name"], j["type"]);
-                SendLocal(PacketType::Server_Content_Response, Database::Get().GetServerContentJSON(j["sid"]));
+                SendPacket(PacketType::Server_Content_Response, Database::Get().GetServerContentJSON(j["sid"]));
                 return;
             }
 
             if (m_Header.type == PacketType::Select_Text_Channel) {
                 if (!j.contains("cid") || !j["cid"].is_number_integer()) return;
-                SendLocal(PacketType::Message_History_Response, Database::Get().GetMessageHistoryJSON(j["cid"]));
+                SendPacket(PacketType::Message_History_Response, Database::Get().GetMessageHistoryJSON(j["cid"]));
                 return;
             }
 
@@ -496,7 +487,7 @@ namespace TalkMe {
                 json res;
                 res["action"] = "upload_approved";
                 res["id"] = m_UploadId;
-                SendLocal(PacketType::File_Transfer_Complete, res.dump());
+                SendPacket(PacketType::File_Transfer_Complete, res.dump());
                 return;
             }
 
@@ -505,7 +496,7 @@ namespace TalkMe {
                 json res;
                 res["action"] = "upload_finished";
                 res["id"] = m_UploadId;
-                SendLocal(PacketType::File_Transfer_Complete, res.dump());
+                SendPacket(PacketType::File_Transfer_Complete, res.dump());
                 return;
             }
 
@@ -538,14 +529,14 @@ namespace TalkMe {
                     entry["online"] = onlineSet.count(m) > 0;
                     res.push_back(entry);
                 }
-                SendLocal(PacketType::Member_List_Response, res.dump());
+                SendPacket(PacketType::Member_List_Response, res.dump());
                 return;
             }
 
             if (m_Header.type == PacketType::Delete_Channel_Request) {
                 if (!j.contains("cid") || !j.contains("sid")) return;
                 if (Database::Get().DeleteChannel(j["cid"], m_Username)) {
-                    SendLocal(PacketType::Server_Content_Response,
+                    SendPacket(PacketType::Server_Content_Response,
                         Database::Get().GetServerContentJSON(j["sid"]));
                 }
                 return;
@@ -584,50 +575,20 @@ namespace TalkMe {
         catch (const json::exception& e) {
             VoiceTrace::log(std::string("step=json_error msg=") + e.what());
             std::fprintf(stderr, "[TalkMe Server] ProcessPacket json_error: %s\n", e.what());
-            if (m_Header.type == PacketType::Login_Request) {
-                auto SendFail = [this](PacketType type, const std::string& data) {
-                    uint32_t size = static_cast<uint32_t>(data.size());
-                    PacketHeader header = { type, size };
-                    header.ToNetwork();
-                    auto buffer = std::make_shared<std::vector<uint8_t>>(sizeof(header) + size);
-                    std::memcpy(buffer->data(), &header, sizeof(header));
-                    if (size > 0) std::memcpy(buffer->data() + sizeof(header), data.data(), size);
-                    SendShared(buffer, false);
-                    };
-                SendFail(PacketType::Login_Failed, "");
-            }
+            if (m_Header.type == PacketType::Login_Request)
+                SendPacket(PacketType::Login_Failed, "");
         }
         catch (const std::exception& e) {
             VoiceTrace::log(std::string("step=std_error msg=") + e.what());
             std::fprintf(stderr, "[TalkMe Server] ProcessPacket std_error: %s\n", e.what());
-            if (m_Header.type == PacketType::Login_Request) {
-                auto SendFail = [this](PacketType type, const std::string& data) {
-                    uint32_t size = static_cast<uint32_t>(data.size());
-                    PacketHeader header = { type, size };
-                    header.ToNetwork();
-                    auto buffer = std::make_shared<std::vector<uint8_t>>(sizeof(header) + size);
-                    std::memcpy(buffer->data(), &header, sizeof(header));
-                    if (size > 0) std::memcpy(buffer->data() + sizeof(header), data.data(), size);
-                    SendShared(buffer, false);
-                    };
-                SendFail(PacketType::Login_Failed, "");
-            }
+            if (m_Header.type == PacketType::Login_Request)
+                SendPacket(PacketType::Login_Failed, "");
         }
         catch (...) {
             VoiceTrace::log("step=unknown_error msg=unknown_exception_caught");
             std::fprintf(stderr, "[TalkMe Server] ProcessPacket unknown exception\n");
-            if (m_Header.type == PacketType::Login_Request) {
-                auto SendFail = [this](PacketType type, const std::string& data) {
-                    uint32_t size = static_cast<uint32_t>(data.size());
-                    PacketHeader header = { type, size };
-                    header.ToNetwork();
-                    auto buffer = std::make_shared<std::vector<uint8_t>>(sizeof(header) + size);
-                    std::memcpy(buffer->data(), &header, sizeof(header));
-                    if (size > 0) std::memcpy(buffer->data() + sizeof(header), data.data(), size);
-                    SendShared(buffer, false);
-                    };
-                SendFail(PacketType::Login_Failed, "");
-            }
+            if (m_Header.type == PacketType::Login_Request)
+                SendPacket(PacketType::Login_Failed, "");
         }
     }
 
