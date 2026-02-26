@@ -496,6 +496,92 @@ namespace TalkMe::UI::Views {
                     ImGui::EndPopup();
                 }
             }
+            // ==================== CINEMA VIEW ====================
+            else if (cType == ChannelType::Cinema) {
+                ImGui::Dummy(ImVec2(0, 20));
+                ImGui::Indent(36);
+                ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
+                ImGui::SetWindowFontScale(1.3f);
+                ImGui::Text("%s", chName.c_str());
+                ImGui::SetWindowFontScale(1.0f);
+                ImGui::PopStyleColor();
+
+                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                ImGui::Text("Cinema Channel");
+                ImGui::PopStyleColor();
+                ImGui::Unindent(36);
+
+                ImGui::Separator();
+                ImGui::Dummy(ImVec2(0, 8));
+
+                // Now Playing
+                ImGui::Indent(20);
+                // Access cinema state through a simple global — Application sets it
+                // For now render from what we have in the protocol state
+                ImGui::Text("Now Playing:");
+                ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "  Use the controls below to manage the queue");
+
+                ImGui::Dummy(ImVec2(0, 8));
+
+                // Playback controls
+                float controlsW = 360.0f;
+                float ctrlX = (areaW - controlsW) * 0.5f;
+                ImGui::SetCursorPosX(ctrlX);
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+
+                if (ImGui::Button("Play", ImVec2(60, 30))) {
+                    nlohmann::json cj; cj["cid"] = selectedChannelId; cj["action"] = "play";
+                    netClient.Send(PacketType::Cinema_Control, cj.dump());
+                }
+                ImGui::SameLine(0, 6);
+                if (ImGui::Button("Pause", ImVec2(60, 30))) {
+                    nlohmann::json cj; cj["cid"] = selectedChannelId; cj["action"] = "pause";
+                    netClient.Send(PacketType::Cinema_Control, cj.dump());
+                }
+                ImGui::SameLine(0, 6);
+                if (ImGui::Button("-10s", ImVec2(50, 30))) {
+                    nlohmann::json cj; cj["cid"] = selectedChannelId; cj["action"] = "seek"; cj["time"] = -10.0f;
+                    netClient.Send(PacketType::Cinema_Control, cj.dump());
+                }
+                ImGui::SameLine(0, 6);
+                if (ImGui::Button("+10s", ImVec2(50, 30))) {
+                    nlohmann::json cj; cj["cid"] = selectedChannelId; cj["action"] = "seek"; cj["time"] = 10.0f;
+                    netClient.Send(PacketType::Cinema_Control, cj.dump());
+                }
+                ImGui::SameLine(0, 6);
+                if (ImGui::Button("Next", ImVec2(55, 30))) {
+                    nlohmann::json cj; cj["cid"] = selectedChannelId; cj["action"] = "next";
+                    netClient.Send(PacketType::Cinema_Control, cj.dump());
+                }
+                ImGui::PopStyleVar();
+
+                ImGui::Dummy(ImVec2(0, 16));
+                ImGui::Separator();
+
+                // Add to queue
+                ImGui::Dummy(ImVec2(0, 8));
+                ImGui::Text("Add to Queue:");
+                static char s_cinemaAddUrl[512] = "";
+                static char s_cinemaAddTitle[128] = "";
+                ImGui::PushItemWidth(areaW - 120);
+                ImGui::InputTextWithHint("##cinema_add_url", "Video URL (direct link)...", s_cinemaAddUrl, sizeof(s_cinemaAddUrl));
+                ImGui::PopItemWidth();
+                ImGui::PushItemWidth(areaW - 120);
+                ImGui::InputTextWithHint("##cinema_add_title", "Title (optional)...", s_cinemaAddTitle, sizeof(s_cinemaAddTitle));
+                ImGui::PopItemWidth();
+                ImGui::SameLine();
+                if (ImGui::Button("Add", ImVec2(60, 0)) && strlen(s_cinemaAddUrl) > 0) {
+                    nlohmann::json qj;
+                    qj["cid"] = selectedChannelId;
+                    qj["url"] = std::string(s_cinemaAddUrl);
+                    qj["title"] = strlen(s_cinemaAddTitle) > 0 ? std::string(s_cinemaAddTitle) : std::string(s_cinemaAddUrl);
+                    netClient.Send(PacketType::Cinema_Queue_Add, qj.dump());
+                    memset(s_cinemaAddUrl, 0, sizeof(s_cinemaAddUrl));
+                    memset(s_cinemaAddTitle, 0, sizeof(s_cinemaAddTitle));
+                }
+
+                ImGui::Unindent(20);
+            }
             // ==================== TEXT VIEW ====================
             else {
                 ImGui::Dummy(ImVec2(0, 20));
