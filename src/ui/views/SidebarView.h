@@ -40,6 +40,7 @@ namespace TalkMe::UI::Views {
         const VoiceInfoData& voiceInfo = {},
         std::function<void()> onToggleEchoLive = nullptr,
         std::function<void()> onInfPopupOpened = nullptr,
-        std::map<int, int>* unreadCounts = nullptr
+        std::map<int, int>* unreadCounts = nullptr,
+        bool* showFriendList = nullptr
     );
 }

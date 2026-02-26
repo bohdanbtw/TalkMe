@@ -714,41 +714,39 @@ namespace TalkMe {
                 }
 
                 if (!m_CurrentCall.state.empty()) {
-                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.15f, 0.15f, 0.2f, 1.0f));
-                    ImGui::BeginChild("CallBanner", ImVec2(0, 50), true);
                     std::string callDisp = m_CurrentCall.otherUser;
                     size_t chp = callDisp.find('#');
                     if (chp != std::string::npos) callDisp = callDisp.substr(0, chp);
 
-                    if (m_CurrentCall.state == "ringing") {
-                        ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "Incoming call from %s", callDisp.c_str());
-                        if (ImGui::SmallButton("Accept")) {
-                            nlohmann::json aj; aj["from"] = m_CurrentCall.otherUser;
-                            m_NetClient.Send(PacketType::Call_Accept, aj.dump());
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::SmallButton("Decline")) {
-                            nlohmann::json rj; rj["from"] = m_CurrentCall.otherUser;
-                            m_NetClient.Send(PacketType::Call_Reject, rj.dump());
-                            m_CurrentCall = {};
-                        }
-                    } else if (m_CurrentCall.state == "calling") {
+                    if (m_CurrentCall.state == "calling") {
+                        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.1f, 0.15f, 0.25f, 1.0f));
+                        ImGui::BeginChild("CallBanner", ImVec2(0, 40), true);
                         ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1), "Calling %s...", callDisp.c_str());
-                        if (ImGui::SmallButton("Cancel")) {
+                        ImGui::SameLine();
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 1.0f));
+                        if (ImGui::Button("Cancel", ImVec2(60, 24))) {
                             nlohmann::json rj; rj["to"] = m_CurrentCall.otherUser;
                             m_NetClient.Send(PacketType::Call_Reject, rj.dump());
                             m_CurrentCall = {};
                         }
+                        ImGui::PopStyleColor();
+                        ImGui::EndChild();
+                        ImGui::PopStyleColor();
                     } else if (m_CurrentCall.state == "active") {
-                        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1), "In call with %s", callDisp.c_str());
-                        if (ImGui::SmallButton("End Call")) {
+                        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.2f, 0.1f, 1.0f));
+                        ImGui::BeginChild("CallBanner", ImVec2(0, 40), true);
+                        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1), "In call: %s", callDisp.c_str());
+                        ImGui::SameLine();
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 1.0f));
+                        if (ImGui::Button("End", ImVec2(50, 24))) {
                             nlohmann::json rj; rj["to"] = m_CurrentCall.otherUser;
                             m_NetClient.Send(PacketType::Call_Reject, rj.dump());
                             m_CurrentCall = {};
                         }
+                        ImGui::PopStyleColor();
+                        ImGui::EndChild();
+                        ImGui::PopStyleColor();
                     }
-                    ImGui::EndChild();
-                    ImGui::PopStyleColor();
                     ImGui::Separator();
                 }
 
@@ -950,6 +948,64 @@ namespace TalkMe {
                 if (ImGui::Button("Decline")) { m_ChessUI.opponent.clear(); }
             }
             ImGui::End();
+        }
+
+        // Incoming call popup — centered overlay with green/red buttons
+        if (m_CurrentCall.state == "ringing") {
+            ImGui::SetNextWindowSize(ImVec2(320, 140), ImGuiCond_Always);
+            ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.12f, 0.12f, 0.16f, 0.95f));
+            if (ImGui::Begin("##IncomingCall", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize)) {
+                std::string caller = m_CurrentCall.otherUser;
+                size_t hp = caller.find('#');
+                if (hp != std::string::npos) caller = caller.substr(0, hp);
+
+                ImGui::SetCursorPosX((320 - ImGui::CalcTextSize("Incoming Call").x) * 0.5f);
+                ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "Incoming Call");
+                ImGui::Dummy(ImVec2(0, 4));
+                ImGui::SetCursorPosX((320 - ImGui::CalcTextSize(caller.c_str()).x) * 0.5f);
+                ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "%s", caller.c_str());
+                ImGui::Dummy(ImVec2(0, 12));
+
+                float btnW = 90.0f, btnGap = 10.0f;
+                float totalW = btnW * 3 + btnGap * 2;
+                ImGui::SetCursorPosX((320 - totalW) * 0.5f);
+
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.65f, 0.25f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.75f, 0.3f, 1.0f));
+                if (ImGui::Button("Accept", ImVec2(btnW, 34))) {
+                    nlohmann::json aj; aj["from"] = m_CurrentCall.otherUser;
+                    m_NetClient.Send(PacketType::Call_Accept, aj.dump());
+                }
+                ImGui::PopStyleColor(2);
+
+                ImGui::SameLine(0, btnGap);
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.4f, 0.4f, 0.45f, 1.0f));
+                if (ImGui::Button("Snooze 10m", ImVec2(btnW, 34))) {
+                    m_CurrentCall = {};
+                }
+                ImGui::PopStyleColor();
+
+                ImGui::SameLine(0, btnGap);
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.2f, 0.2f, 1.0f));
+                if (ImGui::Button("Decline", ImVec2(btnW, 34))) {
+                    nlohmann::json rj; rj["from"] = m_CurrentCall.otherUser;
+                    m_NetClient.Send(PacketType::Call_Reject, rj.dump());
+                    m_CurrentCall = {};
+                }
+                ImGui::PopStyleColor(2);
+
+                // Play ring sound
+                static float s_lastRing = 0;
+                float now = (float)ImGui::GetTime();
+                if (now - s_lastRing > 2.0f) {
+                    m_Sounds.PlayJoin();
+                    s_lastRing = now;
+                }
+            }
+            ImGui::End();
+            ImGui::PopStyleColor();
         }
 
         if (m_Racing.active) {
@@ -1157,7 +1213,7 @@ namespace TalkMe {
         vi.echoLiveEnabled = m_EchoLiveEnabled;
         vi.echoLiveHistory = std::vector<float>(m_EchoLiveHistory.begin(), m_EchoLiveHistory.end());
         vi.currentEchoLossPct = m_EchoLiveHistory.empty() ? 0.f : m_EchoLiveHistory.back();
-        UI::Views::RenderSidebar(m_NetClient, m_CurrentUser, m_CurrentState, m_ServerList, m_SelectedServerId, m_SelectedChannelId, m_ActiveVoiceChannelId, m_VoiceMembers, m_NewServerNameBuf, m_NewChannelNameBuf, m_ShowSettings, m_SelfMuted, m_SelfDeafened, vi, nullptr, [this]() { EnsureEchoLiveEnabled(); }, &m_UnreadCounts);
+        UI::Views::RenderSidebar(m_NetClient, m_CurrentUser, m_CurrentState, m_ServerList, m_SelectedServerId, m_SelectedChannelId, m_ActiveVoiceChannelId, m_VoiceMembers, m_NewServerNameBuf, m_NewChannelNameBuf, m_ShowSettings, m_SelfMuted, m_SelfDeafened, vi, nullptr, [this]() { EnsureEchoLiveEnabled(); }, &m_UnreadCounts, &m_ShowFriendList);
 
         if (m_ShowSettings) {
             static std::vector<TalkMe::AudioDeviceInfo> s_InputDevs;

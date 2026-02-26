@@ -243,8 +243,23 @@ namespace TalkMe::UI::Views {
 
                 ImGui::EndChild(); // VoiceGrid
 
+                // Voice channel toolbar
+                ImGui::Dummy(ImVec2(0, 4));
+                float toolX = (areaW - 350.0f) * 0.5f;
+                if (toolX < 20.0f) toolX = 20.0f;
+                ImGui::SetCursorPosX(toolX);
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+                ImGui::Button("Screen Share", ImVec2(105, 28));
+                ImGui::SameLine(0, 6);
+                ImGui::Button("Chess", ImVec2(65, 28));
+                ImGui::SameLine(0, 6);
+                ImGui::Button("Racing", ImVec2(65, 28));
+                ImGui::SameLine(0, 6);
+                ImGui::Button("Cinema", ImVec2(75, 28));
+                ImGui::PopStyleVar();
+
                 // Leave Voice Chat button (bottom bar)
-                ImGui::Dummy(ImVec2(0, 8));
+                ImGui::Dummy(ImVec2(0, 4));
                 float leaveBtnW = 220.0f;
                 float leaveBtnH = 42.0f;
                 float leaveBtnX = (areaW - leaveBtnW) * 0.5f;
@@ -280,23 +295,22 @@ namespace TalkMe::UI::Views {
                 ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
                 ImGui::Text("Invite: %s", currentServer.inviteCode.c_str());
                 ImGui::PopStyleColor();
-                ImGui::SameLine();
-                if (ImGui::SmallButton("Copy")) {
-                    ImGui::SetClipboardText(currentServer.inviteCode.c_str());
-                }
 
-                float headerBtnX = areaW - 120;
+                ImGui::Unindent(36);
+
+                ImGui::Indent(36);
                 if (showSearch) {
-                    ImGui::SameLine(headerBtnX - 80);
-                    if (ImGui::SmallButton(*showSearch ? "Search X" : "Search"))
+                    if (ImGui::SmallButton(*showSearch ? "[X] Search" : "Search"))
                         *showSearch = !*showSearch;
+                    ImGui::SameLine();
                 }
                 if (showMemberList) {
-                    ImGui::SameLine(headerBtnX);
-                    if (ImGui::SmallButton(*showMemberList ? "Members <<" : "Members >>"))
+                    if (ImGui::SmallButton(*showMemberList ? "[X] Members" : "Members"))
                         *showMemberList = !*showMemberList;
+                    ImGui::SameLine();
                 }
-
+                ImGui::SmallButton("Copy Invite");
+                if (ImGui::IsItemClicked()) ImGui::SetClipboardText(currentServer.inviteCode.c_str());
                 ImGui::Unindent(36);
 
                 ImGui::Dummy(ImVec2(0, 6));
@@ -306,9 +320,9 @@ namespace TalkMe::UI::Views {
                 ImGui::Dummy(ImVec2(0, 4));
 
                 float hdrH = ImGui::GetCursorPosY();
-                float inpH = 88.0f;
+                float inpH = 120.0f;
                 float msgH = winH - hdrH - inpH;
-                if (msgH < 50.0f) msgH = 50.0f;
+                if (msgH < 80.0f) msgH = 80.0f;
 
                 if (showSearch && *showSearch && searchBuf) {
                     ImGui::Indent(32);
@@ -492,7 +506,7 @@ namespace TalkMe::UI::Views {
                             ImGui::Separator();
                             ImGui::Text("React:");
                             ImGui::SameLine();
-                            const char* quickEmojis[] = { "\xF0\x9F\x91\x8D", "\xE2\x9D\xA4", "\xF0\x9F\x98\x82", "\xF0\x9F\x91\x80", "\xF0\x9F\x94\xA5", "\xF0\x9F\x8E\x89" };
+                            const char* quickEmojis[] = { "+1", "<3", ":)", "eyes", "fire", "GG" };
                             for (int ei = 0; ei < 6; ei++) {
                                 if (ei > 0) ImGui::SameLine();
                                 char eid[32];

@@ -14,7 +14,8 @@ namespace TalkMe::UI::Views {
         bool& selfMuted,         bool& selfDeafened, const VoiceInfoData& voiceInfo,
         std::function<void()> onToggleEchoLive,
         std::function<void()> onInfPopupOpened,
-        std::map<int, int>* unreadCounts)
+        std::map<int, int>* unreadCounts,
+        bool* showFriendList)
     {
         float parentW = ImGui::GetWindowWidth();
         float windowHeight = ImGui::GetWindowHeight();
@@ -324,9 +325,13 @@ namespace TalkMe::UI::Views {
         ImGui::PopStyleColor();
         ImGui::PopStyleVar();
 
-        // Row 2: SETTINGS (full width)
+        // Row 2: FRIENDS | SETTINGS
         ImGui::Dummy(ImVec2(0, 4));
-        if (ImGui::Button("Settings", ImVec2(innerW, btnH)))
+        float btnW2 = (innerW - gap) / 2.0f;
+        if (ImGui::Button("Friends", ImVec2(btnW2, btnH)) && showFriendList)
+            *showFriendList = !*showFriendList;
+        ImGui::SameLine(0, gap);
+        if (ImGui::Button("Settings", ImVec2(btnW2, btnH)))
             showSettings = !showSettings;
 
         ImGui::Unindent(pad);
