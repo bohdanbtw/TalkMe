@@ -566,11 +566,14 @@ namespace TalkMe {
         return j.dump();
     }
 
-    std::string Database::GetMessageHistoryJSON(int channelId) {
+    std::string Database::GetMessageHistoryJSON(int channelId, int beforeId, int limit) {
         std::shared_lock<std::shared_mutex> lock(m_RwMutex);
         json j = json::array();
         sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(m_Db, "SELECT id, channel_id, sender, content, time, IFNULL(edited_at, ''), is_pinned, IFNULL(attachment_id, ''), IFNULL(reply_to, 0) FROM messages WHERE channel_id = ? ORDER BY time ASC LIMIT 50;", -1, &stmt, 0) == SQLITE_OK) {
+        std::string query = "SELECT id, channel_id, sender, content, time, IFNULL(edited_at, ''), is_pinned, IFNULL(attachment_id, ''), IFNULL(reply_to, 0) FROM messages WHERE channel_id = ?";
+        if (beforeId > 0) query += " AND id < " + std::to_string(beforeId);
+        query += " ORDER BY id DESC LIMIT " + std::to_string(std::min(limit, 100));
+        if (sqlite3_prepare_v2(m_Db, query.c_str(), -1, &stmt, 0) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, channelId);
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* u = (const char*)sqlite3_column_text(stmt, 2);
@@ -609,6 +612,7 @@ namespace TalkMe {
             }
             sqlite3_finalize(stmt);
         }
+        std::reverse(j.begin(), j.end());
         if (j.empty())
             j.push_back({ {"cid", channelId} });
         return j.dump();

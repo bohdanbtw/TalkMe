@@ -189,6 +189,36 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            if (msg.type == PacketType::Screen_Share_State) {
+                std::string action = j.value("action", "");
+                std::string user = j.value("u", "");
+                if (action == "start") {
+                    m_ScreenShare.viewer = user;
+                    m_ScreenShare.active = false;
+                } else if (action == "stop") {
+                    m_ScreenShare.viewer.clear();
+                }
+                continue;
+            }
+
+            if (msg.type == PacketType::Admin_Action_Result) {
+                std::string action = j.value("action", "");
+                if (action == "force_mute") m_SelfMuted = j.value("state", true);
+                else if (action == "force_deafen") { m_SelfDeafened = j.value("state", true); if (m_SelfDeafened) m_SelfMuted = true; }
+                else if (action == "disconnect" && m_ActiveVoiceChannelId != -1) {
+                    m_ActiveVoiceChannelId = -1;
+                    m_ActiveVoiceChannelIdForVoice.store(-1);
+                    m_VoiceMembers.clear();
+                }
+                else if (action == "move" && j.contains("cid")) {
+                    int newCid = j["cid"];
+                    m_ActiveVoiceChannelId = newCid;
+                    m_ActiveVoiceChannelIdForVoice.store(newCid);
+                    m_NetClient.Send(PacketType::Join_Voice_Channel, PacketHandler::JoinVoiceChannelPayload(newCid));
+                }
+                continue;
+            }
+
             if (msg.type == PacketType::Status_Update) {
                 const std::string user = j.value("u", "");
                 const std::string status = j.value("status", "");

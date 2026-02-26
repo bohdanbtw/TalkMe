@@ -137,6 +137,13 @@ namespace TalkMe {
         bool m_ShowSearch = false;
         bool m_ShowShortcuts = false;
 
+        struct ScreenShareSettings {
+            int fps = 30;
+            int quality = 75;
+            bool active = false;
+            std::string viewer;
+        } m_ScreenShare;
+
         struct FriendEntry { std::string username; std::string status; std::string direction; };
         std::vector<FriendEntry> m_Friends;
         bool m_ShowFriendList = false;
