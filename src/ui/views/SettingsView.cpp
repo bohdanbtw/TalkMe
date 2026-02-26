@@ -404,6 +404,31 @@ namespace TalkMe::UI::Views {
             ctx.onOverlayChanged();
     }
 
+    static void RenderNotificationsTab(SettingsContext& ctx) {
+        if (!ctx.notifVolume) return;
+        ImGui::Text("Notification Volume");
+        ImGui::TextDisabled("Controls the volume of all notification sounds");
+        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::SliderFloat("##notif_vol", ctx.notifVolume, 0.0f, 1.0f, "%.0f%%");
+        ImGui::Dummy(ImVec2(0, 16));
+
+        ImGui::Text("Notification Types");
+        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::Checkbox("Mute @mention notifications", ctx.notifMuteMentions);
+        ImGui::TextDisabled("  When enabled, you won't hear a sound when someone @mentions you");
+        ImGui::Dummy(ImVec2(0, 4));
+        ImGui::Checkbox("Mute new message notifications", ctx.notifMuteMessages);
+        ImGui::TextDisabled("  When enabled, no sound for new messages when app is not focused");
+        ImGui::Dummy(ImVec2(0, 4));
+        ImGui::Checkbox("Mute join/leave sounds", ctx.notifMuteJoinLeave);
+        ImGui::TextDisabled("  When enabled, no sound when users join/leave voice channels");
+
+        ImGui::Dummy(ImVec2(0, 24));
+        ImGui::Text("Mention Format");
+        ImGui::TextDisabled("Use @username or @username#0001 or @all to mention users in chat");
+        ImGui::TextDisabled("Mentioned users will hear a distinct notification sound");
+    }
+
     static void RenderAccountTab(SettingsContext& ctx) {
         ImGui::Text("Security");
         ImGui::TextDisabled("Two-factor authentication (TOTP)");
@@ -569,7 +594,7 @@ namespace TalkMe::UI::Views {
         ImGui::Unindent(16);
         ImGui::Dummy(ImVec2(0, 12));
 
-        const char* tabs[] = { "Appearance", "Voice", "Keybinds", "Overlay", "Account" };
+        const char* tabs[] = { "Appearance", "Voice", "Keybinds", "Overlay", "Notifications", "Account" };
         for (int i = 0; i < 5; i++) {
             bool active = (ctx.settingsTab == i);
 
@@ -629,7 +654,8 @@ namespace TalkMe::UI::Views {
             case 1: RenderVoiceTab(ctx); break;
             case 2: RenderKeybindsTab(ctx.keyMuteMic, ctx.keyDeafen); break;
             case 3: RenderOverlayTab(ctx); break;
-            case 4: RenderAccountTab(ctx); break;
+            case 4: RenderNotificationsTab(ctx); break;
+            case 5: RenderAccountTab(ctx); break;
         }
 
         ImGui::EndGroup();

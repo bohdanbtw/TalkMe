@@ -1474,6 +1474,10 @@ namespace TalkMe {
                 }
             };
             sctx.currentAvatarTexture = (void*)TalkMe::TextureManager::Get().GetTexture("avatar_" + m_CurrentUser.username);
+            sctx.notifVolume = &m_NotifSettings.volume;
+            sctx.notifMuteMentions = &m_NotifSettings.muteMentions;
+            sctx.notifMuteMessages = &m_NotifSettings.muteMessages;
+            sctx.notifMuteJoinLeave = &m_NotifSettings.muteJoinLeave;
             UI::Views::RenderSettings(sctx);
         }
         else if (m_ShowFriendList) {

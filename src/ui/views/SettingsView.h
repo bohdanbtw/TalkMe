@@ -48,6 +48,10 @@ namespace TalkMe::UI::Views {
         std::function<void()> onResetToDefaults;
         std::function<void(const std::string& base64)> onSetAvatar;
         void* currentAvatarTexture = nullptr;
+        float* notifVolume = nullptr;
+        bool* notifMuteMentions = nullptr;
+        bool* notifMuteMessages = nullptr;
+        bool* notifMuteJoinLeave = nullptr;
     };
 
     void RenderSettings(SettingsContext& ctx);

@@ -777,13 +777,39 @@ namespace TalkMe::UI::Views {
                                 if (f != std::string::npos && (urlStart == std::string::npos || f < urlStart))
                                     urlStart = f;
                             }
+                            // Helper: render text with @mention highlighting
+                            auto renderTextWithMentions = [](const std::string& t) {
+                                size_t p = 0;
+                                while (p < t.size()) {
+                                    size_t atPos = t.find('@', p);
+                                    if (atPos == std::string::npos) {
+                                        if (p < t.size()) {
+                                            ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextPrimary());
+                                            ImGui::TextWrapped("%s", t.substr(p).c_str());
+                                            ImGui::PopStyleColor();
+                                        }
+                                        break;
+                                    }
+                                    if (atPos > p) {
+                                        ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextPrimary());
+                                        ImGui::TextWrapped("%s", t.substr(p, atPos - p).c_str());
+                                        ImGui::PopStyleColor();
+                                    }
+                                    // Find end of mention (space or end of string)
+                                    size_t mentionEnd = t.find_first_of(" \t\n\r", atPos);
+                                    if (mentionEnd == std::string::npos) mentionEnd = t.size();
+                                    std::string mention = t.substr(atPos, mentionEnd - atPos);
+                                    // Render mention in highlight color with background
+                                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.6f, 1.0f, 1.0f));
+                                    ImGui::TextWrapped("%s", mention.c_str());
+                                    ImGui::PopStyleColor();
+                                    p = mentionEnd;
+                                }
+                            };
+
                             if (urlStart == std::string::npos) {
                                 std::string rest = text.substr(pos);
-                                if (!rest.empty()) {
-                                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextPrimary());
-                                    ImGui::TextWrapped("%s", rest.c_str());
-                                    ImGui::PopStyleColor();
-                                }
+                                if (!rest.empty()) renderTextWithMentions(rest);
                                 break;
                             }
                             if (urlStart > pos) {
