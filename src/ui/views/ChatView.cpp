@@ -520,48 +520,49 @@ namespace TalkMe::UI::Views {
                 if (ImGui::BeginPopup("GamesPicker")) {
                     ImGui::Text("Choose a Game");
                     ImGui::Separator();
-                    ImGui::Dummy(ImVec2(0, 6));
+                    ImGui::Dummy(ImVec2(0, 4));
 
-                    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
-
-                    if (ImGui::Button("Chess", ImVec2(230, 34))) {
-                        ImGui::OpenPopup("ChessTarget");
-                    }
-                    ImGui::Dummy(ImVec2(0, 2));
-                    if (ImGui::Button("Car Racing", ImVec2(230, 34))) {
-                        ImGui::OpenPopup("RacingTarget");
-                    }
-
-                    ImGui::PopStyleVar();
-
-                    // Chess opponent picker (nested popup)
-                    if (ImGui::BeginPopup("ChessTarget")) {
-                        ImGui::Text("Challenge to Chess:");
+                    // Chess — submenu with opponent picker
+                    if (ImGui::BeginMenu("Chess (2 players)")) {
                         for (const auto& m : voiceMembers) {
                             if (m == currentUser.username) continue;
                             std::string d = m; size_t h = d.find('#'); if (h != std::string::npos) d = d.substr(0, h);
-                            if (ImGui::Selectable(d.c_str())) {
+                            if (ImGui::MenuItem(d.c_str())) {
                                 nlohmann::json cj; cj["to"] = m; cj["game"] = "chess";
                                 netClient.Send(PacketType::Game_Challenge, cj.dump());
+                                ImGui::CloseCurrentPopup();
                             }
                         }
-                        if (voiceMembers.size() <= 1) ImGui::TextDisabled("No other users in channel");
-                        ImGui::EndPopup();
+                        if (voiceMembers.size() <= 1) ImGui::TextDisabled("No other users");
+                        ImGui::EndMenu();
                     }
 
-                    // Racing opponent picker (nested popup)
-                    if (ImGui::BeginPopup("RacingTarget")) {
-                        ImGui::Text("Challenge to Race:");
+                    // Racing — submenu with opponent picker
+                    if (ImGui::BeginMenu("Car Racing (2 players)")) {
                         for (const auto& m : voiceMembers) {
                             if (m == currentUser.username) continue;
                             std::string d = m; size_t h = d.find('#'); if (h != std::string::npos) d = d.substr(0, h);
-                            if (ImGui::Selectable(d.c_str())) {
+                            if (ImGui::MenuItem(d.c_str())) {
                                 nlohmann::json cj; cj["to"] = m; cj["game"] = "racing";
                                 netClient.Send(PacketType::Game_Challenge, cj.dump());
+                                ImGui::CloseCurrentPopup();
                             }
                         }
-                        if (voiceMembers.size() <= 1) ImGui::TextDisabled("No other users in channel");
-                        ImGui::EndPopup();
+                        if (voiceMembers.size() <= 1) ImGui::TextDisabled("No other users");
+                        ImGui::EndMenu();
+                    }
+
+                    ImGui::Separator();
+
+                    // Flappy Bird — single player
+                    if (ImGui::MenuItem("Flappy Bird (solo)")) {
+                        // Signal to Application to start flappy bird
+                        // We'll use a static flag that Application checks
+                        static bool* s_startFlappy = nullptr;
+                        // Handled by checking Game_Challenge with game="flappy" to self
+                        nlohmann::json cj; cj["to"] = currentUser.username; cj["game"] = "flappy";
+                        netClient.Send(PacketType::Game_Challenge, cj.dump());
+                        ImGui::CloseCurrentPopup();
                     }
 
                     ImGui::EndPopup();

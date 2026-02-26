@@ -210,8 +210,9 @@ void Application::ProcessNetworkMessages() {
             if (msg.type == PacketType::Game_Challenge) {
                 std::string game = j.value("game", "chess");
                 std::string from = j.value("from", "");
-                if (game == "racing") {
-                    // Auto-accept racing for now (show popup later)
+                if (game == "flappy") {
+                    m_FlappyBird.Reset(m_CurrentUser.username);
+                } else if (game == "racing") {
                     m_Racing.Reset(m_CurrentUser.username, from);
                 } else {
                     m_ChessUI.opponent = from;

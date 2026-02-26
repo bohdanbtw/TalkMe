@@ -28,6 +28,7 @@
 #include "../screen/AudioLoopback.h"
 #include "../network/TenorAPI.h"
 #include "../game/Racing.h"
+#include "../game/FlappyBird.h"
 
 namespace TalkMe {
     enum class AppState { Login, Login2FA, Register, MainApp };
@@ -169,6 +170,7 @@ namespace TalkMe {
         } m_ChessUI;
         ChessEngine m_ChessEngine;
         RacingGame m_Racing;
+        FlappyBird m_FlappyBird;
         ScreenCapture m_ScreenCapture;
         DXGICapture m_DXGICapture;
         H264Decoder m_H264Decoder;

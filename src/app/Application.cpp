@@ -1139,6 +1139,71 @@ namespace TalkMe {
             if (!raceOpen) m_Racing.active = false;
         }
 
+        // Flappy Bird
+        if (m_FlappyBird.active) {
+            ImGui::SetNextWindowSize(ImVec2(FlappyBird::kWorldW + 20, FlappyBird::kWorldH + 80), ImGuiCond_FirstUseEver);
+            bool flappyOpen = m_FlappyBird.active;
+            if (ImGui::Begin("Flappy Bird", &flappyOpen)) {
+                ImGui::Text("Score: %d  |  Best: %d", m_FlappyBird.score, m_FlappyBird.bestScore);
+
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                ImVec2 origin = ImGui::GetCursorScreenPos();
+                float W = FlappyBird::kWorldW;
+                float H = FlappyBird::kWorldH;
+
+                // Background
+                dl->AddRectFilled(origin, ImVec2(origin.x + W, origin.y + H), IM_COL32(70, 180, 230, 255));
+
+                // Ground
+                dl->AddRectFilled(ImVec2(origin.x, origin.y + H - 20), ImVec2(origin.x + W, origin.y + H), IM_COL32(100, 180, 60, 255));
+
+                // Pipes
+                for (const auto& p : m_FlappyBird.pipes) {
+                    float px = origin.x + p.x;
+                    float topH = p.gapY - FlappyBird::kPipeGap * 0.5f;
+                    float botY = p.gapY + FlappyBird::kPipeGap * 0.5f;
+                    dl->AddRectFilled(ImVec2(px, origin.y), ImVec2(px + FlappyBird::kPipeWidth, origin.y + topH), IM_COL32(40, 160, 40, 255));
+                    dl->AddRectFilled(ImVec2(px, origin.y + botY), ImVec2(px + FlappyBird::kPipeWidth, origin.y + H - 20), IM_COL32(40, 160, 40, 255));
+                }
+
+                // Bird
+                float bx = origin.x + 60;
+                float by = origin.y + m_FlappyBird.birdY;
+                dl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + FlappyBird::kBirdSize, by + FlappyBird::kBirdSize), IM_COL32(255, 220, 50, 255));
+                dl->AddRectFilled(ImVec2(bx + 12, by + 4), ImVec2(bx + FlappyBird::kBirdSize + 5, by + 12), IM_COL32(255, 150, 30, 255));
+
+                ImGui::InvisibleButton("##flappy", ImVec2(W, H));
+                if (ImGui::IsItemClicked() || ImGui::IsKeyPressed(ImGuiKey_Space))
+                    m_FlappyBird.Jump();
+
+                m_FlappyBird.Update(ImGui::GetIO().DeltaTime);
+
+                if (m_FlappyBird.gameOver) {
+                    ImVec2 goSz = ImGui::CalcTextSize("GAME OVER");
+                    dl->AddText(ImVec2(origin.x + (W - goSz.x) * 0.5f, origin.y + H * 0.4f),
+                        IM_COL32(255, 50, 50, 255), "GAME OVER");
+                    ImVec2 rsSz = ImGui::CalcTextSize("Click or Space to restart");
+                    dl->AddText(ImVec2(origin.x + (W - rsSz.x) * 0.5f, origin.y + H * 0.5f),
+                        IM_COL32(255, 255, 255, 200), "Click or Space to restart");
+                }
+
+                // Leaderboard
+                ImGui::Dummy(ImVec2(0, 4));
+                ImGui::Text("Leaderboard:");
+                for (size_t i = 0; i < m_FlappyBird.localLeaderboard.size() && i < 5; i++) {
+                    auto& e = m_FlappyBird.localLeaderboard[i];
+                    std::string d = e.name;
+                    size_t hp = d.find('#');
+                    if (hp != std::string::npos) d = d.substr(0, hp);
+                    ImGui::Text("  %d. %s — %d", (int)i + 1, d.c_str(), e.score);
+                }
+
+                if (ImGui::Button("Quit")) m_FlappyBird.active = false;
+            }
+            ImGui::End();
+            if (!flappyOpen) m_FlappyBird.active = false;
+        }
+
         // GIF Picker (Tenor)
         if (m_ShowGifPicker && m_CurrentState == AppState::MainApp) {
             ImGui::SetNextWindowSize(ImVec2(420, 350), ImGuiCond_FirstUseEver);
