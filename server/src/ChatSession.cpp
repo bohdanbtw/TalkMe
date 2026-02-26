@@ -534,6 +534,27 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Rename_Server_Request) {
+                if (!j.contains("sid") || !j.contains("name")) return;
+                if (Database::Get().RenameServer(j["sid"], j["name"], m_Username))
+                    SendPacket(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
+                return;
+            }
+
+            if (m_Header.type == PacketType::Delete_Server_Request) {
+                if (!j.contains("sid")) return;
+                if (Database::Get().DeleteServer(j["sid"], m_Username))
+                    SendPacket(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
+                return;
+            }
+
+            if (m_Header.type == PacketType::Leave_Server_Request) {
+                if (!j.contains("sid")) return;
+                Database::Get().LeaveServer(m_Username, j["sid"]);
+                SendPacket(PacketType::Server_List_Response, Database::Get().GetUserServersJSON(m_Username));
+                return;
+            }
+
             if (m_Header.type == PacketType::Set_Status) {
                 std::string status = j.value("status", "");
                 if (status.size() > 128) status = status.substr(0, 128);

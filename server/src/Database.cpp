@@ -695,6 +695,51 @@ namespace TalkMe {
         return users;
     }
 
+    bool Database::RenameServer(int serverId, const std::string& newName, const std::string& username) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool ok = false;
+        if (sqlite3_prepare_v2(m_Db, "UPDATE servers SET name=? WHERE id=? AND owner=?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, newName.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 2, serverId);
+            sqlite3_bind_text(stmt, 3, username.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            ok = (sqlite3_changes(m_Db) > 0);
+            sqlite3_finalize(stmt);
+        }
+        return ok;
+    }
+
+    bool Database::DeleteServer(int serverId, const std::string& username) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* chk = nullptr;
+        bool isOwner = false;
+        if (sqlite3_prepare_v2(m_Db, "SELECT 1 FROM servers WHERE id=? AND owner=?;", -1, &chk, 0) == SQLITE_OK) {
+            sqlite3_bind_int(chk, 1, serverId);
+            sqlite3_bind_text(chk, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+            isOwner = (sqlite3_step(chk) == SQLITE_ROW);
+            sqlite3_finalize(chk);
+        }
+        if (!isOwner) return false;
+        sqlite3_exec(m_Db, ("DELETE FROM messages WHERE channel_id IN (SELECT id FROM channels WHERE server_id=" + std::to_string(serverId) + ");").c_str(), 0, 0, 0);
+        sqlite3_exec(m_Db, ("DELETE FROM channels WHERE server_id=" + std::to_string(serverId) + ";").c_str(), 0, 0, 0);
+        sqlite3_exec(m_Db, ("DELETE FROM server_members WHERE server_id=" + std::to_string(serverId) + ";").c_str(), 0, 0, 0);
+        sqlite3_exec(m_Db, ("DELETE FROM servers WHERE id=" + std::to_string(serverId) + ";").c_str(), 0, 0, 0);
+        return true;
+    }
+
+    bool Database::LeaveServer(const std::string& username, int serverId) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "DELETE FROM server_members WHERE username=? AND server_id=?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 2, serverId);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+        return true;
+    }
+
     bool Database::SetMemberPermissions(int serverId, const std::string& targetUser, uint32_t permissions, const std::string& requestingUser) {
         std::unique_lock<std::shared_mutex> lock(m_RwMutex);
         // Only owner or admin can change permissions

@@ -51,6 +51,9 @@ namespace TalkMe {
         std::vector<std::string> GetServerMembers(int serverId);
         bool DeleteChannel(int channelId, const std::string& username);
 
+        bool RenameServer(int serverId, const std::string& newName, const std::string& username);
+        bool DeleteServer(int serverId, const std::string& username);
+        bool LeaveServer(const std::string& username, int serverId);
         bool SetMemberPermissions(int serverId, const std::string& targetUser, uint32_t permissions, const std::string& requestingUser);
         std::string GetServerOwner(int serverId);
 

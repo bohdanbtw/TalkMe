@@ -430,9 +430,25 @@ namespace TalkMe::UI::Views {
                 if (ImGui::Selectable("Copy Invite Code"))
                     ImGui::SetClipboardText(server.inviteCode.c_str());
                 ImGui::Separator();
+                if (ImGui::Selectable("Rename Server")) {
+                    strncpy_s(newServerNameBuf, 64, server.name.c_str(), _TRUNCATE);
+                    ImGui::OpenPopup("RenameServerPopup");
+                }
+                ImGui::PushStyleColor(ImGuiCol_Text, Styles::Error());
+                if (ImGui::Selectable("Delete Server")) {
+                    nlohmann::json dj; dj["sid"] = server.id;
+                    netClient.Send(PacketType::Delete_Server_Request, dj.dump());
+                    if (selectedServerId == server.id) { selectedServerId = -1; selectedChannelId = -1; }
+                }
+                ImGui::PopStyleColor();
                 ImGui::PushStyleColor(ImGuiCol_Text, Styles::Error());
                 if (ImGui::Selectable("Leave Server")) {
-                    // TODO: Add Leave_Server_Request packet when server supports it
+                    nlohmann::json lj; lj["sid"] = server.id;
+                    netClient.Send(PacketType::Leave_Server_Request, lj.dump());
+                    if (selectedServerId == server.id) {
+                        selectedServerId = -1;
+                        selectedChannelId = -1;
+                    }
                 }
                 ImGui::PopStyleColor();
                 ImGui::EndPopup();

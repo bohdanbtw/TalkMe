@@ -150,6 +150,11 @@ namespace TalkMe {
         Remove_Reaction,     // Client -> Server: remove own reaction
         Reaction_Update,     // Server -> Client: broadcast reaction change
 
+        // --- SERVER MANAGEMENT ---
+        Rename_Server_Request,   // Client -> Server: rename server (owner only)
+        Delete_Server_Request,   // Client -> Server: delete server (owner only)
+        Leave_Server_Request,    // Client -> Server: leave a server
+
         // --- SCREEN SHARING ---
         Screen_Share_Start,  // Client -> Server: start sharing screen (resolution, fps)
         Screen_Share_Stop,   // Client -> Server: stop sharing screen
