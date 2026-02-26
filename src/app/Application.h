@@ -22,6 +22,7 @@
 #include "../overlay/GameOverlay.h"
 #include "../game/Chess.h"
 #include "../screen/ScreenCapture.h"
+#include "../screen/DXGICapture.h"
 #include "../game/Racing.h"
 
 namespace TalkMe {
@@ -151,6 +152,7 @@ namespace TalkMe {
         ChessEngine m_ChessEngine;
         RacingGame m_Racing;
         ScreenCapture m_ScreenCapture;
+        DXGICapture m_DXGICapture;
 
         struct CinemaState {
             bool active = false;
