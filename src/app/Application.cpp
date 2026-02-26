@@ -1013,7 +1013,8 @@ namespace TalkMe {
                             members.emplace_back(sm.username, sm.online);
                         return members.empty() ? nullptr : &members;
                     }(),
-                    &m_ShowMemberList);
+                    &m_ShowMemberList,
+                    m_SearchBuf, &m_ShowSearch);
             }
         }
     }
