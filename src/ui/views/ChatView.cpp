@@ -354,15 +354,17 @@ namespace TalkMe::UI::Views {
 
                     ImGui::PushStyleColor(ImGuiCol_Text, isMe ? Styles::Accent() : Styles::Error());
                     size_t hp = msg.sender.find('#');
-                    if (hp != std::string::npos) {
-                        ImGui::Text("%s", msg.sender.substr(0, hp).c_str());
+                    std::string dispName = hp != std::string::npos ? msg.sender.substr(0, hp) : msg.sender;
+                    std::string tag = hp != std::string::npos ? msg.sender.substr(hp) : "";
+                    ImGui::Text("%s", dispName.c_str());
+                    if (!tag.empty()) {
                         ImGui::SameLine(0, 0);
                         ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
-                        ImGui::Text("%s", msg.sender.substr(hp).c_str());
+                        ImGui::Text("%s", tag.c_str());
                         ImGui::PopStyleColor();
-                    } else {
-                        ImGui::Text("%s", msg.sender.c_str());
                     }
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click to copy username");
+                    if (ImGui::IsItemClicked()) ImGui::SetClipboardText(msg.sender.c_str());
                     ImGui::PopStyleColor();
 
                     ImGui::SameLine();
