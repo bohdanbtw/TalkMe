@@ -438,7 +438,7 @@ namespace TalkMe {
                     if (!m_VoiceMembers.empty()) m_VoiceMembers.clear();
                     if (m_ActiveVoiceChannelId != -1) m_ActiveVoiceChannelId = -1;
                     m_UserMuteStates.clear();
-                    if (m_ScreenShare.iAmSharing) { m_DXGICapture.Stop(); m_ScreenShare.iAmSharing = false; }
+                    if (m_ScreenShare.iAmSharing) { m_DXGICapture.Stop(); m_AudioLoopback.Stop(); m_ScreenShare.iAmSharing = false; }
                     m_ScreenShare.activeStreams.clear();
                     m_ScreenShare.viewingStream.clear();
                 }
@@ -1637,14 +1637,33 @@ namespace TalkMe {
                             si.frameHeight = h;
                             si.frameUpdated = true;
                         });
+                        // Start system audio loopback capture
+                        m_AudioLoopback.Start([this](const float* samples, int frameCount, int sampleRate, int channels) {
+                            // Resample to mono 48kHz if needed, then send as voice data alongside mic
+                            // For now, mix into the existing voice stream by feeding the audio engine
+                            if (frameCount > 0 && channels > 0) {
+                                // Downmix to mono
+                                std::vector<float> mono(frameCount);
+                                for (int i = 0; i < frameCount; i++) {
+                                    float sum = 0;
+                                    for (int c = 0; c < channels; c++)
+                                        sum += samples[i * channels + c];
+                                    mono[i] = sum / channels;
+                                }
+                                // Scale down system audio volume to avoid overwhelming mic
+                                for (auto& s : mono) s *= 0.5f;
+                                // Feed into audio engine's playback for local mixing
+                                // The opus encoder will pick this up from the capture ring buffer
+                                m_AudioEngine.PushSystemAudio(mono.data(), frameCount, sampleRate);
+                            }
+                        });
                         nlohmann::json sj;
                         sj["width"] = 1920; sj["height"] = 1080; sj["fps"] = fps;
                         m_NetClient.Send(PacketType::Screen_Share_Start, sj.dump());
-                        std::fprintf(stderr, "[TalkMe] Screen_Share_Start sent, capture started: %s\n", m_ScreenCapture.IsRunning() ? "YES" : "NO");
-                        std::fflush(stderr);
                     },
                     [this]() {
                         m_DXGICapture.Stop();
+                        m_AudioLoopback.Stop();
                         m_ScreenShare.iAmSharing = false;
                         m_NetClient.Send(PacketType::Screen_Share_Stop, "{}");
                     },
