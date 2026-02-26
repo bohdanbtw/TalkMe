@@ -185,6 +185,15 @@ namespace TalkMe {
         TalkMe::Logger::Instance().InitializeVoiceTrace(tracePath, voiceTraceEnable);
         m_Window.SetOnDestroy([this]() { if (m_QuitEvent) ::SetEvent(static_cast<HANDLE>(m_QuitEvent)); });
         m_Window.SetOnResize([this](UINT w, UINT h) { m_Graphics.OnResize(w, h); });
+        m_Window.SetOnRenderFrame([this]() {
+            if (!m_Graphics.IsValid()) return;
+            m_Graphics.ImGuiNewFrame();
+            ImGui::NewFrame();
+            RenderUI();
+            ImGui::Render();
+            const float clear[4] = { 0.06f, 0.06f, 0.07f, 1.0f };
+            m_Graphics.ClearAndPresent(clear, ImGui::GetDrawData());
+        });
         if (!m_Window.Create(m_Width, m_Height, m_Title) || !m_Graphics.Init(m_Window.GetHwnd()) || !m_Graphics.InitImGui()) return false;
     m_NetworkWakeEvent = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
     m_QuitEvent = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
