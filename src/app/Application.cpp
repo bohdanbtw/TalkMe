@@ -1607,8 +1607,13 @@ namespace TalkMe {
                         CaptureSettings cs;
                         cs.fps = fps;
                         cs.quality = quality;
-                        m_ScreenCapture.Start(cs, [this](const std::vector<uint8_t>& bmpData, int w, int h) {
-                            m_NetClient.SendRaw(PacketType::Screen_Share_Frame, bmpData);
+                        m_ScreenCapture.Start(cs, [this](const std::vector<uint8_t>& jpegData, int w, int h) {
+                            m_NetClient.SendRaw(PacketType::Screen_Share_Frame, jpegData);
+                            // Also store locally for self-preview
+                            m_ScreenShare.lastFrameData = jpegData;
+                            m_ScreenShare.frameWidth = w;
+                            m_ScreenShare.frameHeight = h;
+                            m_ScreenShare.frameUpdated = true;
                         });
                         nlohmann::json sj;
                         sj["width"] = 1920; sj["height"] = 1080; sj["fps"] = fps;
