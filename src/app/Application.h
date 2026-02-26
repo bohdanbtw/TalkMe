@@ -53,6 +53,8 @@ namespace TalkMe {
         std::map<std::string, std::vector<std::string>> reactions;
     };
 
+    struct UserVoiceState { bool muted = false; bool deafened = false; };
+
     class Application {
     public:
         Application(const std::string& title, int width, int height);
@@ -120,7 +122,6 @@ namespace TalkMe {
         std::map<std::string, float> m_SpeakingTimers;
         std::map<std::string, float> m_UserVolumes;  // client-side per-user volume (0 = mute, 1 = normal)
 
-        struct UserVoiceState { bool muted = false; bool deafened = false; };
         std::map<std::string, UserVoiceState> m_UserMuteStates;
 
         std::map<std::string, float> m_TypingUsers;  // username -> timestamp of last typing indicator

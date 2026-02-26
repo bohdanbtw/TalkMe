@@ -63,14 +63,14 @@ public:
         if (!active || finished) return;
         raceTime += dt;
 
-        if (accel) player.speed = std::min(player.speed + kAcceleration, kMaxSpeed);
-        if (brake) player.speed = std::max(player.speed - kBrakeForce, -kMaxSpeed * 0.3f);
+        if (accel) player.speed = (std::min)(player.speed + kAcceleration, kMaxSpeed);
+        if (brake) player.speed = (std::max)(player.speed - kBrakeForce, -kMaxSpeed * 0.3f);
         if (!accel && !brake) {
-            if (player.speed > 0) player.speed = std::max(0.0f, player.speed - kFriction);
-            else player.speed = std::min(0.0f, player.speed + kFriction);
+            if (player.speed > 0) player.speed = (std::max)(0.0f, player.speed - kFriction);
+            else player.speed = (std::min)(0.0f, player.speed + kFriction);
         }
-        if (left) player.angle -= kTurnSpeed * (std::abs(player.speed) / kMaxSpeed);
-        if (right) player.angle += kTurnSpeed * (std::abs(player.speed) / kMaxSpeed);
+        if (left) player.angle -= kTurnSpeed * ((std::abs)(player.speed) / kMaxSpeed);
+        if (right) player.angle += kTurnSpeed * ((std::abs)(player.speed) / kMaxSpeed);
 
         player.x += std::cos(player.angle) * player.speed;
         player.y += std::sin(player.angle) * player.speed;

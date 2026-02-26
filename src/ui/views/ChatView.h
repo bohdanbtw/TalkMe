@@ -8,7 +8,7 @@
 
 namespace TalkMe::UI::Views {
 
-    using UserVoiceState = Application::UserVoiceState;
+    using UserVoiceState = TalkMe::UserVoiceState;
 
     void RenderChannelView(
         NetworkClient& netClient,
