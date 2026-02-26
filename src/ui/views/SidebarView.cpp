@@ -328,11 +328,15 @@ namespace TalkMe::UI::Views {
         // Row 2: FRIENDS | SETTINGS
         ImGui::Dummy(ImVec2(0, 4));
         float btnW2 = (innerW - gap) / 2.0f;
-        if (ImGui::Button("Friends", ImVec2(btnW2, btnH)) && showFriendList)
+        if (ImGui::Button("Friends", ImVec2(btnW2, btnH)) && showFriendList) {
             *showFriendList = !*showFriendList;
+            if (*showFriendList) showSettings = false;
+        }
         ImGui::SameLine(0, gap);
-        if (ImGui::Button("Settings", ImVec2(btnW2, btnH)))
+        if (ImGui::Button("Settings", ImVec2(btnW2, btnH))) {
             showSettings = !showSettings;
+            if (showSettings && showFriendList) *showFriendList = false;
+        }
 
         ImGui::Unindent(pad);
         ImGui::EndChild();

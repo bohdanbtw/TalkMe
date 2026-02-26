@@ -247,18 +247,7 @@ namespace TalkMe::UI::Views {
                 ImGui::Dummy(ImVec2(0, 4));
                 float toolX = (areaW - 350.0f) * 0.5f;
                 if (toolX < 20.0f) toolX = 20.0f;
-                ImGui::SetCursorPosX(toolX);
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
-                ImGui::Button("Screen Share", ImVec2(105, 28));
-                ImGui::SameLine(0, 6);
-                ImGui::Button("Chess", ImVec2(65, 28));
-                ImGui::SameLine(0, 6);
-                ImGui::Button("Racing", ImVec2(65, 28));
-                ImGui::SameLine(0, 6);
-                ImGui::Button("Cinema", ImVec2(75, 28));
-                ImGui::PopStyleVar();
-
-                // Leave Voice Chat button (bottom bar)
+                // Leave Voice Chat button FIRST (most important)
                 ImGui::Dummy(ImVec2(0, 4));
                 float leaveBtnW = 220.0f;
                 float leaveBtnH = 42.0f;
@@ -275,6 +264,71 @@ namespace TalkMe::UI::Views {
                 }
                 ImGui::PopStyleColor(3);
                 ImGui::PopStyleVar();
+
+                // Activity toolbar (below leave button)
+                ImGui::Dummy(ImVec2(0, 6));
+                float toolX2 = (areaW - 320.0f) * 0.5f;
+                if (toolX2 < 20.0f) toolX2 = 20.0f;
+                ImGui::SetCursorPosX(toolX2);
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+                ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonSubtle());
+                if (ImGui::Button("Screen Share", ImVec2(100, 26))) {
+                    nlohmann::json sj; sj["width"] = 1920; sj["height"] = 1080; sj["fps"] = 30;
+                    netClient.Send(PacketType::Screen_Share_Start, sj.dump());
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Start sharing your screen");
+                ImGui::SameLine(0, 4);
+                if (ImGui::Button("Cinema", ImVec2(65, 26))) {
+                    ImGui::OpenPopup("CinemaPopup");
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Start a watch party");
+                ImGui::SameLine(0, 4);
+                if (ImGui::Button("Chess", ImVec2(55, 26))) {
+                    ImGui::OpenPopup("ChessTargetPopup");
+                }
+                ImGui::SameLine(0, 4);
+                if (ImGui::Button("Racing", ImVec2(60, 26))) {
+                    ImGui::OpenPopup("RaceTargetPopup");
+                }
+                ImGui::PopStyleColor();
+                ImGui::PopStyleVar();
+
+                if (ImGui::BeginPopup("ChessTargetPopup")) {
+                    ImGui::Text("Challenge to Chess:");
+                    for (const auto& m : voiceMembers) {
+                        if (m == currentUser.username) continue;
+                        std::string d = m; size_t h = d.find('#'); if (h != std::string::npos) d = d.substr(0, h);
+                        if (ImGui::Selectable(d.c_str())) {
+                            nlohmann::json cj; cj["to"] = m; cj["game"] = "chess";
+                            netClient.Send(PacketType::Game_Challenge, cj.dump());
+                        }
+                    }
+                    ImGui::EndPopup();
+                }
+                if (ImGui::BeginPopup("RaceTargetPopup")) {
+                    ImGui::Text("Challenge to Race:");
+                    for (const auto& m : voiceMembers) {
+                        if (m == currentUser.username) continue;
+                        std::string d = m; size_t h = d.find('#'); if (h != std::string::npos) d = d.substr(0, h);
+                        if (ImGui::Selectable(d.c_str())) {
+                            nlohmann::json cj; cj["to"] = m; cj["game"] = "racing";
+                            netClient.Send(PacketType::Game_Challenge, cj.dump());
+                        }
+                    }
+                    ImGui::EndPopup();
+                }
+                if (ImGui::BeginPopup("CinemaPopup")) {
+                    static char s_cinemaUrl[512] = "";
+                    ImGui::Text("Start Watch Party");
+                    ImGui::InputTextWithHint("##cinema_url", "Video URL...", s_cinemaUrl, sizeof(s_cinemaUrl));
+                    if (ImGui::Button("Start", ImVec2(80, 26)) && strlen(s_cinemaUrl) > 0) {
+                        nlohmann::json cj; cj["url"] = std::string(s_cinemaUrl); cj["title"] = "Watch Party";
+                        netClient.Send(PacketType::Cinema_Start, cj.dump());
+                        memset(s_cinemaUrl, 0, sizeof(s_cinemaUrl));
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::EndPopup();
+                }
             }
             // ==================== TEXT VIEW ====================
             else {
@@ -594,7 +648,7 @@ namespace TalkMe::UI::Views {
                 ImGui::Indent(32);
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
                 ImGui::PushStyleColor(ImGuiCol_FrameBg, Styles::ButtonSubtle());
-                float inputW = areaW - 150;
+                float inputW = areaW - 220;
                 ImGui::PushItemWidth(inputW);
                 bool enter = ImGui::InputText("##chat_in", chatInputBuf, 1024, ImGuiInputTextFlags_EnterReturnsTrue);
                 ImGui::PopItemWidth();
@@ -603,7 +657,22 @@ namespace TalkMe::UI::Views {
                     onUserTyping();
 
                 ImGui::SameLine();
-                if (UI::AccentButton("Send", ImVec2(68, 32)) || enter) {
+                if (ImGui::Button("+", ImVec2(28, 32))) {
+                    ImGui::OpenPopup("AttachPopup");
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Attach file or image");
+                if (ImGui::BeginPopup("AttachPopup")) {
+                    if (ImGui::Selectable("Upload Image...")) {
+                        // TODO: open file dialog and upload via File_Transfer_Request
+                    }
+                    if (ImGui::Selectable("Send GIF Link")) {
+                        // Pre-fill input with a GIF URL placeholder
+                    }
+                    ImGui::EndPopup();
+                }
+
+                ImGui::SameLine();
+                if (UI::AccentButton("Send", ImVec2(60, 32)) || enter) {
                     if (strlen(chatInputBuf) > 0) {
                         std::string input(chatInputBuf);
                         if (input.size() > 1 && input[0] == '/') {
