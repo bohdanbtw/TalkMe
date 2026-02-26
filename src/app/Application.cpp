@@ -672,10 +672,9 @@ namespace TalkMe {
         else if (m_CurrentState == AppState::MainApp) RenderMainApp();
         ImGui::End(); ImGui::PopStyleVar(3);
 
-        // Friends panel (F2 toggle)
-        if (m_ShowFriendList && m_CurrentState == AppState::MainApp) {
-            ImGui::SetNextWindowSize(ImVec2(320, 400), ImGuiCond_FirstUseEver);
-            if (ImGui::Begin("Friends", &m_ShowFriendList)) {
+        // Friends panel removed — now rendered as a full tab (like Settings)
+        if (false) {
+            if (ImGui::Begin("_unused_")) {
                 ImGui::PushItemWidth(-1);
                 ImGui::InputTextWithHint("##friend_search", "Add friend (username#tag)...", m_FriendSearchBuf, sizeof(m_FriendSearchBuf));
                 ImGui::PopItemWidth();
@@ -1335,6 +1334,202 @@ namespace TalkMe {
                 }
             };
             UI::Views::RenderSettings(sctx);
+        }
+        else if (m_ShowFriendList) {
+            float left = UI::Styles::MainContentLeftOffset;
+            float friendW = ImGui::GetWindowWidth() - left - UI::Styles::ServerRailWidth;
+            ImGui::SetCursorPos(ImVec2(left, 0));
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, UI::Styles::BgChat());
+            ImGui::BeginChild("FriendsTab", ImVec2(friendW, ImGui::GetWindowHeight()), false);
+
+            ImGui::Dummy(ImVec2(0, 20));
+            ImGui::Indent(36);
+            ImGui::PushStyleColor(ImGuiCol_Text, UI::Styles::Accent());
+            ImGui::SetWindowFontScale(1.3f);
+            ImGui::Text("Friends");
+            ImGui::SetWindowFontScale(1.0f);
+            ImGui::PopStyleColor();
+
+            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::PushItemWidth(friendW - 180);
+            ImGui::InputTextWithHint("##friend_add", "Add friend (username#tag)...", m_FriendSearchBuf, sizeof(m_FriendSearchBuf));
+            ImGui::PopItemWidth();
+            ImGui::SameLine();
+            if (UI::AccentButton("Add Friend", ImVec2(100, 28)) && strlen(m_FriendSearchBuf) > 0) {
+                nlohmann::json fj; fj["u"] = std::string(m_FriendSearchBuf);
+                m_NetClient.Send(PacketType::Friend_Request, fj.dump());
+                memset(m_FriendSearchBuf, 0, sizeof(m_FriendSearchBuf));
+            }
+
+            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::Separator();
+            ImGui::Dummy(ImVec2(0, 8));
+
+            // Pending requests
+            int pendingCount = 0;
+            for (const auto& f : m_Friends)
+                if (f.status == "pending" && f.direction == "received") pendingCount++;
+
+            if (pendingCount > 0) {
+                ImGui::TextColored(ImVec4(1, 0.7f, 0.2f, 1), "Pending Requests (%d)", pendingCount);
+                ImGui::Dummy(ImVec2(0, 4));
+                for (const auto& f : m_Friends) {
+                    if (f.status != "pending" || f.direction != "received") continue;
+                    std::string disp = f.username;
+                    size_t hp = disp.find('#');
+                    if (hp != std::string::npos) disp = disp.substr(0, hp);
+                    ImGui::Text("  %s", disp.c_str());
+                    ImGui::SameLine();
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.6f, 0.25f, 1));
+                    if (ImGui::SmallButton(("Accept##" + f.username).c_str())) {
+                        nlohmann::json aj; aj["u"] = f.username;
+                        m_NetClient.Send(PacketType::Friend_Accept, aj.dump());
+                    }
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine();
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.15f, 0.15f, 1));
+                    if (ImGui::SmallButton(("Reject##" + f.username).c_str())) {
+                        nlohmann::json rj; rj["u"] = f.username;
+                        m_NetClient.Send(PacketType::Friend_Reject, rj.dump());
+                    }
+                    ImGui::PopStyleColor();
+                }
+                ImGui::Dummy(ImVec2(0, 8));
+                ImGui::Separator();
+                ImGui::Dummy(ImVec2(0, 8));
+            }
+
+            // Online friends
+            ImGui::Text("Online");
+            ImGui::Dummy(ImVec2(0, 4));
+            for (const auto& f : m_Friends) {
+                if (f.status != "accepted") continue;
+                bool online = m_OnlineUsers.count(f.username) > 0;
+                if (!online) continue;
+                std::string disp = f.username;
+                size_t hp = disp.find('#');
+                if (hp != std::string::npos) disp = disp.substr(0, hp);
+
+                ImVec2 pos = ImGui::GetCursorScreenPos();
+                ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(pos.x + 42, pos.y + 8), 5.0f, IM_COL32(80, 220, 100, 255));
+                ImGui::Text("      %s", disp.c_str());
+                ImGui::SameLine();
+                if (m_CurrentCall.state.empty() && ImGui::SmallButton(("Call##" + f.username).c_str())) {
+                    nlohmann::json cj; cj["to"] = f.username;
+                    m_NetClient.Send(PacketType::Call_Request, cj.dump());
+                    m_CurrentCall.otherUser = f.username;
+                    m_CurrentCall.state = "calling";
+                }
+                ImGui::SameLine();
+                if (ImGui::SmallButton(("Message##" + f.username).c_str())) {
+                    m_ActiveDMUser = f.username;
+                    m_DirectMessages.clear();
+                    nlohmann::json hj; hj["u"] = f.username;
+                    m_NetClient.Send(PacketType::DM_History_Request, hj.dump());
+                }
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Text, UI::Styles::TextMuted());
+                if (ImGui::SmallButton(("Remove##" + f.username).c_str())) {
+                    nlohmann::json rj; rj["u"] = f.username;
+                    m_NetClient.Send(PacketType::Friend_Reject, rj.dump());
+                }
+                ImGui::PopStyleColor();
+            }
+
+            ImGui::Dummy(ImVec2(0, 12));
+            ImGui::Text("Offline");
+            ImGui::Dummy(ImVec2(0, 4));
+            for (const auto& f : m_Friends) {
+                if (f.status != "accepted") continue;
+                bool online = m_OnlineUsers.count(f.username) > 0;
+                if (online) continue;
+                std::string disp = f.username;
+                size_t hp = disp.find('#');
+                if (hp != std::string::npos) disp = disp.substr(0, hp);
+
+                ImVec2 pos = ImGui::GetCursorScreenPos();
+                ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(pos.x + 42, pos.y + 8), 5.0f, IM_COL32(120, 120, 125, 255));
+                ImGui::PushStyleColor(ImGuiCol_Text, UI::Styles::TextMuted());
+                ImGui::Text("      %s", disp.c_str());
+                ImGui::PopStyleColor();
+                ImGui::SameLine();
+                if (ImGui::SmallButton(("Message##" + f.username).c_str())) {
+                    m_ActiveDMUser = f.username;
+                    m_DirectMessages.clear();
+                    nlohmann::json hj; hj["u"] = f.username;
+                    m_NetClient.Send(PacketType::DM_History_Request, hj.dump());
+                }
+            }
+
+            // DM conversation area
+            if (!m_ActiveDMUser.empty()) {
+                ImGui::Dummy(ImVec2(0, 12));
+                ImGui::Separator();
+                ImGui::Dummy(ImVec2(0, 8));
+                std::string dmDisp = m_ActiveDMUser;
+                size_t dhp = dmDisp.find('#');
+                if (dhp != std::string::npos) dmDisp = dmDisp.substr(0, dhp);
+                ImGui::Text("Direct Messages: %s", dmDisp.c_str());
+                ImGui::SameLine();
+                if (ImGui::SmallButton("X##closedm")) m_ActiveDMUser.clear();
+
+                float dmH = ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - 40;
+                if (dmH < 100) dmH = 100;
+                ImGui::BeginChild("DMMessages", ImVec2(friendW - 80, dmH), true);
+                for (const auto& dm : m_DirectMessages) {
+                    bool isMe = (dm.sender == m_CurrentUser.username);
+                    std::string sDisp = dm.sender;
+                    size_t shp = sDisp.find('#');
+                    if (shp != std::string::npos) sDisp = sDisp.substr(0, shp);
+                    ImGui::TextColored(isMe ? ImVec4(0.4f, 0.6f, 1.0f, 1) : ImVec4(1.0f, 0.5f, 0.3f, 1), "%s", sDisp.c_str());
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s", dm.timestamp.c_str());
+                    ImGui::TextWrapped("%s", dm.content.c_str());
+                    ImGui::Dummy(ImVec2(0, 4));
+                }
+                if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
+                ImGui::EndChild();
+
+                ImGui::PushItemWidth(friendW - 160);
+                bool dmSend = ImGui::InputText("##dm_in", m_DMInputBuf, sizeof(m_DMInputBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+                ImGui::PopItemWidth();
+                ImGui::SameLine();
+                if ((ImGui::SmallButton("Send##dm") || dmSend) && strlen(m_DMInputBuf) > 0) {
+                    nlohmann::json dj; dj["to"] = m_ActiveDMUser; dj["msg"] = std::string(m_DMInputBuf);
+                    m_NetClient.Send(PacketType::DM_Send, dj.dump());
+                    memset(m_DMInputBuf, 0, sizeof(m_DMInputBuf));
+                }
+            }
+
+            if (m_Friends.empty() || std::none_of(m_Friends.begin(), m_Friends.end(), [](const FriendEntry& f) { return f.status == "accepted"; })) {
+                ImGui::Dummy(ImVec2(0, 20));
+                ImGui::TextDisabled("No friends yet. Add someone by their username#tag above.");
+            }
+
+            // Call state banner
+            if (!m_CurrentCall.state.empty() && m_CurrentCall.state != "ringing") {
+                std::string cd = m_CurrentCall.otherUser;
+                size_t chp = cd.find('#');
+                if (chp != std::string::npos) cd = cd.substr(0, chp);
+                ImGui::Dummy(ImVec2(0, 8));
+                ImGui::Separator();
+                if (m_CurrentCall.state == "calling")
+                    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1), "Calling %s...", cd.c_str());
+                else if (m_CurrentCall.state == "active")
+                    ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.4f, 1), "In call: %s", cd.c_str());
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.15f, 0.15f, 1));
+                if (ImGui::Button("End Call", ImVec2(80, 26))) {
+                    nlohmann::json rj; rj["to"] = m_CurrentCall.otherUser;
+                    m_NetClient.Send(PacketType::Call_Reject, rj.dump());
+                    m_CurrentCall = {};
+                }
+                ImGui::PopStyleColor();
+            }
+
+            ImGui::Unindent(36);
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
         }
         else if (m_SelectedServerId != -1) {
             auto it = std::find_if(m_ServerList.begin(), m_ServerList.end(), [this](const Server& s) { return s.id == m_SelectedServerId; });
