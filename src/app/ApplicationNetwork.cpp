@@ -4,6 +4,7 @@
 #include "../shared/Protocol.h"
 #include "../shared/PacketHandler.h"
 #include "../core/ConfigManager.h"
+#include "../../vendor/imgui.h"
 #include <nlohmann/json.hpp>
 #include <cstring>
 #include <algorithm>
@@ -238,10 +239,10 @@ void Application::ProcessNetworkMessages() {
                 std::string action = j.value("action", "");
                 std::string user = j.value("u", "");
                 if (action == "start") {
-                    m_ScreenShare.viewer = user;
-                    m_ScreenShare.active = false;
+                    m_ScreenShare.viewingUser = user;
+                    m_ScreenShare.sharing = false;
                 } else if (action == "stop") {
-                    m_ScreenShare.viewer.clear();
+                    m_ScreenShare.viewingUser.clear();
                 }
                 continue;
             }
