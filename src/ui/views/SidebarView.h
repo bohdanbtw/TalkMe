@@ -39,6 +39,7 @@ namespace TalkMe::UI::Views {
         bool& selfDeafened,
         const VoiceInfoData& voiceInfo = {},
         std::function<void()> onToggleEchoLive = nullptr,
-        std::function<void()> onInfPopupOpened = nullptr
+        std::function<void()> onInfPopupOpened = nullptr,
+        std::map<int, int>* unreadCounts = nullptr
     );
 }

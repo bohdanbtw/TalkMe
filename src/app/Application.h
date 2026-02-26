@@ -130,6 +130,8 @@ namespace TalkMe {
         std::vector<ServerMember> m_ServerMembers;
         bool m_ShowMemberList = false;
 
+        std::map<int, int> m_UnreadCounts;  // channelId -> unread message count
+
         struct FriendEntry { std::string username; std::string status; std::string direction; };
         std::vector<FriendEntry> m_Friends;
         bool m_ShowFriendList = false;

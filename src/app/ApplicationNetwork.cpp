@@ -399,12 +399,17 @@ void Application::ProcessNetworkMessages() {
             }
 
             if (msg.type == PacketType::Message_Text) {
-                m_Messages.push_back({ j.value("mid", 0), j.value("cid", 0),
+                int incomingCid = j.value("cid", 0);
+                m_Messages.push_back({ j.value("mid", 0), incomingCid,
                                        j.value("u", "??"), j.value("msg", ""),
                                        GetCurrentTimeStr(),
                                        j.value("reply_to", 0) });
-                if (j.value("u", "") != m_CurrentUser.username && GetForegroundWindow() != m_Window.GetHwnd())
-                    m_Sounds.PlayMessage();
+                if (j.value("u", "") != m_CurrentUser.username) {
+                    if (incomingCid != m_SelectedChannelId)
+                        m_UnreadCounts[incomingCid]++;
+                    if (GetForegroundWindow() != m_Window.GetHwnd())
+                        m_Sounds.PlayMessage();
+                }
                 continue;
             }
         }
