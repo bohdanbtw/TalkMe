@@ -256,14 +256,29 @@ void Application::ProcessNetworkMessages() {
 
             if (msg.type == PacketType::Cinema_State) {
                 m_Cinema.active = true;
-                m_Cinema.url = j.value("url", m_Cinema.url);
-                m_Cinema.title = j.value("title", m_Cinema.title);
+                m_Cinema.currentUrl = j.value("url", m_Cinema.currentUrl);
+                m_Cinema.currentTitle = j.value("title", m_Cinema.currentTitle);
                 m_Cinema.playing = j.value("playing", m_Cinema.playing);
                 m_Cinema.currentTime = j.value("time", m_Cinema.currentTime);
+                m_Cinema.duration = j.value("duration", m_Cinema.duration);
                 m_Cinema.host = j.value("u", m_Cinema.host);
-                if (j.contains("action") && j["action"] == "pause") m_Cinema.playing = false;
-                if (j.contains("action") && j["action"] == "play") m_Cinema.playing = true;
-                if (j.contains("action") && j["action"] == "seek") m_Cinema.currentTime = j.value("time", 0.0f);
+                if (j.contains("action")) {
+                    std::string action = j["action"];
+                    if (action == "pause") m_Cinema.playing = false;
+                    else if (action == "play") m_Cinema.playing = true;
+                    else if (action == "seek") m_Cinema.currentTime = j.value("time", 0.0f);
+                    else if (action == "next" && !m_Cinema.queue.empty()) m_Cinema.queue.erase(m_Cinema.queue.begin());
+                }
+                if (j.contains("queue") && j["queue"].is_array()) {
+                    m_Cinema.queue.clear();
+                    for (const auto& item : j["queue"]) {
+                        CinemaQueueItem qi;
+                        qi.url = item.value("url", "");
+                        qi.title = item.value("title", "");
+                        qi.addedBy = item.value("by", "");
+                        if (!qi.url.empty()) m_Cinema.queue.push_back(qi);
+                    }
+                }
                 continue;
             }
 
@@ -437,7 +452,9 @@ void Application::ProcessNetworkMessages() {
                             ch.id   = item["id"];
                             ch.name = item["name"];
                             const std::string typeStr = item.value("type", "text");
-                            ch.type = (typeStr == "voice") ? ChannelType::Voice : ChannelType::Text;
+                            if (typeStr == "voice") ch.type = ChannelType::Voice;
+                            else if (typeStr == "cinema") ch.type = ChannelType::Cinema;
+                            else ch.type = ChannelType::Text;
                             ch.description = item.value("desc", "");
                             ch.userLimit = item.value("limit", 0);
                             it->channels.push_back(ch);

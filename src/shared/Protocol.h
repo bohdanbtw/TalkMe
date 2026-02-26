@@ -188,9 +188,12 @@ namespace TalkMe {
         // --- CINEMA / WATCH PARTY ---
         Cinema_Start,        // Client -> Server -> Channel: start watch party (URL, title)
         Cinema_Control,      // Client -> Server -> Channel: play/pause/seek
-        Cinema_State,        // Server -> Client: current cinema state (playing, time, URL)
+        Cinema_State,        // Server -> Client: current cinema state (playing, time, URL, queue)
         Cinema_Stop,         // Client -> Server -> Channel: end watch party
         Cinema_Chat,         // Client -> Server -> Channel: cinema chat message
+        Cinema_Queue_Add,    // Client -> Server: add video to queue
+        Cinema_Queue_Remove, // Client -> Server: remove video from queue
+        Cinema_Join,         // Client -> Server: join cinema channel
 
         // --- MINIGAMES ---
         Game_Challenge,      // Client -> Server -> Target: challenge someone to a game

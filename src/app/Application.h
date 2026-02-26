@@ -30,7 +30,7 @@
 
 namespace TalkMe {
     enum class AppState { Login, Login2FA, Register, MainApp };
-    enum class ChannelType { Text, Voice };
+    enum class ChannelType { Text, Voice, Cinema };
 
     struct Channel {
         int id;
@@ -163,14 +163,24 @@ namespace TalkMe {
         H264Decoder m_H264Decoder;
         AudioLoopback m_AudioLoopback;
 
-        struct CinemaState {
-            bool active = false;
+        struct CinemaQueueItem {
             std::string url;
             std::string title;
+            std::string addedBy;
+        };
+        struct CinemaState {
+            bool active = false;
+            int channelId = -1;
+            std::string currentUrl;
+            std::string currentTitle;
             bool playing = false;
             float currentTime = 0.0f;
+            float duration = 0.0f;
             std::string host;
+            std::vector<CinemaQueueItem> queue;
         } m_Cinema;
+        char m_CinemaUrlBuf[512] = "";
+        char m_CinemaTitleBuf[128] = "";
 
         struct StreamInfo {
             std::string username;

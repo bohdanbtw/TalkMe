@@ -151,6 +151,41 @@ namespace TalkMe::UI::Views {
                     ImGui::Unindent(26);
                 }
             }
+
+                // Cinema channels
+                bool hasCinema = false;
+                for (const auto& ch : cur->channels) if (ch.type == ChannelType::Cinema) { hasCinema = true; break; }
+                if (hasCinema) {
+                    ImGui::Dummy(ImVec2(0, Styles::SectionPadding));
+                    ImGui::Indent(16);
+                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                    ImGui::Text("CINEMA CHANNELS");
+                    ImGui::PopStyleColor();
+                    ImGui::Unindent(16);
+                    ImGui::Dummy(ImVec2(0, 4));
+
+                    for (const auto& ch : cur->channels) {
+                        if (ch.type != ChannelType::Cinema) continue;
+                        bool sel = (selectedChannelId == ch.id);
+                        std::string label = "  > " + ch.name;
+                        if (sel) {
+                            ImGui::PushStyleColor(ImGuiCol_Header, Styles::ButtonSubtle());
+                            ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
+                        }
+                        ImGui::Indent(10);
+                        if (ImGui::Selectable(label.c_str(), sel, 0, ImVec2(sW - 30, 26))) {
+                            if (selectedChannelId != ch.id) {
+                                selectedChannelId = ch.id;
+                                showSettings = false;
+                                nlohmann::json cj; cj["cid"] = ch.id;
+                                netClient.Send(PacketType::Cinema_Join, cj.dump());
+                            }
+                        }
+                        ImGui::Unindent(10);
+                        if (sel) ImGui::PopStyleColor(2);
+                    }
+                }
+            }
         }
 
         // Create channel popup
@@ -167,10 +202,12 @@ namespace TalkMe::UI::Views {
             ImGui::RadioButton("Text", &type, 0);
             ImGui::SameLine();
             ImGui::RadioButton("Voice", &type, 1);
+            ImGui::SameLine();
+            ImGui::RadioButton("Cinema", &type, 2);
             ImGui::Dummy(ImVec2(0, 6));
             if (UI::AccentButton("Create", ImVec2(220, 30))) {
                 if (selectedServerId != -1 && strlen(newChannelNameBuf) > 0) {
-                    std::string tStr = (type == 1) ? "voice" : "text";
+                    std::string tStr = (type == 2) ? "cinema" : (type == 1) ? "voice" : "text";
                     netClient.Send(PacketType::Create_Channel_Request, PacketHandler::CreateChannelPayload(selectedServerId, newChannelNameBuf, tStr));
                     memset(newChannelNameBuf, 0, 64);
                     ImGui::CloseCurrentPopup();

@@ -578,16 +578,125 @@ namespace TalkMe {
                 return;
             }
 
-            if (m_Header.type == PacketType::Cinema_Start || m_Header.type == PacketType::Cinema_Control
-                || m_Header.type == PacketType::Cinema_Stop || m_Header.type == PacketType::Cinema_Chat) {
-                int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
-                if (cid == -1) return;
-                json out = j;
-                out["u"] = m_Username;
-                PacketType outType = (m_Header.type == PacketType::Cinema_Start || m_Header.type == PacketType::Cinema_Control)
-                    ? PacketType::Cinema_State : m_Header.type;
-                auto buf = m_Server.CreateBroadcastBuffer(outType, out.dump());
-                m_Server.BroadcastToVoiceChannel(cid, buf);
+            if (m_Header.type == PacketType::Cinema_Join) {
+                if (!j.contains("cid")) return;
+                int cid = j["cid"];
+                auto& cinema = m_Server.GetCinemaChannels()[cid];
+                cinema.viewers.insert(shared_from_this());
+                // Send current state to the joining user
+                json state;
+                state["url"] = cinema.currentUrl;
+                state["title"] = cinema.currentTitle;
+                state["playing"] = cinema.playing;
+                state["time"] = cinema.currentTime;
+                state["duration"] = cinema.duration;
+                json queueArr = json::array();
+                for (const auto& qi : cinema.queue)
+                    queueArr.push_back({ {"url", qi.url}, {"title", qi.title}, {"by", qi.addedBy} });
+                state["queue"] = queueArr;
+                SendPacket(PacketType::Cinema_State, state.dump());
+                return;
+            }
+
+            if (m_Header.type == PacketType::Cinema_Queue_Add) {
+                if (!j.contains("cid") || !j.contains("url")) return;
+                int cid = j["cid"];
+                auto& cinema = m_Server.GetCinemaChannels()[cid];
+                TalkMeServer::CinemaChannelState::QueueItem qi;
+                qi.url = j["url"];
+                qi.title = j.value("title", qi.url);
+                qi.addedBy = m_Username;
+                cinema.queue.push_back(qi);
+                // If nothing is playing, start the first item
+                if (cinema.currentUrl.empty() && !cinema.queue.empty()) {
+                    cinema.currentUrl = cinema.queue[0].url;
+                    cinema.currentTitle = cinema.queue[0].title;
+                    cinema.playing = true;
+                    cinema.currentTime = 0;
+                }
+                // Broadcast updated state to all viewers
+                json state;
+                state["url"] = cinema.currentUrl; state["title"] = cinema.currentTitle;
+                state["playing"] = cinema.playing; state["time"] = cinema.currentTime;
+                json queueArr = json::array();
+                for (const auto& q : cinema.queue)
+                    queueArr.push_back({ {"url", q.url}, {"title", q.title}, {"by", q.addedBy} });
+                state["queue"] = queueArr;
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Cinema_State, state.dump());
+                for (const auto& v : cinema.viewers) v->SendShared(buf, false);
+                return;
+            }
+
+            if (m_Header.type == PacketType::Cinema_Queue_Remove) {
+                if (!j.contains("cid") || !j.contains("index")) return;
+                int cid = j["cid"];
+                int idx = j["index"];
+                auto& cinema = m_Server.GetCinemaChannels()[cid];
+                if (idx >= 0 && idx < (int)cinema.queue.size())
+                    cinema.queue.erase(cinema.queue.begin() + idx);
+                json state;
+                state["url"] = cinema.currentUrl; state["title"] = cinema.currentTitle;
+                state["playing"] = cinema.playing; state["time"] = cinema.currentTime;
+                json queueArr = json::array();
+                for (const auto& q : cinema.queue)
+                    queueArr.push_back({ {"url", q.url}, {"title", q.title}, {"by", q.addedBy} });
+                state["queue"] = queueArr;
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Cinema_State, state.dump());
+                for (const auto& v : cinema.viewers) v->SendShared(buf, false);
+                return;
+            }
+
+            if (m_Header.type == PacketType::Cinema_Control) {
+                if (!j.contains("cid")) return;
+                int cid = j["cid"];
+                auto& cinema = m_Server.GetCinemaChannels()[cid];
+                std::string action = j.value("action", "");
+                if (action == "play") cinema.playing = true;
+                else if (action == "pause") cinema.playing = false;
+                else if (action == "seek") cinema.currentTime = j.value("time", 0.0f);
+                else if (action == "next") {
+                    if (!cinema.queue.empty()) cinema.queue.erase(cinema.queue.begin());
+                    if (!cinema.queue.empty()) {
+                        cinema.currentUrl = cinema.queue[0].url;
+                        cinema.currentTitle = cinema.queue[0].title;
+                        cinema.currentTime = 0;
+                        cinema.playing = true;
+                    } else {
+                        cinema.currentUrl.clear(); cinema.currentTitle.clear();
+                        cinema.playing = false; cinema.currentTime = 0;
+                    }
+                }
+                json state;
+                state["url"] = cinema.currentUrl; state["title"] = cinema.currentTitle;
+                state["playing"] = cinema.playing; state["time"] = cinema.currentTime;
+                state["action"] = action;
+                json queueArr = json::array();
+                for (const auto& q : cinema.queue)
+                    queueArr.push_back({ {"url", q.url}, {"title", q.title}, {"by", q.addedBy} });
+                state["queue"] = queueArr;
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Cinema_State, state.dump());
+                for (const auto& v : cinema.viewers) v->SendShared(buf, false);
+                return;
+            }
+
+            if (m_Header.type == PacketType::Cinema_Stop) {
+                if (!j.contains("cid")) return;
+                int cid = j["cid"];
+                auto& cinema = m_Server.GetCinemaChannels()[cid];
+                cinema = {};
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Cinema_Stop, "{}");
+                for (const auto& v : cinema.viewers) v->SendShared(buf, false);
+                m_Server.GetCinemaChannels().erase(cid);
+                return;
+            }
+
+            if (m_Header.type == PacketType::Cinema_Chat) {
+                if (!j.contains("cid")) return;
+                int cid = j["cid"];
+                json out = j; out["u"] = m_Username;
+                auto& cinema = m_Server.GetCinemaChannels()[cid];
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Cinema_Chat, out.dump());
+                for (const auto& v : cinema.viewers) v->SendShared(buf, false);
                 return;
             }
 

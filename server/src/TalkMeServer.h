@@ -102,6 +102,18 @@ namespace TalkMe {
         const std::set<std::shared_ptr<ChatSession>>& GetAllSessions() const { return m_AllSessions; }
         const std::unordered_map<int, std::set<std::shared_ptr<ChatSession>>>& GetVoiceChannels() const { return m_VoiceChannels; }
 
+        struct CinemaChannelState {
+            std::string currentUrl;
+            std::string currentTitle;
+            bool playing = false;
+            float currentTime = 0.0f;
+            float duration = 0.0f;
+            struct QueueItem { std::string url; std::string title; std::string addedBy; };
+            std::vector<QueueItem> queue;
+            std::set<std::shared_ptr<ChatSession>> viewers;
+        };
+        std::unordered_map<int, CinemaChannelState>& GetCinemaChannels() { return m_CinemaChannels; }
+
         // Broadcast user online/offline presence to all sessions.
         void BroadcastPresence(const std::string& username, bool online);
 
@@ -127,6 +139,7 @@ namespace TalkMe {
         std::shared_mutex                                                m_RoomMutex;
         std::set<std::shared_ptr<ChatSession>>                           m_AllSessions;
         std::unordered_map<int, std::set<std::shared_ptr<ChatSession>>>  m_VoiceChannels;
+        std::unordered_map<int, CinemaChannelState> m_CinemaChannels;
 
         // --- UDP bindings (guarded by m_RoomMutex) -----------------------------
         std::unordered_map<std::string, UdpBinding> m_UdpBindings;
