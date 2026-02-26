@@ -150,6 +150,11 @@ namespace TalkMe {
         Remove_Reaction,     // Client -> Server: remove own reaction
         Reaction_Update,     // Server -> Client: broadcast reaction change
 
+        // --- ROLES ---
+        Set_Member_Role,     // Client -> Server: set permissions for a member
+        Get_Member_Role,     // Client -> Server: get permissions for a member
+        Member_Role_Response,// Server -> Client: member permissions data
+
         // --- PRESENCE ---
         Voice_Mute_State,    // Client -> Server -> All: user muted/deafened state change
         Typing_Indicator,    // Client -> Server -> Channel: user is typing
