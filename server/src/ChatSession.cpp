@@ -539,6 +539,16 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Message_History_Page) {
+                if (!j.contains("cid")) return;
+                int cid = j["cid"];
+                int beforeId = j.value("before", 0);
+                int limit = j.value("limit", 50);
+                SendPacket(PacketType::Message_History_Response,
+                    Database::Get().GetMessageHistoryJSON(cid, beforeId, limit));
+                return;
+            }
+
             if (m_Header.type == PacketType::Bot_Register) {
                 if (!j.contains("sid") || !j.contains("name")) return;
                 int sid = j["sid"];

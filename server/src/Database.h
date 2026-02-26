@@ -39,7 +39,7 @@ namespace TalkMe {
         int JoinServer(const std::string& username, const std::string& code);
         std::string GetUserServersJSON(const std::string& username);
         std::string GetServerContentJSON(int serverId);
-        std::string GetMessageHistoryJSON(int channelId);
+        std::string GetMessageHistoryJSON(int channelId, int beforeId = 0, int limit = 50);
         void SaveMessage(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId = "", int replyTo = 0);
         int SaveMessageReturnId(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId = "", int replyTo = 0);
         int GetServerIdForChannel(int cid);
