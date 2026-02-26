@@ -81,7 +81,7 @@ void Application::StartLinkProbe() {
                 meanRtt /= static_cast<float>(rtts.size());
 
                 float jitterMs = 0.0f;
-                for (float r : rtts) jitterMs += std::abs(r - meanRtt);
+                for (float r : rtts) jitterMs += (std::abs)(r - meanRtt);
                 jitterMs /= static_cast<float>(rtts.size());
 
                 const float lossPct = 100.0f * (1.0f -

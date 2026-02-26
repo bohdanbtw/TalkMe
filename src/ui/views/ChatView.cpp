@@ -159,7 +159,7 @@ namespace TalkMe::UI::Views {
                 float cardR   = Styles::VoiceCardRounding;
 
                 float usableW = areaW - 60.0f;
-                int cols = std::max(1, (int)(usableW / (itemW + gap)));
+                int cols = (std::max)(1, (int)(usableW / (itemW + gap)));
                 float totalW = cols * itemW + (cols - 1) * gap;
                 float padX = (areaW - totalW) * 0.5f;
                 if (padX < 20.0f) padX = 20.0f;
@@ -209,7 +209,7 @@ namespace TalkMe::UI::Views {
                     dl->AddCircleFilled(ctr, avatarR, Styles::ColBgAvatar());
 
                     // Initials
-                    std::string init = member.substr(0, std::min((size_t)2, member.size()));
+                    std::string init = member.substr(0, (std::min)((size_t)2, member.size()));
                     ImVec2 tsz = ImGui::GetFont()->CalcTextSizeA(Styles::VoiceAvatarFontSize, FLT_MAX, 0, init.c_str());
                     dl->AddText(ImGui::GetFont(), Styles::VoiceAvatarFontSize,
                         ImVec2(ctr.x - tsz.x * 0.5f, ctr.y - tsz.y * 0.5f),

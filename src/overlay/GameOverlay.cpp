@@ -88,7 +88,7 @@ namespace TalkMe {
     }
 
     void GameOverlay::SetCorner(int corner) {
-        m_Corner = std::min(std::max(corner, 0), 3);
+        m_Corner = (std::min)((std::max)(corner, 0), 3);
         if (m_Enabled && m_Hwnd) Reposition();
     }
 

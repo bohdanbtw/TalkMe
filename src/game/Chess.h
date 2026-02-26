@@ -80,7 +80,7 @@ public:
         }
 
         // Castling
-        if (lower == 'k' && std::abs(tc - fc) == 2) {
+        if (lower == 'k' && (std::abs)(tc - fc) == 2) {
             if (tc == 6) { board[fr][5] = board[fr][7]; board[fr][7] = ' '; }
             if (tc == 2) { board[fr][3] = board[fr][0]; board[fr][0] = ' '; }
         }
@@ -103,7 +103,7 @@ public:
 
         // En passant tracking
         enPassantCol = -1;
-        if (lower == 'p' && std::abs(tr - fr) == 2) enPassantCol = fc;
+        if (lower == 'p' && (std::abs)(tr - fr) == 2) enPassantCol = fc;
 
         whiteToMove = !whiteToMove;
 
@@ -147,7 +147,7 @@ private:
             if (tr == fr + dir && board[tr][tc] == ' ') return true;
             if (fr == startRow && tr == fr + 2 * dir && board[fr + dir][fc] == ' ' && board[tr][tc] == ' ') return true;
         }
-        if (std::abs(tc - fc) == 1 && tr == fr + dir) {
+        if ((std::abs)(tc - fc) == 1 && tr == fr + dir) {
             if (board[tr][tc] != ' ') return true;
             int epRow = isWhite ? 3 : 4;
             if (fr == epRow && tc == enPassantCol && board[fr][tc] != ' ') return true;
@@ -156,13 +156,13 @@ private:
     }
 
     bool ValidateKnight(int fr, int fc, int tr, int tc) const {
-        int dr = std::abs(tr - fr), dc = std::abs(tc - fc);
+        int dr = (std::abs)(tr - fr), dc = (std::abs)(tc - fc);
         return (dr == 2 && dc == 1) || (dr == 1 && dc == 2);
     }
 
     bool ValidateBishop(int fr, int fc, int tr, int tc) const {
         int dr = tr - fr, dc = tc - fc;
-        if (std::abs(dr) != std::abs(dc) || dr == 0) return false;
+        if ((std::abs)(dr) != (std::abs)(dc) || dr == 0) return false;
         int sr = (dr > 0) ? 1 : -1, sc = (dc > 0) ? 1 : -1;
         for (int r = fr + sr, c = fc + sc; r != tr; r += sr, c += sc)
             if (board[r][c] != ' ') return false;
@@ -179,7 +179,7 @@ private:
     }
 
     bool ValidateKing(int fr, int fc, int tr, int tc, bool isWhite) const {
-        int dr = std::abs(tr - fr), dc = std::abs(tc - fc);
+        int dr = (std::abs)(tr - fr), dc = (std::abs)(tc - fc);
         if (dr <= 1 && dc <= 1 && (dr + dc > 0)) return true;
         // Castling
         if (dr == 0 && dc == 2 && !IsKingInCheck(isWhite)) {
@@ -214,11 +214,11 @@ private:
                 switch (lp) {
                     case 'p': {
                         int dir = pw ? -1 : 1;
-                        if (ar + dir == r && std::abs(ac - c) == 1) return true;
+                        if (ar + dir == r && (std::abs)(ac - c) == 1) return true;
                         break;
                     }
                     case 'n': {
-                        int dr = std::abs(r - ar), dc = std::abs(c - ac);
+                        int dr = (std::abs)(r - ar), dc = (std::abs)(c - ac);
                         if ((dr == 2 && dc == 1) || (dr == 1 && dc == 2)) return true;
                         break;
                     }
@@ -226,7 +226,7 @@ private:
                     case 'r': if (ValidateRook(ar, ac, r, c)) return true; break;
                     case 'q': if (ValidateBishop(ar, ac, r, c) || ValidateRook(ar, ac, r, c)) return true; break;
                     case 'k': {
-                        int dr = std::abs(r - ar), dc = std::abs(c - ac);
+                        int dr = (std::abs)(r - ar), dc = (std::abs)(c - ac);
                         if (dr <= 1 && dc <= 1 && (dr + dc > 0)) return true;
                         break;
                     }
