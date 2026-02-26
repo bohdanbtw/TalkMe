@@ -20,6 +20,7 @@
 #include "../core/ConfigManager.h"
 #include "../audio/AudioEngine.h"
 #include "../overlay/GameOverlay.h"
+#include "../game/Chess.h"
 
 namespace TalkMe {
     enum class AppState { Login, Login2FA, Register, MainApp };
@@ -137,24 +138,14 @@ namespace TalkMe {
         bool m_ShowSearch = false;
         bool m_ShowShortcuts = false;
 
-        struct ChessGame {
+        struct ChessGameState {
             bool active = false;
             std::string opponent;
             bool myTurn = false;
             bool isWhite = true;
-            char board[8][8] = {
-                {'r','n','b','q','k','b','n','r'},
-                {'p','p','p','p','p','p','p','p'},
-                {' ',' ',' ',' ',' ',' ',' ',' '},
-                {' ',' ',' ',' ',' ',' ',' ',' '},
-                {' ',' ',' ',' ',' ',' ',' ',' '},
-                {' ',' ',' ',' ',' ',' ',' ',' '},
-                {'P','P','P','P','P','P','P','P'},
-                {'R','N','B','Q','K','B','N','R'}
-            };
             int selectedRow = -1, selectedCol = -1;
-            std::string result;
-        } m_Chess;
+        } m_ChessUI;
+        ChessEngine m_ChessEngine;
 
         struct ScreenShareSettings {
             int fps = 30;
