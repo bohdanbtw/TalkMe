@@ -24,6 +24,7 @@
 #include "../screen/ScreenCapture.h"
 #include "../screen/DXGICapture.h"
 #include "../screen/H264Encoder.h"
+#include "../screen/AudioLoopback.h"
 #include "../game/Racing.h"
 
 namespace TalkMe {
@@ -155,6 +156,7 @@ namespace TalkMe {
         ScreenCapture m_ScreenCapture;
         DXGICapture m_DXGICapture;
         H264Decoder m_H264Decoder;
+        AudioLoopback m_AudioLoopback;
 
         struct CinemaState {
             bool active = false;
