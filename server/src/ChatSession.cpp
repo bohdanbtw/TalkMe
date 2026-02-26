@@ -534,6 +534,28 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Set_Member_Role) {
+                if (!j.contains("sid") || !j.contains("u") || !j.contains("perms")) return;
+                int sid = j["sid"];
+                std::string target = j["u"];
+                uint32_t perms = j["perms"];
+                if (Database::Get().SetMemberPermissions(sid, target, perms, m_Username)) {
+                    json res; res["u"] = target; res["perms"] = perms; res["sid"] = sid;
+                    SendPacket(PacketType::Member_Role_Response, res.dump());
+                }
+                return;
+            }
+
+            if (m_Header.type == PacketType::Get_Member_Role) {
+                if (!j.contains("sid") || !j.contains("u")) return;
+                uint32_t perms = Database::Get().GetUserPermissions(j["sid"], j["u"]);
+                json res; res["u"] = j["u"]; res["perms"] = perms; res["sid"] = j["sid"];
+                std::string owner = Database::Get().GetServerOwner(j["sid"]);
+                res["is_owner"] = (j["u"] == owner);
+                SendPacket(PacketType::Member_Role_Response, res.dump());
+                return;
+            }
+
             if (m_Header.type == PacketType::Call_Request) {
                 std::string target = j.value("to", "");
                 if (target.empty() || !Database::Get().AreFriends(m_Username, target)) return;

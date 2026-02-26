@@ -695,6 +695,55 @@ namespace TalkMe {
         return users;
     }
 
+    bool Database::SetMemberPermissions(int serverId, const std::string& targetUser, uint32_t permissions, const std::string& requestingUser) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        // Only owner or admin can change permissions
+        sqlite3_stmt* chk = nullptr;
+        bool allowed = false;
+        if (sqlite3_prepare_v2(m_Db, "SELECT 1 FROM servers WHERE id=? AND owner=?;", -1, &chk, 0) == SQLITE_OK) {
+            sqlite3_bind_int(chk, 1, serverId);
+            sqlite3_bind_text(chk, 2, requestingUser.c_str(), -1, SQLITE_TRANSIENT);
+            allowed = (sqlite3_step(chk) == SQLITE_ROW);
+            sqlite3_finalize(chk);
+        }
+        if (!allowed) {
+            sqlite3_stmt* pchk = nullptr;
+            if (sqlite3_prepare_v2(m_Db, "SELECT permissions FROM server_members WHERE server_id=? AND username=?;", -1, &pchk, 0) == SQLITE_OK) {
+                sqlite3_bind_int(pchk, 1, serverId);
+                sqlite3_bind_text(pchk, 2, requestingUser.c_str(), -1, SQLITE_TRANSIENT);
+                if (sqlite3_step(pchk) == SQLITE_ROW)
+                    allowed = (sqlite3_column_int(pchk, 0) & Perm_Admin) != 0;
+                sqlite3_finalize(pchk);
+            }
+        }
+        if (!allowed) return false;
+
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "UPDATE server_members SET permissions=? WHERE server_id=? AND username=?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, (int)permissions);
+            sqlite3_bind_int(stmt, 2, serverId);
+            sqlite3_bind_text(stmt, 3, targetUser.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+        return true;
+    }
+
+    std::string Database::GetServerOwner(int serverId) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        std::string owner;
+        if (sqlite3_prepare_v2(m_Db, "SELECT owner FROM servers WHERE id=?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* o = (const char*)sqlite3_column_text(stmt, 0);
+                if (o) owner = o;
+            }
+            sqlite3_finalize(stmt);
+        }
+        return owner;
+    }
+
     int Database::SaveDirectMessage(const std::string& sender, const std::string& receiver, const std::string& content) {
         std::unique_lock<std::shared_mutex> lock(m_RwMutex);
         sqlite3_stmt* stmt = nullptr;
