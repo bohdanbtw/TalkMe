@@ -952,6 +952,88 @@ namespace TalkMe {
             ImGui::End();
         }
 
+        if (m_Racing.active) {
+            ImGui::SetNextWindowSize(ImVec2(620, 560), ImGuiCond_FirstUseEver);
+            bool raceOpen = m_Racing.active;
+            if (ImGui::Begin("Car Racing", &raceOpen)) {
+                std::string oppDisp = m_Racing.opponent.name;
+                size_t hp = oppDisp.find('#');
+                if (hp != std::string::npos) oppDisp = oppDisp.substr(0, hp);
+                ImGui::Text("Lap %d/%d  |  Time: %.1fs  |  Speed: %.0f",
+                    m_Racing.player.lap, RacingGame::kTotalLaps, m_Racing.raceTime,
+                    std::abs(m_Racing.player.speed) * 50.0f);
+
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                ImVec2 origin = ImGui::GetCursorScreenPos();
+
+                // Draw track (elliptical ring)
+                float cx = origin.x + RacingGame::kTrackCX;
+                float cy = origin.y + RacingGame::kTrackCY;
+                for (int i = 0; i < 64; i++) {
+                    float a1 = i * 6.28318f / 64.0f;
+                    float a2 = (i + 1) * 6.28318f / 64.0f;
+                    for (float rMul : {0.7f, 1.0f, 1.3f}) {
+                        ImVec2 p1(cx + std::cos(a1) * RacingGame::kTrackRX * rMul, cy + std::sin(a1) * RacingGame::kTrackRY * rMul);
+                        ImVec2 p2(cx + std::cos(a2) * RacingGame::kTrackRX * rMul, cy + std::sin(a2) * RacingGame::kTrackRY * rMul);
+                        dl->AddLine(p1, p2, rMul == 1.0f ? IM_COL32(180, 180, 180, 100) : IM_COL32(100, 100, 100, 255), rMul == 1.0f ? 1.0f : 2.0f);
+                    }
+                }
+
+                // Draw track surface
+                dl->AddEllipse(ImVec2(cx, cy), RacingGame::kTrackRX, RacingGame::kTrackRY, IM_COL32(60, 60, 65, 180), 64, 2.0f);
+
+                // Draw cars
+                auto drawCar = [&](const RaceCar& car, ImU32 color) {
+                    float carX = origin.x + car.x;
+                    float carY = origin.y + car.y;
+                    float ca = std::cos(car.angle), sa = std::sin(car.angle);
+                    float len = 12.0f, wid = 6.0f;
+                    ImVec2 pts[4] = {
+                        {carX + ca * len - sa * wid, carY + sa * len + ca * wid},
+                        {carX + ca * len + sa * wid, carY + sa * len - ca * wid},
+                        {carX - ca * len + sa * wid, carY - sa * len - ca * wid},
+                        {carX - ca * len - sa * wid, carY - sa * len + ca * wid}
+                    };
+                    dl->AddConvexPolyFilled(pts, 4, color);
+                };
+
+                drawCar(m_Racing.player, IM_COL32(50, 150, 255, 255));
+                drawCar(m_Racing.opponent, IM_COL32(255, 80, 80, 255));
+
+                ImGui::InvisibleButton("##racetrack", ImVec2(600, 500));
+
+                // Controls
+                bool accel = ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow);
+                bool brake = ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_DownArrow);
+                bool left = ImGui::IsKeyDown(ImGuiKey_A) || ImGui::IsKeyDown(ImGuiKey_LeftArrow);
+                bool right = ImGui::IsKeyDown(ImGuiKey_D) || ImGui::IsKeyDown(ImGuiKey_RightArrow);
+
+                float dt = ImGui::GetIO().DeltaTime;
+                m_Racing.UpdatePlayer(accel, brake, left, right, dt);
+
+                // Send position to opponent
+                static float s_lastSend = 0;
+                float now = (float)ImGui::GetTime();
+                if (now - s_lastSend > 0.05f) {
+                    nlohmann::json rj;
+                    rj["opponent"] = m_Racing.opponent.name;
+                    rj["x"] = m_Racing.player.x; rj["y"] = m_Racing.player.y;
+                    rj["angle"] = m_Racing.player.angle; rj["speed"] = m_Racing.player.speed;
+                    rj["lap"] = m_Racing.player.lap; rj["cp"] = m_Racing.player.checkpoint;
+                    m_NetClient.Send(PacketType::Game_Move, rj.dump());
+                    s_lastSend = now;
+                }
+
+                if (m_Racing.finished)
+                    ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "%s wins!", m_Racing.winner.c_str());
+
+                ImGui::Text("WASD / Arrow keys to drive");
+                if (ImGui::Button("Quit Race")) { m_Racing.active = false; }
+            }
+            ImGui::End();
+            if (!raceOpen) m_Racing.active = false;
+        }
+
         if (m_ShowShortcuts) {
             ImGui::SetNextWindowSize(ImVec2(300, 250), ImGuiCond_FirstUseEver);
             if (ImGui::Begin("Keyboard Shortcuts", &m_ShowShortcuts)) {
