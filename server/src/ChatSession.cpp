@@ -504,6 +504,11 @@ namespace TalkMe {
             if (m_Header.type == PacketType::Message_Text) {
                 if (!j.contains("cid") || !j.contains("msg")) return;
                 int cid = j["cid"];
+                int sid = Database::Get().GetServerIdForChannel(cid);
+                if (sid > 0 && Database::Get().IsUserSanctioned(sid, m_Username, "chat_mute")) {
+                    SendPacket(PacketType::Admin_Action_Result, R"({"ok":false,"msg":"You are muted in this server"})");
+                    return;
+                }
                 int replyTo = j.value("reply_to", 0);
                 int mid = Database::Get().SaveMessageReturnId(cid, m_Username, j["msg"], j.value("attachment_id", ""), replyTo);
                 json out;
@@ -531,6 +536,110 @@ namespace TalkMe {
                     res.push_back(entry);
                 }
                 SendPacket(PacketType::Member_List_Response, res.dump());
+                return;
+            }
+
+            if (m_Header.type == PacketType::Admin_Move_User) {
+                if (!j.contains("sid") || !j.contains("u") || !j.contains("cid")) return;
+                int sid = j["sid"];
+                if (!Database::Get().IsUserAdmin(sid, m_Username)) {
+                    SendPacket(PacketType::Admin_Action_Result, R"({"ok":false,"msg":"No permission"})");
+                    return;
+                }
+                std::string target = j["u"];
+                int newCid = j["cid"];
+                json notify; notify["action"] = "move"; notify["cid"] = newCid; notify["by"] = m_Username;
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Admin_Action_Result, notify.dump());
+                std::shared_lock lock(m_Server.GetRoomMutex());
+                for (const auto& s : m_Server.GetAllSessions())
+                    if (s->GetUsername() == target) s->SendShared(buf, false);
+                SendPacket(PacketType::Admin_Action_Result, R"({"ok":true,"msg":"User moved"})");
+                return;
+            }
+
+            if (m_Header.type == PacketType::Admin_Disconnect_User) {
+                if (!j.contains("sid") || !j.contains("u")) return;
+                int sid = j["sid"];
+                if (!Database::Get().IsUserAdmin(sid, m_Username)) {
+                    SendPacket(PacketType::Admin_Action_Result, R"({"ok":false,"msg":"No permission"})");
+                    return;
+                }
+                std::string target = j["u"];
+                json notify; notify["action"] = "disconnect"; notify["by"] = m_Username;
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Admin_Action_Result, notify.dump());
+                std::shared_lock lock(m_Server.GetRoomMutex());
+                for (const auto& s : m_Server.GetAllSessions())
+                    if (s->GetUsername() == target) s->SendShared(buf, false);
+                SendPacket(PacketType::Admin_Action_Result, R"({"ok":true,"msg":"User disconnected"})");
+                return;
+            }
+
+            if (m_Header.type == PacketType::Admin_Force_Mute || m_Header.type == PacketType::Admin_Force_Deafen) {
+                if (!j.contains("sid") || !j.contains("u")) return;
+                int sid = j["sid"];
+                if (!Database::Get().IsUserAdmin(sid, m_Username)) {
+                    SendPacket(PacketType::Admin_Action_Result, R"({"ok":false,"msg":"No permission"})");
+                    return;
+                }
+                std::string target = j["u"];
+                bool state = j.value("state", true);
+                json notify;
+                notify["action"] = (m_Header.type == PacketType::Admin_Force_Mute) ? "force_mute" : "force_deafen";
+                notify["state"] = state;
+                notify["by"] = m_Username;
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Admin_Action_Result, notify.dump());
+                std::shared_lock lock(m_Server.GetRoomMutex());
+                for (const auto& s : m_Server.GetAllSessions())
+                    if (s->GetUsername() == target) s->SendShared(buf, false);
+                SendPacket(PacketType::Admin_Action_Result, R"({"ok":true})");
+                return;
+            }
+
+            if (m_Header.type == PacketType::Admin_Sanction_User) {
+                if (!j.contains("sid") || !j.contains("u") || !j.contains("type")) return;
+                int sid = j["sid"];
+                if (!Database::Get().IsUserAdmin(sid, m_Username)) {
+                    SendPacket(PacketType::Admin_Action_Result, R"({"ok":false,"msg":"No permission"})");
+                    return;
+                }
+                std::string target = j["u"];
+                std::string sType = j["type"];
+                std::string reason = j.value("reason", "");
+                int durationMin = j.value("duration_minutes", 0);
+                Database::Get().AddSanction(sid, target, sType, reason, durationMin, m_Username);
+                json notify; notify["action"] = "sanctioned"; notify["type"] = sType; notify["by"] = m_Username;
+                if (durationMin > 0) notify["duration_minutes"] = durationMin;
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Admin_Action_Result, notify.dump());
+                std::shared_lock lock(m_Server.GetRoomMutex());
+                for (const auto& s : m_Server.GetAllSessions())
+                    if (s->GetUsername() == target) s->SendShared(buf, false);
+                SendPacket(PacketType::Admin_Action_Result, R"({"ok":true,"msg":"Sanction applied"})");
+                return;
+            }
+
+            if (m_Header.type == PacketType::Admin_Create_Role) {
+                if (!j.contains("sid") || !j.contains("name")) return;
+                int sid = j["sid"];
+                if (!Database::Get().IsUserAdmin(sid, m_Username)) {
+                    SendPacket(PacketType::Admin_Action_Result, R"({"ok":false,"msg":"No permission"})");
+                    return;
+                }
+                int roleId = Database::Get().CreateRole(sid, j["name"], j.value("perms", 0), j.value("color", "#FFFFFF"));
+                json res; res["ok"] = (roleId > 0); res["role_id"] = roleId;
+                res["roles"] = json::parse(Database::Get().GetServerRolesJSON(sid));
+                SendPacket(PacketType::Admin_Action_Result, res.dump());
+                return;
+            }
+
+            if (m_Header.type == PacketType::Admin_Assign_Role) {
+                if (!j.contains("sid") || !j.contains("u") || !j.contains("role_id")) return;
+                int sid = j["sid"];
+                if (!Database::Get().IsUserAdmin(sid, m_Username)) {
+                    SendPacket(PacketType::Admin_Action_Result, R"({"ok":false,"msg":"No permission"})");
+                    return;
+                }
+                Database::Get().AssignRole(j["u"], j["role_id"]);
+                SendPacket(PacketType::Admin_Action_Result, R"({"ok":true,"msg":"Role assigned"})");
                 return;
             }
 

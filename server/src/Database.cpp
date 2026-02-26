@@ -149,6 +149,10 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN is_2fa_enabled INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS trusted_devices (username TEXT, device_id TEXT, PRIMARY KEY(username, device_id));", 0, 0, 0);
+        sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS sanctions (id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER, username TEXT, type TEXT, reason TEXT, expires_at DATETIME, created_by TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);", 0, 0, 0);
+        sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS roles (id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER, name TEXT, permissions INTEGER DEFAULT 0, color TEXT DEFAULT '#FFFFFF', position INTEGER DEFAULT 0);", 0, 0, 0);
+        sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS user_roles (username TEXT, role_id INTEGER, PRIMARY KEY(username, role_id));", 0, 0, 0);
+        sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS bots (id TEXT PRIMARY KEY, owner TEXT, name TEXT, token TEXT UNIQUE, server_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);", 0, 0, 0);
 
         sqlite3_stmt* countStmt = nullptr;
         if (sqlite3_prepare_v2(m_Db, "SELECT COUNT(*) FROM servers;", -1, &countStmt, 0) == SQLITE_OK &&
@@ -693,6 +697,126 @@ namespace TalkMe {
             sqlite3_finalize(stmt);
         }
         return users;
+    }
+
+    bool Database::AddSanction(int serverId, const std::string& username, const std::string& type, const std::string& reason, int durationMinutes, const std::string& createdBy) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool ok = false;
+        std::string expiresAt;
+        if (durationMinutes > 0) {
+            time_t now = time(nullptr);
+            now += durationMinutes * 60;
+            char buf[32];
+            strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", gmtime(&now));
+            expiresAt = buf;
+        }
+        if (sqlite3_prepare_v2(m_Db, "INSERT INTO sanctions (server_id, username, type, reason, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            sqlite3_bind_text(stmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, type.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 4, reason.c_str(), -1, SQLITE_TRANSIENT);
+            if (expiresAt.empty()) sqlite3_bind_null(stmt, 5);
+            else sqlite3_bind_text(stmt, 5, expiresAt.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 6, createdBy.c_str(), -1, SQLITE_TRANSIENT);
+            ok = (sqlite3_step(stmt) == SQLITE_DONE);
+            sqlite3_finalize(stmt);
+        }
+        return ok;
+    }
+
+    bool Database::IsUserSanctioned(int serverId, const std::string& username, const std::string& type) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool sanctioned = false;
+        if (sqlite3_prepare_v2(m_Db, "SELECT 1 FROM sanctions WHERE server_id=? AND username=? AND type=? AND (expires_at IS NULL OR expires_at > datetime('now'));", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            sqlite3_bind_text(stmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, type.c_str(), -1, SQLITE_TRANSIENT);
+            sanctioned = (sqlite3_step(stmt) == SQLITE_ROW);
+            sqlite3_finalize(stmt);
+        }
+        return sanctioned;
+    }
+
+    bool Database::RemoveSanction(int serverId, const std::string& username, const std::string& type) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "DELETE FROM sanctions WHERE server_id=? AND username=? AND type=?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            sqlite3_bind_text(stmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, type.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+        return true;
+    }
+
+    int Database::CreateRole(int serverId, const std::string& name, uint32_t permissions, const std::string& color) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        int roleId = 0;
+        if (sqlite3_prepare_v2(m_Db, "INSERT INTO roles (server_id, name, permissions, color) VALUES (?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            sqlite3_bind_text(stmt, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 3, (int)permissions);
+            sqlite3_bind_text(stmt, 4, color.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmt) == SQLITE_DONE) roleId = (int)sqlite3_last_insert_rowid(m_Db);
+            sqlite3_finalize(stmt);
+        }
+        return roleId;
+    }
+
+    bool Database::AssignRole(const std::string& username, int roleId) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool ok = false;
+        if (sqlite3_prepare_v2(m_Db, "INSERT OR IGNORE INTO user_roles (username, role_id) VALUES (?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 2, roleId);
+            ok = (sqlite3_step(stmt) == SQLITE_DONE);
+            sqlite3_finalize(stmt);
+        }
+        return ok;
+    }
+
+    std::string Database::GetServerRolesJSON(int serverId) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        json j = json::array();
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "SELECT id, name, permissions, color, position FROM roles WHERE server_id=? ORDER BY position;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* n = (const char*)sqlite3_column_text(stmt, 1);
+                const char* c = (const char*)sqlite3_column_text(stmt, 3);
+                j.push_back({ {"id", sqlite3_column_int(stmt, 0)}, {"name", n ? n : ""}, {"perms", sqlite3_column_int(stmt, 2)}, {"color", c ? c : "#FFFFFF"}, {"position", sqlite3_column_int(stmt, 4)} });
+            }
+            sqlite3_finalize(stmt);
+        }
+        return j.dump();
+    }
+
+    bool Database::IsUserAdmin(int serverId, const std::string& username) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool isAdmin = false;
+        if (sqlite3_prepare_v2(m_Db, "SELECT 1 FROM servers WHERE id=? AND owner=?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            sqlite3_bind_text(stmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+            isAdmin = (sqlite3_step(stmt) == SQLITE_ROW);
+            sqlite3_finalize(stmt);
+        }
+        if (!isAdmin) {
+            sqlite3_stmt* pstmt = nullptr;
+            if (sqlite3_prepare_v2(m_Db, "SELECT permissions FROM server_members WHERE server_id=? AND username=?;", -1, &pstmt, 0) == SQLITE_OK) {
+                sqlite3_bind_int(pstmt, 1, serverId);
+                sqlite3_bind_text(pstmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+                if (sqlite3_step(pstmt) == SQLITE_ROW)
+                    isAdmin = (sqlite3_column_int(pstmt, 0) & Perm_Admin) != 0;
+                sqlite3_finalize(pstmt);
+            }
+        }
+        return isAdmin;
     }
 
     bool Database::RenameServer(int serverId, const std::string& newName, const std::string& username) {

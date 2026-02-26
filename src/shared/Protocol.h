@@ -150,6 +150,16 @@ namespace TalkMe {
         Remove_Reaction,     // Client -> Server: remove own reaction
         Reaction_Update,     // Server -> Client: broadcast reaction change
 
+        // --- ADMIN ACTIONS ---
+        Admin_Move_User,         // Client -> Server: move user to another voice channel
+        Admin_Disconnect_User,   // Client -> Server: force disconnect user from voice
+        Admin_Force_Mute,        // Client -> Server: force mute a user
+        Admin_Force_Deafen,      // Client -> Server: force deafen a user
+        Admin_Sanction_User,     // Client -> Server: mute user from chat for X minutes
+        Admin_Create_Role,       // Client -> Server: create a named role with permissions
+        Admin_Assign_Role,       // Client -> Server: assign role to a user
+        Admin_Action_Result,     // Server -> Client: result of admin action
+
         // --- SERVER MANAGEMENT ---
         Rename_Server_Request,   // Client -> Server: rename server (owner only)
         Delete_Server_Request,   // Client -> Server: delete server (owner only)
