@@ -53,6 +53,19 @@ namespace TalkMe {
                 std::memcpy(pcmBuffer, pRead, framesRead * sizeof(float));
                 ma_pcm_rb_commit_read(&internal->captureRb, framesRead);
 
+                // Mix system audio (loopback) into the mic buffer
+                if (internal->systemAudioRbInit && ma_pcm_rb_available_read(&internal->systemAudioRb) >= OPUS_FRAME_SIZE) {
+                    void* pSysRead = nullptr;
+                    ma_uint32 sysFrames = OPUS_FRAME_SIZE;
+                    if (ma_pcm_rb_acquire_read(&internal->systemAudioRb, &sysFrames, &pSysRead) == MA_SUCCESS && sysFrames > 0) {
+                        const float vol = internal->systemAudioVolume.load(std::memory_order_relaxed);
+                        const float* sysData = static_cast<const float*>(pSysRead);
+                        for (ma_uint32 i = 0; i < sysFrames && i < OPUS_FRAME_SIZE; i++)
+                            pcmBuffer[i] += sysData[i] * vol;
+                        ma_pcm_rb_commit_read(&internal->systemAudioRb, sysFrames);
+                    }
+                }
+
                 if (!internal->m_Engine->IsSelfMuted() && internal->encoder) {
                     int encodedBytes;
                     {

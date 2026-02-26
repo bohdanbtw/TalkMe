@@ -61,6 +61,7 @@ namespace TalkMe {
             int keepaliveIntervalMs = -1, int targetBitrateKbps = -1);
         void SetUserGain(const std::string& userId, float gain);
         void PushSystemAudio(const float* mono48k, int frameCount, int sourceSampleRate);
+        void SetSystemAudioVolume(float vol);
         float GetMicActivity() const;
 
         void SetSelfMuted(bool muted) { m_SelfMuted = muted; }

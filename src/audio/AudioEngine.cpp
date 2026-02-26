@@ -660,7 +660,14 @@ namespace TalkMe {
 
     void AudioEngine::PushSystemAudio(const float* monoSamples, int frameCount, int sourceSampleRate) {
         if (!m_Internal || !m_Internal->deviceStarted || frameCount <= 0) return;
-        // Simple nearest-neighbor resample to 48kHz if needed
+
+        // Initialize system audio ring buffer on first call
+        if (!m_Internal->systemAudioRbInit) {
+            ma_pcm_rb_init(ma_format_f32, 1, 48000, nullptr, nullptr, &m_Internal->systemAudioRb);
+            m_Internal->systemAudioRbInit = true;
+        }
+
+        // Resample to 48kHz if needed
         std::vector<float> resampled;
         const float* data = monoSamples;
         int count = frameCount;
@@ -674,14 +681,19 @@ namespace TalkMe {
             }
             data = resampled.data();
         }
-        // Write into capture ring buffer so it gets mixed with mic and encoded
+
+        // Write into separate system audio ring buffer (NOT the capture buffer)
         void* pWrite = nullptr;
         ma_uint32 toWrite = (ma_uint32)count;
-        if (ma_pcm_rb_acquire_write(&m_Internal->captureRb, &toWrite, &pWrite) == MA_SUCCESS && toWrite > 0) {
+        if (ma_pcm_rb_acquire_write(&m_Internal->systemAudioRb, &toWrite, &pWrite) == MA_SUCCESS && toWrite > 0) {
             ma_uint32 actual = (std::min)(toWrite, (ma_uint32)count);
             memcpy(pWrite, data, actual * sizeof(float));
-            ma_pcm_rb_commit_write(&m_Internal->captureRb, actual);
+            ma_pcm_rb_commit_write(&m_Internal->systemAudioRb, actual);
         }
+    }
+
+    void AudioEngine::SetSystemAudioVolume(float vol) {
+        if (m_Internal) m_Internal->systemAudioVolume.store(vol, std::memory_order_relaxed);
     }
 
     float AudioEngine::GetMicActivity() const {
