@@ -134,6 +134,7 @@ namespace TalkMe {
         std::map<int, int> m_UnreadCounts;  // channelId -> unread message count
         char m_SearchBuf[256] = "";
         bool m_ShowSearch = false;
+        bool m_ShowShortcuts = false;
 
         struct FriendEntry { std::string username; std::string status; std::string direction; };
         std::vector<FriendEntry> m_Friends;

@@ -661,6 +661,8 @@ namespace TalkMe {
             ImGui::End(); ImGui::PopStyleVar(3);
             return;
         }
+        if (ImGui::IsKeyPressed(ImGuiKey_F1))
+            m_ShowShortcuts = !m_ShowShortcuts;
         if (ImGui::IsKeyPressed(ImGuiKey_F2))
             m_ShowFriendList = !m_ShowFriendList;
 
@@ -824,6 +826,25 @@ namespace TalkMe {
                         memset(m_DMInputBuf, 0, sizeof(m_DMInputBuf));
                     }
                 }
+            }
+            ImGui::End();
+        }
+
+        if (m_ShowShortcuts) {
+            ImGui::SetNextWindowSize(ImVec2(300, 250), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin("Keyboard Shortcuts", &m_ShowShortcuts)) {
+                ImGui::Text("F1  - This help panel");
+                ImGui::Text("F2  - Friends / Direct Messages");
+                ImGui::Separator();
+                ImGui::Text("Ctrl+Shift+M  - Toggle Mute");
+                ImGui::Text("Ctrl+Shift+D  - Toggle Deafen");
+                ImGui::Separator();
+                ImGui::Text("Enter  - Send message");
+                ImGui::Text("Right-click message  - Reply / Edit / Delete / Pin / React");
+                ImGui::Text("Right-click channel  - Delete channel");
+                ImGui::Text("Right-click server   - Copy invite / Leave");
+                ImGui::Separator();
+                ImGui::TextDisabled("v%s", "1.4.0");
             }
             ImGui::End();
         }
