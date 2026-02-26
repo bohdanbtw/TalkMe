@@ -150,7 +150,6 @@ namespace TalkMe::UI::Views {
                     ImGui::PopStyleColor();
                     ImGui::Unindent(26);
                 }
-            }
 
                 // Cinema channels
                 bool hasCinema = false;

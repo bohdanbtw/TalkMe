@@ -5,6 +5,7 @@
 #include "../shared/PacketHandler.h"
 #include "../core/ConfigManager.h"
 #include <imgui.h>
+#include "../ui/TextureManager.h"
 #include <nlohmann/json.hpp>
 #include <cstring>
 #include <algorithm>

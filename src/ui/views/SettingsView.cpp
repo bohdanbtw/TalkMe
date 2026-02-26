@@ -6,6 +6,9 @@
 #include "Version.h"
 #include "qrcodegen.hpp"
 #include <cstring>
+#include <cstdio>
+#include <commdlg.h>
+#pragma comment(lib, "comdlg32.lib")
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif

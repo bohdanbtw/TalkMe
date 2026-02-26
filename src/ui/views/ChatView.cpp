@@ -8,6 +8,9 @@
 #include <string>
 #include <algorithm>
 #include <shellapi.h>
+#include <commdlg.h>
+#include <cstdio>
+#pragma comment(lib, "comdlg32.lib")
 
 #ifndef NOMINMAX
 #define NOMINMAX
