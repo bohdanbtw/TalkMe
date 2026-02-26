@@ -8,9 +8,13 @@
 #include <wingdi.h>
 #include <objidl.h>
 #include <gdiplus.h>
+#include <shlwapi.h>
+#include <cstdio>
 
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "gdiplus.lib")
+#pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "ole32.lib")
 
 namespace TalkMe {
 
@@ -32,57 +36,6 @@ int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
     return -1;
 }
 
-class MemoryStream : public IStream {
-public:
-    MemoryStream() : m_Ref(1) {}
-    std::vector<uint8_t>& GetData() { return m_Data; }
-
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** ppv) override { *ppv = this; AddRef(); return S_OK; }
-    ULONG STDMETHODCALLTYPE AddRef() override { return ++m_Ref; }
-    ULONG STDMETHODCALLTYPE Release() override { if (--m_Ref == 0) { delete this; return 0; } return m_Ref; }
-    HRESULT STDMETHODCALLTYPE Read(void* pv, ULONG cb, ULONG* pcbRead) override {
-        ULONG avail = (ULONG)(m_Data.size() - m_Pos);
-        ULONG toRead = (std::min)(cb, avail);
-        memcpy(pv, m_Data.data() + m_Pos, toRead);
-        m_Pos += toRead;
-        if (pcbRead) *pcbRead = toRead;
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE Write(const void* pv, ULONG cb, ULONG* pcbWritten) override {
-        size_t newEnd = m_Pos + cb;
-        if (newEnd > m_Data.size()) m_Data.resize(newEnd);
-        memcpy(m_Data.data() + m_Pos, pv, cb);
-        m_Pos += cb;
-        if (pcbWritten) *pcbWritten = cb;
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER dlibMove, DWORD dwOrigin, ULARGE_INTEGER* plibNewPosition) override {
-        LONGLONG newPos = 0;
-        if (dwOrigin == STREAM_SEEK_SET) newPos = dlibMove.QuadPart;
-        else if (dwOrigin == STREAM_SEEK_CUR) newPos = (LONGLONG)m_Pos + dlibMove.QuadPart;
-        else if (dwOrigin == STREAM_SEEK_END) newPos = (LONGLONG)m_Data.size() + dlibMove.QuadPart;
-        m_Pos = (size_t)newPos;
-        if (plibNewPosition) plibNewPosition->QuadPart = newPos;
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE SetSize(ULARGE_INTEGER libNewSize) override { m_Data.resize((size_t)libNewSize.QuadPart); return S_OK; }
-    HRESULT STDMETHODCALLTYPE CopyTo(IStream*, ULARGE_INTEGER, ULARGE_INTEGER*, ULARGE_INTEGER*) override { return E_NOTIMPL; }
-    HRESULT STDMETHODCALLTYPE Commit(DWORD) override { return S_OK; }
-    HRESULT STDMETHODCALLTYPE Revert() override { return E_NOTIMPL; }
-    HRESULT STDMETHODCALLTYPE LockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD) override { return E_NOTIMPL; }
-    HRESULT STDMETHODCALLTYPE UnlockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD) override { return E_NOTIMPL; }
-    HRESULT STDMETHODCALLTYPE Stat(STATSTG* pstatstg, DWORD) override {
-        memset(pstatstg, 0, sizeof(*pstatstg));
-        pstatstg->cbSize.QuadPart = m_Data.size();
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE Clone(IStream**) override { return E_NOTIMPL; }
-private:
-    std::vector<uint8_t> m_Data;
-    size_t m_Pos = 0;
-    ULONG m_Ref;
-};
-
 } // namespace
 
 void ScreenCapture::Start(const CaptureSettings& settings, FrameCallback onFrame) {
@@ -96,6 +49,8 @@ void ScreenCapture::Start(const CaptureSettings& settings, FrameCallback onFrame
     if (m_Thread.joinable()) m_Thread.join();
 
     m_Thread = std::thread([this]() {
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
         std::fprintf(stderr, "[ScreenCapture] Thread started, initializing GDI+\n");
         std::fflush(stderr);
         Gdiplus::GdiplusStartupInput gdipInput;
@@ -104,9 +59,11 @@ void ScreenCapture::Start(const CaptureSettings& settings, FrameCallback onFrame
         std::fprintf(stderr, "[ScreenCapture] GDI+ init status=%d\n", (int)status);
         std::fflush(stderr);
 
-        CaptureLoop();
+        if (status == Gdiplus::Ok)
+            CaptureLoop();
 
         Gdiplus::GdiplusShutdown(gdipToken);
+        CoUninitialize();
         std::fprintf(stderr, "[ScreenCapture] Thread exiting\n");
         std::fflush(stderr);
     });
@@ -126,6 +83,7 @@ void ScreenCapture::CaptureLoop() {
     int encoderIdx = GetEncoderClsid(L"image/jpeg", &jpegClsid);
     std::fprintf(stderr, "[ScreenCapture] JPEG encoder index=%d\n", encoderIdx);
     std::fflush(stderr);
+    if (encoderIdx < 0) { m_Running.store(false); return; }
 
     Gdiplus::EncoderParameters encoderParams;
     encoderParams.Count = 1;
@@ -158,28 +116,48 @@ void ScreenCapture::CaptureLoop() {
         HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, hBmp);
         SetStretchBltMode(memDC, HALFTONE);
         StretchBlt(memDC, 0, 0, outW, outH, screenDC, 0, 0, screenW, screenH, SRCCOPY);
+        SelectObject(memDC, oldBmp);
 
-        {
+        // Use CreateStreamOnHGlobal (proven Windows API) instead of custom IStream
+        IStream* pStream = nullptr;
+        HRESULT hr = CreateStreamOnHGlobal(nullptr, TRUE, &pStream);
+        if (SUCCEEDED(hr) && pStream) {
             Gdiplus::Bitmap bmp(hBmp, nullptr);
-            auto* memStream = new MemoryStream();
-            auto saveStatus = bmp.Save(memStream, &jpegClsid, &encoderParams);
+            auto saveStatus = bmp.Save(pStream, &jpegClsid, &encoderParams);
 
-            auto& jpegData = memStream->GetData();
             static int s_frameCount = 0;
             if (s_frameCount < 5) {
-                std::fprintf(stderr, "[ScreenCapture] Frame %d: save_status=%d, jpeg_size=%zu, screen=%dx%d->%dx%d\n",
-                    s_frameCount, (int)saveStatus, jpegData.size(), GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), outW, outH);
+                std::fprintf(stderr, "[ScreenCapture] Frame %d: save_status=%d, %dx%d\n",
+                    s_frameCount, (int)saveStatus, outW, outH);
                 std::fflush(stderr);
             }
+
+            if (saveStatus == Gdiplus::Ok) {
+                // Read JPEG data from stream
+                LARGE_INTEGER liZero = {};
+                pStream->Seek(liZero, STREAM_SEEK_SET, nullptr);
+                STATSTG stat = {};
+                pStream->Stat(&stat, STATFLAG_NONAME);
+                ULONG jpegSize = (ULONG)stat.cbSize.QuadPart;
+
+                if (jpegSize > 0) {
+                    std::vector<uint8_t> jpegData(jpegSize);
+                    ULONG bytesRead = 0;
+                    pStream->Read(jpegData.data(), jpegSize, &bytesRead);
+
+                    if (s_frameCount < 5) {
+                        std::fprintf(stderr, "[ScreenCapture] Frame %d: jpeg_bytes=%lu\n", s_frameCount, bytesRead);
+                        std::fflush(stderr);
+                    }
+
+                    if (bytesRead > 0 && m_OnFrame)
+                        m_OnFrame(jpegData, outW, outH);
+                }
+            }
             s_frameCount++;
-
-            if (!jpegData.empty() && m_OnFrame)
-                m_OnFrame(jpegData, outW, outH);
-
-            memStream->Release();
+            pStream->Release();
         }
 
-        SelectObject(memDC, oldBmp);
         DeleteObject(hBmp);
         DeleteDC(memDC);
         ReleaseDC(nullptr, screenDC);
