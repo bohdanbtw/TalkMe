@@ -619,12 +619,25 @@ namespace TalkMe::UI::Views {
 
                     ImGui::Separator();
 
+                    // Tic-Tac-Toe — 2 players
+                    if (ImGui::BeginMenu("Tic-Tac-Toe (2 players)")) {
+                        for (const auto& m : voiceMembers) {
+                            if (m == currentUser.username) continue;
+                            std::string d = m; size_t h = d.find('#'); if (h != std::string::npos) d = d.substr(0, h);
+                            if (ImGui::MenuItem(d.c_str())) {
+                                nlohmann::json cj; cj["to"] = m; cj["game"] = "tictactoe";
+                                netClient.Send(PacketType::Game_Challenge, cj.dump());
+                                ImGui::CloseCurrentPopup();
+                            }
+                        }
+                        if (voiceMembers.size() <= 1) ImGui::TextDisabled("No other users");
+                        ImGui::EndMenu();
+                    }
+
+                    ImGui::Separator();
+
                     // Flappy Bird — single player
                     if (ImGui::MenuItem("Flappy Bird (solo)")) {
-                        // Signal to Application to start flappy bird
-                        // We'll use a static flag that Application checks
-                        static bool* s_startFlappy = nullptr;
-                        // Handled by checking Game_Challenge with game="flappy" to self
                         nlohmann::json cj; cj["to"] = currentUser.username; cj["game"] = "flappy";
                         netClient.Send(PacketType::Game_Challenge, cj.dump());
                         ImGui::CloseCurrentPopup();

@@ -212,6 +212,8 @@ void Application::ProcessNetworkMessages() {
                 std::string from = j.value("from", "");
                 if (game == "flappy") {
                     m_FlappyBird.Reset(m_CurrentUser.username);
+                } else if (game == "tictactoe") {
+                    m_TicTacToe.Reset(from, false);
                 } else if (game == "racing") {
                     m_Racing.Reset(m_CurrentUser.username, from);
                 } else {
@@ -226,6 +228,8 @@ void Application::ProcessNetworkMessages() {
                     std::string game = j.value("game", "chess");
                     if (game == "racing") {
                         m_Racing.Reset(m_CurrentUser.username, j.value("from", ""));
+                    } else if (game == "tictactoe") {
+                        m_TicTacToe.Reset(j.value("from", ""), true);
                     } else {
                         m_ChessEngine.Reset();
                         m_ChessUI.active = true;
@@ -244,6 +248,11 @@ void Application::ProcessNetworkMessages() {
                     int fr = j["fr"], fc = j["fc"], tr = j["tr"], tc = j["tc"];
                     m_ChessEngine.MakeMove(fr, fc, tr, tc);
                     m_ChessUI.myTurn = true;
+                }
+                // Tic-tac-toe moves
+                if (m_TicTacToe.active && j.contains("cell")) {
+                    m_TicTacToe.MakeMove(j["cell"], m_TicTacToe.TheirPiece());
+                    m_TicTacToe.myTurn = true;
                 }
                 // Racing position updates
                 if (m_Racing.active && j.contains("x") && j.contains("y")) {

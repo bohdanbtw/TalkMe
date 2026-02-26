@@ -204,6 +204,11 @@ namespace TalkMe {
         // --- PAGINATION ---
         Message_History_Page,// Client -> Server: request older messages (before_id)
 
+        // --- POLLS ---
+        Poll_Create,         // Client -> Server: create a poll in channel
+        Poll_Vote,           // Client -> Server: vote on a poll option
+        Poll_Update,         // Server -> Client: poll state update
+
         // --- PROFILE ---
         Set_Avatar,          // Client -> Server: upload avatar (base64 JPEG)
         Get_Avatar,          // Client -> Server: request avatar for a user

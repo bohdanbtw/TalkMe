@@ -29,6 +29,7 @@
 #include "../network/TenorAPI.h"
 #include "../game/Racing.h"
 #include "../game/FlappyBird.h"
+#include "../game/TicTacToe.h"
 
 namespace TalkMe {
     enum class AppState { Login, Login2FA, Register, MainApp };
@@ -158,8 +159,16 @@ namespace TalkMe {
             bool muteJoinLeave = false;
         } m_NotifSettings;
 
-        std::unordered_map<std::string, std::string> m_AvatarCache; // username -> base64 data
+        std::unordered_map<std::string, std::string> m_AvatarCache;
         std::unordered_set<std::string> m_AvatarRequested;
+
+        struct PollOption { std::string text; int votes = 0; bool iVoted = false; };
+        struct Poll { int id = 0; int channelId = 0; std::string question; std::string creator; std::vector<PollOption> options; };
+        std::vector<Poll> m_Polls;
+        bool m_ShowPollCreator = false;
+
+        bool m_CompactMode = false;
+        float m_FontScale = 1.0f;
 
         struct ChessGameState {
             bool active = false;
@@ -171,6 +180,7 @@ namespace TalkMe {
         ChessEngine m_ChessEngine;
         RacingGame m_Racing;
         FlappyBird m_FlappyBird;
+        TicTacToe m_TicTacToe;
         ScreenCapture m_ScreenCapture;
         DXGICapture m_DXGICapture;
         H264Decoder m_H264Decoder;
