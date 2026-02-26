@@ -216,6 +216,24 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            if (msg.type == PacketType::Cinema_State) {
+                m_Cinema.active = true;
+                m_Cinema.url = j.value("url", m_Cinema.url);
+                m_Cinema.title = j.value("title", m_Cinema.title);
+                m_Cinema.playing = j.value("playing", m_Cinema.playing);
+                m_Cinema.currentTime = j.value("time", m_Cinema.currentTime);
+                m_Cinema.host = j.value("u", m_Cinema.host);
+                if (j.contains("action") && j["action"] == "pause") m_Cinema.playing = false;
+                if (j.contains("action") && j["action"] == "play") m_Cinema.playing = true;
+                if (j.contains("action") && j["action"] == "seek") m_Cinema.currentTime = j.value("time", 0.0f);
+                continue;
+            }
+
+            if (msg.type == PacketType::Cinema_Stop) {
+                m_Cinema = {};
+                continue;
+            }
+
             if (msg.type == PacketType::Screen_Share_State) {
                 std::string action = j.value("action", "");
                 std::string user = j.value("u", "");

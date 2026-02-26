@@ -185,6 +185,13 @@ namespace TalkMe {
         Member_List_Request, // Client -> Server: request member list for a server
         Member_List_Response,// Server -> Client: list of members in a server with online status
 
+        // --- CINEMA / WATCH PARTY ---
+        Cinema_Start,        // Client -> Server -> Channel: start watch party (URL, title)
+        Cinema_Control,      // Client -> Server -> Channel: play/pause/seek
+        Cinema_State,        // Server -> Client: current cinema state (playing, time, URL)
+        Cinema_Stop,         // Client -> Server -> Channel: end watch party
+        Cinema_Chat,         // Client -> Server -> Channel: cinema chat message
+
         // --- MINIGAMES ---
         Game_Challenge,      // Client -> Server -> Target: challenge someone to a game
         Game_Accept,         // Client -> Server -> Challenger: accept game

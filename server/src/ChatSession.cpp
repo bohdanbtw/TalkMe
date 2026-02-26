@@ -539,6 +539,19 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Cinema_Start || m_Header.type == PacketType::Cinema_Control
+                || m_Header.type == PacketType::Cinema_Stop || m_Header.type == PacketType::Cinema_Chat) {
+                int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
+                if (cid == -1) return;
+                json out = j;
+                out["u"] = m_Username;
+                PacketType outType = (m_Header.type == PacketType::Cinema_Start || m_Header.type == PacketType::Cinema_Control)
+                    ? PacketType::Cinema_State : m_Header.type;
+                auto buf = m_Server.CreateBroadcastBuffer(outType, out.dump());
+                m_Server.BroadcastToVoiceChannel(cid, buf);
+                return;
+            }
+
             if (m_Header.type == PacketType::Game_Challenge || m_Header.type == PacketType::Game_Accept || m_Header.type == PacketType::Game_Move) {
                 std::string target = j.value("to", j.value("opponent", ""));
                 if (target.empty()) return;
