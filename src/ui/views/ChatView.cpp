@@ -27,7 +27,14 @@ namespace TalkMe::UI::Views {
         const std::vector<std::pair<std::string, bool>>* serverMembers,
         bool* showMemberList,
         char* searchBuf,
-        bool* showSearch)
+        bool* showSearch,
+        std::function<void(int fps, int quality)> onStartScreenShare,
+        std::function<void()> onStopScreenShare,
+        bool isScreenSharing,
+        bool someoneIsSharing,
+        void* screenShareTexture,
+        int screenShareW,
+        int screenShareH)
     {
         float winH = ImGui::GetWindowHeight();
         float winW = ImGui::GetWindowWidth();
@@ -73,6 +80,33 @@ namespace TalkMe::UI::Views {
                 if (gridH < 100.0f) gridH = 100.0f;
 
                 ImGui::BeginChild("VoiceGrid", ImVec2(areaW, gridH), false, ImGuiWindowFlags_None);
+
+                // Screen share viewport (takes priority over user grid when active)
+                if ((someoneIsSharing || isScreenSharing) && screenShareTexture) {
+                    float viewW = areaW - 40.0f;
+                    float viewH = gridH - 40.0f;
+                    if (screenShareW > 0 && screenShareH > 0) {
+                        float aspect = (float)screenShareW / (float)screenShareH;
+                        float fitW = viewW;
+                        float fitH = fitW / aspect;
+                        if (fitH > viewH) { fitH = viewH; fitW = fitH * aspect; }
+                        float padX = (areaW - fitW) * 0.5f;
+                        float padY = 10.0f;
+                        ImGui::SetCursorPos(ImVec2(padX, padY));
+                        ImGui::Image((ImTextureID)screenShareTexture, ImVec2(fitW, fitH));
+                    }
+
+                    ImGui::EndChild(); // VoiceGrid
+                } else if (someoneIsSharing && !screenShareTexture) {
+                    float cx = areaW * 0.5f;
+                    ImGui::Dummy(ImVec2(0, gridH * 0.3f));
+                    std::string shareMsg = "Screen share active";
+                    ImVec2 sz = ImGui::CalcTextSize(shareMsg.c_str());
+                    ImGui::SetCursorPosX((areaW - sz.x) * 0.5f);
+                    ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "%s", shareMsg.c_str());
+
+                    ImGui::EndChild(); // VoiceGrid
+                } else {
 
                 float avatarR = Styles::AvatarRadius;
                 float itemW   = Styles::VoiceItemWidth;
@@ -241,7 +275,8 @@ namespace TalkMe::UI::Views {
                 ImGui::PopStyleColor();
                 ImGui::PopStyleVar();
 
-                ImGui::EndChild(); // VoiceGrid
+                ImGui::EndChild(); // VoiceGrid (user grid branch)
+                } // close else block for screen share vs user grid
 
                 // ====== Bottom action bar: 3 buttons centered ======
                 ImGui::Dummy(ImVec2(0, 8));
@@ -263,15 +298,25 @@ namespace TalkMe::UI::Views {
                 }
                 ImGui::PopStyleColor(3);
 
-                // Button 2: Screen Share (blue)
+                // Button 2: Screen Share (blue) or Stop (if sharing)
                 ImGui::SameLine(0, 12);
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.65f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.42f, 0.75f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
-                if (ImGui::Button("Screen Share", ImVec2(130, actionBtnH))) {
-                    ImGui::OpenPopup("ScreenShareSetup");
+                if (isScreenSharing) {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.3f, 0.1f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.35f, 0.12f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                    if (ImGui::Button("Stop Share", ImVec2(130, actionBtnH))) {
+                        if (onStopScreenShare) onStopScreenShare();
+                    }
+                    ImGui::PopStyleColor(3);
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.65f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.42f, 0.75f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                    if (ImGui::Button("Screen Share", ImVec2(130, actionBtnH))) {
+                        ImGui::OpenPopup("ScreenShareSetup");
+                    }
+                    ImGui::PopStyleColor(3);
                 }
-                ImGui::PopStyleColor(3);
 
                 // Button 3: Games (green)
                 ImGui::SameLine(0, 12);
@@ -286,42 +331,41 @@ namespace TalkMe::UI::Views {
                 ImGui::PopStyleVar();
 
                 // ====== Screen Share Setup Popup ======
-                ImGui::SetNextWindowSize(ImVec2(340, 220), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(520, 140), ImGuiCond_Always);
                 if (ImGui::BeginPopup("ScreenShareSetup")) {
                     ImGui::Text("Screen Share Settings");
                     ImGui::Separator();
-                    ImGui::Dummy(ImVec2(0, 6));
+                    ImGui::Dummy(ImVec2(0, 4));
+
+                    ImGui::Columns(3, nullptr, false);
 
                     static int s_shareMode = 0;
-                    ImGui::RadioButton("Entire Screen", &s_shareMode, 0);
-                    ImGui::SameLine();
-                    ImGui::RadioButton("Application Window", &s_shareMode, 1);
+                    ImGui::Text("Source:");
+                    ImGui::RadioButton("Full Screen", &s_shareMode, 0);
+                    ImGui::RadioButton("App Window", &s_shareMode, 1);
 
-                    ImGui::Dummy(ImVec2(0, 4));
+                    ImGui::NextColumn();
                     static int s_shareFps = 1;
-                    ImGui::Text("Frame Rate:");
-                    ImGui::RadioButton("30 FPS", &s_shareFps, 0); ImGui::SameLine();
-                    ImGui::RadioButton("60 FPS", &s_shareFps, 1); ImGui::SameLine();
-                    ImGui::RadioButton("120 FPS", &s_shareFps, 2);
+                    ImGui::Text("FPS:");
+                    ImGui::RadioButton("30", &s_shareFps, 0);
+                    ImGui::RadioButton("60", &s_shareFps, 1);
+                    ImGui::RadioButton("120", &s_shareFps, 2);
 
-                    ImGui::Dummy(ImVec2(0, 4));
+                    ImGui::NextColumn();
                     static int s_shareQuality = 1;
                     ImGui::Text("Quality:");
-                    ImGui::RadioButton("Low", &s_shareQuality, 0); ImGui::SameLine();
-                    ImGui::RadioButton("Medium", &s_shareQuality, 1); ImGui::SameLine();
-                    ImGui::RadioButton("High", &s_shareQuality, 2);
+                    ImGui::RadioButton("Low##q", &s_shareQuality, 0);
+                    ImGui::RadioButton("Medium##q", &s_shareQuality, 1);
+                    ImGui::RadioButton("High##q", &s_shareQuality, 2);
 
-                    ImGui::Dummy(ImVec2(0, 8));
+                    ImGui::Columns(1);
+                    ImGui::Dummy(ImVec2(0, 4));
+
                     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.65f, 1.0f));
                     if (ImGui::Button("Start Sharing", ImVec2(150, 32))) {
                         int fps[] = { 30, 60, 120 };
                         int quality[] = { 40, 70, 95 };
-                        nlohmann::json sj;
-                        sj["width"] = 1920; sj["height"] = 1080;
-                        sj["fps"] = fps[s_shareFps];
-                        sj["quality"] = quality[s_shareQuality];
-                        sj["mode"] = s_shareMode == 0 ? "screen" : "window";
-                        netClient.Send(PacketType::Screen_Share_Start, sj.dump());
+                        if (onStartScreenShare) onStartScreenShare(fps[s_shareFps], quality[s_shareQuality]);
                         ImGui::CloseCurrentPopup();
                     }
                     ImGui::PopStyleColor();

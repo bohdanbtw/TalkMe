@@ -238,11 +238,20 @@ void Application::ProcessNetworkMessages() {
             if (msg.type == PacketType::Screen_Share_State) {
                 std::string action = j.value("action", "");
                 std::string user = j.value("u", "");
-                if (action == "start") {
-                    m_ScreenShare.viewingUser = user;
-                    m_ScreenShare.sharing = false;
+                if (action == "start" && user != m_CurrentUser.username) {
+                    m_ScreenShare.someoneSharing = true;
+                    m_ScreenShare.sharingUser = user;
                 } else if (action == "stop") {
-                    m_ScreenShare.viewingUser.clear();
+                    m_ScreenShare.someoneSharing = false;
+                    m_ScreenShare.sharingUser.clear();
+                }
+                continue;
+            }
+
+            if (msg.type == PacketType::Screen_Share_Frame) {
+                if (m_ScreenShare.someoneSharing && !msg.data.empty()) {
+                    m_ScreenShare.lastFrameData = msg.data;
+                    m_ScreenShare.frameUpdated = true;
                 }
                 continue;
             }

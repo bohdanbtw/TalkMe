@@ -21,6 +21,7 @@
 #include "../audio/AudioEngine.h"
 #include "../overlay/GameOverlay.h"
 #include "../game/Chess.h"
+#include "../screen/ScreenCapture.h"
 #include "../game/Racing.h"
 
 namespace TalkMe {
@@ -149,6 +150,7 @@ namespace TalkMe {
         } m_ChessUI;
         ChessEngine m_ChessEngine;
         RacingGame m_Racing;
+        ScreenCapture m_ScreenCapture;
 
         struct CinemaState {
             bool active = false;
@@ -162,8 +164,13 @@ namespace TalkMe {
         struct ScreenShareState {
             int fps = 30;
             int quality = 75;
-            bool sharing = false;
-            std::string viewingUser;
+            bool iAmSharing = false;
+            bool someoneSharing = false;
+            std::string sharingUser;
+            std::vector<uint8_t> lastFrameData;
+            int frameWidth = 0;
+            int frameHeight = 0;
+            bool frameUpdated = false;
         } m_ScreenShare;
 
         struct FriendEntry { std::string username; std::string status; std::string direction; };
