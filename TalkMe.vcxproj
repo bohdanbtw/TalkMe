@@ -150,6 +150,8 @@
     <ClCompile Include="src\audio\AudioEngine.cpp" />
     <ClCompile Include="src\core\Logger.cpp" />
     <ClCompile Include="src\overlay\GameOverlay.cpp" />
+    <ClCompile Include="src\screen\ScreenCapture.cpp" />
+    <ClCompile Include="src\ui\TextureManager.cpp" />
     <ClCompile Include="src\network\VoiceTransport.cpp" />
     <ClCompile Include="src\ui\views\ChatView.cpp" />
     <ClCompile Include="src\ui\views\SettingsView.cpp" />
@@ -186,6 +188,10 @@
     <ClInclude Include="src\audio\AudioEngine.h" />
     <ClInclude Include="src\core\Logger.h" />
     <ClInclude Include="src\overlay\GameOverlay.h" />
+    <ClInclude Include="src\screen\ScreenCapture.h" />
+    <ClInclude Include="src\ui\TextureManager.h" />
+    <ClInclude Include="src\game\Chess.h" />
+    <ClInclude Include="src\game\Racing.h" />
     <ClInclude Include="src\network\VoiceTransport.h" />
     <ClInclude Include="src\shared\PacketHandler.h" />
     <ClInclude Include="src\shared\Protocol.h" />
