@@ -175,6 +175,9 @@ namespace TalkMe {
         Soundboard m_Soundboard;
         bool m_ShowSoundboard = false;
 
+        int m_VoiceEffect = 0; // 0=none, 1=deep, 2=high, 3=robot
+        int m_DisappearingDuration = 0; // 0=off, seconds for auto-delete
+
         struct ChessGameState {
             bool active = false;
             std::string opponent;
