@@ -309,6 +309,7 @@ void Application::ProcessNetworkMessages() {
                             const std::string typeStr = item.value("type", "text");
                             ch.type = (typeStr == "voice") ? ChannelType::Voice : ChannelType::Text;
                             ch.description = item.value("desc", "");
+                            ch.userLimit = item.value("limit", 0);
                             it->channels.push_back(ch);
                         }
                     }

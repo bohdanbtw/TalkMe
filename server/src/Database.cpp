@@ -141,6 +141,7 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN attachment_id TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE messages ADD COLUMN reply_to INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE channels ADD COLUMN description TEXT DEFAULT '';", 0, 0, 0);
+        sqlite3_exec(m_Db, "ALTER TABLE channels ADD COLUMN user_limit INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS reactions (message_id INTEGER, username TEXT, emoji TEXT, PRIMARY KEY(message_id, username, emoji));", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS friends (user1 TEXT, user2 TEXT, status TEXT DEFAULT 'pending', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user1, user2));", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS direct_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT, receiver TEXT, content TEXT, time DATETIME DEFAULT CURRENT_TIMESTAMP);", 0, 0, 0);
@@ -544,14 +545,16 @@ namespace TalkMe {
         std::shared_lock<std::shared_mutex> lock(m_RwMutex);
         json j = json::array();
         sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(m_Db, "SELECT id, name, type, IFNULL(description, '') FROM channels WHERE server_id = ?;", -1, &stmt, 0) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(m_Db, "SELECT id, name, type, IFNULL(description, ''), IFNULL(user_limit, 0) FROM channels WHERE server_id = ?;", -1, &stmt, 0) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, serverId);
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const char* n = (const char*)sqlite3_column_text(stmt, 1);
                 const char* t = (const char*)sqlite3_column_text(stmt, 2);
                 const char* d = (const char*)sqlite3_column_text(stmt, 3);
+                int limit = sqlite3_column_int(stmt, 4);
                 json entry = { {"id", sqlite3_column_int(stmt, 0)}, {"name", n ? n : ""}, {"type", t ? t : ""} };
                 if (d && d[0] != '\0') entry["desc"] = d;
+                if (limit > 0) entry["limit"] = limit;
                 j.push_back(entry);
             }
             sqlite3_finalize(stmt);

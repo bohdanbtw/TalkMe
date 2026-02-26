@@ -126,6 +126,7 @@ namespace TalkMe::UI::Views {
                     if (ch.type != ChannelType::Voice) continue;
                     bool active = (activeVoiceChannelId == ch.id);
                     std::string label = (active ? "  > " : "  ~  ") + ch.name;
+                    if (ch.userLimit > 0) label += " [" + std::to_string(ch.userLimit) + "]";
 
                     if (active) ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
                     ImGui::Indent(10);
