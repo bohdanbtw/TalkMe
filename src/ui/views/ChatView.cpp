@@ -24,7 +24,9 @@ namespace TalkMe::UI::Views {
         std::function<void()> onUserTyping,
         int* replyingToMessageId,
         const std::vector<std::pair<std::string, bool>>* serverMembers,
-        bool* showMemberList)
+        bool* showMemberList,
+        char* searchBuf,
+        bool* showSearch)
     {
         float winH = ImGui::GetWindowHeight();
         float winW = ImGui::GetWindowWidth();
@@ -278,8 +280,14 @@ namespace TalkMe::UI::Views {
                 ImGui::Text("Invite: %s", currentServer.inviteCode.c_str());
                 ImGui::PopStyleColor();
 
+                float headerBtnX = areaW - 120;
+                if (showSearch) {
+                    ImGui::SameLine(headerBtnX - 80);
+                    if (ImGui::SmallButton(*showSearch ? "Search X" : "Search"))
+                        *showSearch = !*showSearch;
+                }
                 if (showMemberList) {
-                    ImGui::SameLine(areaW - 120);
+                    ImGui::SameLine(headerBtnX);
                     if (ImGui::SmallButton(*showMemberList ? "Members <<" : "Members >>"))
                         *showMemberList = !*showMemberList;
                 }
@@ -297,10 +305,29 @@ namespace TalkMe::UI::Views {
                 float msgH = winH - hdrH - inpH;
                 if (msgH < 50.0f) msgH = 50.0f;
 
+                if (showSearch && *showSearch && searchBuf) {
+                    ImGui::Indent(32);
+                    ImGui::PushItemWidth(areaW - 100);
+                    ImGui::InputTextWithHint("##search", "Search messages...", searchBuf, 256);
+                    ImGui::PopItemWidth();
+                    ImGui::Unindent(32);
+                }
+
+                std::string searchStr = (showSearch && *showSearch && searchBuf) ? searchBuf : "";
+                for (auto& c : searchStr) c = (char)std::tolower((unsigned char)c);
+
                 ImGui::SetCursorPosX(32);
                 ImGui::BeginChild("Messages", ImVec2(areaW - 64, msgH), false, ImGuiWindowFlags_None);
                 for (const auto& msg : messages) {
                     if (msg.channelId != selectedChannelId) continue;
+                    if (!searchStr.empty()) {
+                        std::string lower = msg.content;
+                        for (auto& c : lower) c = (char)std::tolower((unsigned char)c);
+                        std::string lowerSender = msg.sender;
+                        for (auto& c : lowerSender) c = (char)std::tolower((unsigned char)c);
+                        if (lower.find(searchStr) == std::string::npos && lowerSender.find(searchStr) == std::string::npos)
+                            continue;
+                    }
                     bool isMe = (msg.sender == currentUser.username);
 
                     ImGui::BeginGroup();
