@@ -46,6 +46,8 @@ namespace TalkMe::UI::Views {
         std::function<void(int)> onNoiseSuppressionModeChange;
         std::function<void(bool)> onToggleTestMic;
         std::function<void()> onResetToDefaults;
+        std::function<void(const std::string& base64)> onSetAvatar;
+        void* currentAvatarTexture = nullptr;
     };
 
     void RenderSettings(SettingsContext& ctx);

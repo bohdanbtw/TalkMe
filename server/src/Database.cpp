@@ -148,6 +148,7 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "ALTER TABLE server_members ADD COLUMN permissions INTEGER DEFAULT 0;", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN is_2fa_enabled INTEGER DEFAULT 0;", 0, 0, 0);
+        sqlite3_exec(m_Db, "ALTER TABLE users ADD COLUMN avatar TEXT DEFAULT '';", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS trusted_devices (username TEXT, device_id TEXT, PRIMARY KEY(username, device_id));", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS sanctions (id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER, username TEXT, type TEXT, reason TEXT, expires_at DATETIME, created_by TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS roles (id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER, name TEXT, permissions INTEGER DEFAULT 0, color TEXT DEFAULT '#FFFFFF', position INTEGER DEFAULT 0);", 0, 0, 0);
@@ -704,6 +705,34 @@ namespace TalkMe {
             sqlite3_finalize(stmt);
         }
         return users;
+    }
+
+    bool Database::SetAvatar(const std::string& username, const std::string& avatarBase64) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool ok = false;
+        if (sqlite3_prepare_v2(m_Db, "UPDATE users SET avatar = ? WHERE username = ?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, avatarBase64.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, username.c_str(), -1, SQLITE_TRANSIENT);
+            ok = (sqlite3_step(stmt) == SQLITE_DONE);
+            sqlite3_finalize(stmt);
+        }
+        return ok;
+    }
+
+    std::string Database::GetAvatar(const std::string& username) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        std::string avatar;
+        if (sqlite3_prepare_v2(m_Db, "SELECT avatar FROM users WHERE username = ?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* a = (const char*)sqlite3_column_text(stmt, 0);
+                if (a) avatar = a;
+            }
+            sqlite3_finalize(stmt);
+        }
+        return avatar;
     }
 
     std::string Database::RegisterBot(int serverId, const std::string& owner, const std::string& botName) {

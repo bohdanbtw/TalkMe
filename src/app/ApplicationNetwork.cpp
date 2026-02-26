@@ -334,6 +334,33 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            if (msg.type == PacketType::Avatar_Response) {
+                std::string user = j.value("u", "");
+                std::string data = j.value("data", "");
+                if (!user.empty() && !data.empty()) {
+                    m_AvatarCache[user] = data;
+                    // Decode base64 and create texture
+                    // Base64 decode inline
+                    static const std::string b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                    std::vector<uint8_t> decoded;
+                    decoded.reserve(data.size() * 3 / 4);
+                    int val = 0, bits = -8;
+                    for (char c : data) {
+                        size_t pos = b64chars.find(c);
+                        if (pos == std::string::npos) continue;
+                        val = (val << 6) + (int)pos;
+                        bits += 6;
+                        if (bits >= 0) { decoded.push_back((uint8_t)((val >> bits) & 0xFF)); bits -= 8; }
+                    }
+                    if (!decoded.empty()) {
+                        auto& tm = TalkMe::TextureManager::Get();
+                        tm.SetDevice(m_Graphics.GetDevice());
+                        tm.LoadFromMemory("avatar_" + user, decoded.data(), (int)decoded.size(), nullptr, nullptr);
+                    }
+                }
+                continue;
+            }
+
             if (msg.type == PacketType::Presence_Update) {
                 const std::string user = j.value("u", "");
                 if (!user.empty()) {

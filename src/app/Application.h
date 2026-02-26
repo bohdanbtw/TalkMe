@@ -10,6 +10,7 @@
 #include <functional>
 #include <queue>
 #include <thread>
+#include <unordered_set>
 #include "AppSounds.h"
 #include "AppWindow.h"
 #include "AppGraphics.h"
@@ -148,6 +149,9 @@ namespace TalkMe {
         char m_GifSearchBuf[128] = "";
         TenorAPI m_TenorAPI;
         char m_StatusBuf[128] = "";
+
+        std::unordered_map<std::string, std::string> m_AvatarCache; // username -> base64 data
+        std::unordered_set<std::string> m_AvatarRequested;
 
         struct ChessGameState {
             bool active = false;

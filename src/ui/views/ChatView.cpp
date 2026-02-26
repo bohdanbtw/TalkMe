@@ -233,14 +233,26 @@ namespace TalkMe::UI::Views {
 
                     // Avatar circle centered in card
                     ImVec2 ctr = ImVec2(pos.x + itemW * 0.5f, pos.y + 12.0f + avatarR);
-                    dl->AddCircleFilled(ctr, avatarR, Styles::ColBgAvatar());
 
-                    // Initials
-                    std::string init = member.substr(0, (std::min)((size_t)2, member.size()));
-                    ImVec2 tsz = ImGui::GetFont()->CalcTextSizeA(Styles::VoiceAvatarFontSize, FLT_MAX, 0, init.c_str());
-                    dl->AddText(ImGui::GetFont(), Styles::VoiceAvatarFontSize,
-                        ImVec2(ctr.x - tsz.x * 0.5f, ctr.y - tsz.y * 0.5f),
-                        Styles::ColTextOnAvatar(), init.c_str());
+                    // Check for avatar texture
+                    auto* avatarSrv = TalkMe::TextureManager::Get().GetTexture("avatar_" + member);
+                    if (avatarSrv) {
+                        // Draw circular avatar using a square image (ImGui clips to card)
+                        float avSz = avatarR * 2.0f;
+                        ImVec2 avMin(ctr.x - avatarR, ctr.y - avatarR);
+                        ImVec2 avMax(ctr.x + avatarR, ctr.y + avatarR);
+                        dl->AddCircleFilled(ctr, avatarR, Styles::ColBgAvatar());
+                        dl->AddImageRounded((ImTextureID)avatarSrv, avMin, avMax,
+                            ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 255), avatarR);
+                    } else {
+                        dl->AddCircleFilled(ctr, avatarR, Styles::ColBgAvatar());
+                        // Initials fallback
+                        std::string init = member.substr(0, (std::min)((size_t)2, member.size()));
+                        ImVec2 tsz = ImGui::GetFont()->CalcTextSizeA(Styles::VoiceAvatarFontSize, FLT_MAX, 0, init.c_str());
+                        dl->AddText(ImGui::GetFont(), Styles::VoiceAvatarFontSize,
+                            ImVec2(ctr.x - tsz.x * 0.5f, ctr.y - tsz.y * 0.5f),
+                            Styles::ColTextOnAvatar(), init.c_str());
+                    }
 
                     // Name
                     std::string disp = member;

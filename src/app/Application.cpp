@@ -1452,6 +1452,28 @@ namespace TalkMe {
                     UpdateOverlay();
                 }
             };
+            sctx.onSetAvatar = [this](const std::string& base64) {
+                nlohmann::json aj; aj["data"] = base64;
+                m_NetClient.Send(PacketType::Set_Avatar, aj.dump());
+                m_AvatarCache[m_CurrentUser.username] = base64;
+                // Decode and create texture for self
+                std::vector<uint8_t> decoded;
+                static const std::string b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                decoded.reserve(base64.size() * 3 / 4);
+                int val = 0, bits = -8;
+                for (char c : base64) {
+                    size_t pos = b64chars.find(c);
+                    if (pos == std::string::npos) continue;
+                    val = (val << 6) + (int)pos; bits += 6;
+                    if (bits >= 0) { decoded.push_back((uint8_t)((val >> bits) & 0xFF)); bits -= 8; }
+                }
+                if (!decoded.empty()) {
+                    auto& tm = TalkMe::TextureManager::Get();
+                    tm.SetDevice(m_Graphics.GetDevice());
+                    tm.LoadFromMemory("avatar_" + m_CurrentUser.username, decoded.data(), (int)decoded.size(), nullptr, nullptr);
+                }
+            };
+            sctx.currentAvatarTexture = (void*)TalkMe::TextureManager::Get().GetTexture("avatar_" + m_CurrentUser.username);
             UI::Views::RenderSettings(sctx);
         }
         else if (m_ShowFriendList) {
