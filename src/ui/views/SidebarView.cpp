@@ -13,7 +13,8 @@ namespace TalkMe::UI::Views {
         char* newServerNameBuf, char* newChannelNameBuf, bool& showSettings,
         bool& selfMuted,         bool& selfDeafened, const VoiceInfoData& voiceInfo,
         std::function<void()> onToggleEchoLive,
-        std::function<void()> onInfPopupOpened)
+        std::function<void()> onInfPopupOpened,
+        std::map<int, int>* unreadCounts)
     {
         float parentW = ImGui::GetWindowWidth();
         float windowHeight = ImGui::GetWindowHeight();
@@ -81,13 +82,20 @@ namespace TalkMe::UI::Views {
                         ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
                     }
                     ImGui::Indent(10);
-                    if (ImGui::Selectable(label.c_str(), sel, 0, ImVec2(sW - 30, 26))) {
+                    int unread = (unreadCounts && unreadCounts->count(ch.id)) ? (*unreadCounts)[ch.id] : 0;
+                    std::string displayLabel = label;
+                    if (unread > 0) displayLabel += "  (" + std::to_string(unread) + ")";
+
+                    if (unread > 0 && !sel) ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
+                    if (ImGui::Selectable(displayLabel.c_str(), sel, 0, ImVec2(sW - 30, 26))) {
                         if (selectedChannelId != ch.id) {
                             selectedChannelId = ch.id;
                             showSettings = false;
                             netClient.Send(PacketType::Select_Text_Channel, PacketHandler::SelectTextChannelPayload(ch.id));
+                            if (unreadCounts) (*unreadCounts)[ch.id] = 0;
                         }
                     }
+                    if (unread > 0 && !sel) ImGui::PopStyleColor();
                     if (ImGui::BeginPopupContextItem(("del_ch_" + std::to_string(ch.id)).c_str())) {
                         if (ImGui::Selectable("Delete Channel")) {
                             nlohmann::json dj; dj["cid"] = ch.id; dj["sid"] = selectedServerId;

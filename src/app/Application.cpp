@@ -841,7 +841,7 @@ namespace TalkMe {
         vi.echoLiveEnabled = m_EchoLiveEnabled;
         vi.echoLiveHistory = std::vector<float>(m_EchoLiveHistory.begin(), m_EchoLiveHistory.end());
         vi.currentEchoLossPct = m_EchoLiveHistory.empty() ? 0.f : m_EchoLiveHistory.back();
-        UI::Views::RenderSidebar(m_NetClient, m_CurrentUser, m_CurrentState, m_ServerList, m_SelectedServerId, m_SelectedChannelId, m_ActiveVoiceChannelId, m_VoiceMembers, m_NewServerNameBuf, m_NewChannelNameBuf, m_ShowSettings, m_SelfMuted, m_SelfDeafened, vi, nullptr, [this]() { EnsureEchoLiveEnabled(); });
+        UI::Views::RenderSidebar(m_NetClient, m_CurrentUser, m_CurrentState, m_ServerList, m_SelectedServerId, m_SelectedChannelId, m_ActiveVoiceChannelId, m_VoiceMembers, m_NewServerNameBuf, m_NewChannelNameBuf, m_ShowSettings, m_SelfMuted, m_SelfDeafened, vi, nullptr, [this]() { EnsureEchoLiveEnabled(); }, &m_UnreadCounts);
 
         if (m_ShowSettings) {
             static std::vector<TalkMe::AudioDeviceInfo> s_InputDevs;
