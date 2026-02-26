@@ -86,19 +86,29 @@ private:
 } // namespace
 
 void ScreenCapture::Start(const CaptureSettings& settings, FrameCallback onFrame) {
+    std::fprintf(stderr, "[ScreenCapture] Start called, running=%d\n", m_Running.load() ? 1 : 0);
+    std::fflush(stderr);
     if (m_Running.load()) return;
     m_Settings = settings;
     m_OnFrame = std::move(onFrame);
     m_Running.store(true);
 
+    if (m_Thread.joinable()) m_Thread.join();
+
     m_Thread = std::thread([this]() {
+        std::fprintf(stderr, "[ScreenCapture] Thread started, initializing GDI+\n");
+        std::fflush(stderr);
         Gdiplus::GdiplusStartupInput gdipInput;
         ULONG_PTR gdipToken = 0;
-        Gdiplus::GdiplusStartup(&gdipToken, &gdipInput, nullptr);
+        auto status = Gdiplus::GdiplusStartup(&gdipToken, &gdipInput, nullptr);
+        std::fprintf(stderr, "[ScreenCapture] GDI+ init status=%d\n", (int)status);
+        std::fflush(stderr);
 
         CaptureLoop();
 
         Gdiplus::GdiplusShutdown(gdipToken);
+        std::fprintf(stderr, "[ScreenCapture] Thread exiting\n");
+        std::fflush(stderr);
     });
 }
 
@@ -109,9 +119,13 @@ void ScreenCapture::Stop() {
 
 void ScreenCapture::CaptureLoop() {
     int intervalMs = 1000 / (std::max)(1, m_Settings.fps);
+    std::fprintf(stderr, "[ScreenCapture] CaptureLoop started, interval=%dms\n", intervalMs);
+    std::fflush(stderr);
 
     CLSID jpegClsid;
-    GetEncoderClsid(L"image/jpeg", &jpegClsid);
+    int encoderIdx = GetEncoderClsid(L"image/jpeg", &jpegClsid);
+    std::fprintf(stderr, "[ScreenCapture] JPEG encoder index=%d\n", encoderIdx);
+    std::fflush(stderr);
 
     Gdiplus::EncoderParameters encoderParams;
     encoderParams.Count = 1;
@@ -148,9 +162,17 @@ void ScreenCapture::CaptureLoop() {
         {
             Gdiplus::Bitmap bmp(hBmp, nullptr);
             auto* memStream = new MemoryStream();
-            bmp.Save(memStream, &jpegClsid, &encoderParams);
+            auto saveStatus = bmp.Save(memStream, &jpegClsid, &encoderParams);
 
             auto& jpegData = memStream->GetData();
+            static int s_frameCount = 0;
+            if (s_frameCount < 5) {
+                std::fprintf(stderr, "[ScreenCapture] Frame %d: save_status=%d, jpeg_size=%zu, screen=%dx%d->%dx%d\n",
+                    s_frameCount, (int)saveStatus, jpegData.size(), GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), outW, outH);
+                std::fflush(stderr);
+            }
+            s_frameCount++;
+
             if (!jpegData.empty() && m_OnFrame)
                 m_OnFrame(jpegData, outW, outH);
 

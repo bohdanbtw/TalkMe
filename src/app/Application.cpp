@@ -1601,6 +1601,8 @@ namespace TalkMe {
                     &m_ShowMemberList,
                     m_SearchBuf, &m_ShowSearch,
                     [this](int fps, int quality) {
+                        std::fprintf(stderr, "[TalkMe] onStartScreenShare called: fps=%d quality=%d\n", fps, quality);
+                        std::fflush(stderr);
                         m_ScreenShare.iAmSharing = true;
                         m_ScreenShare.fps = fps;
                         m_ScreenShare.quality = quality;
@@ -1608,8 +1610,9 @@ namespace TalkMe {
                         cs.fps = fps;
                         cs.quality = quality;
                         m_ScreenCapture.Start(cs, [this](const std::vector<uint8_t>& jpegData, int w, int h) {
+                            std::fprintf(stderr, "[TalkMe] Frame captured: %dx%d, %zu bytes\n", w, h, jpegData.size());
+                            std::fflush(stderr);
                             m_NetClient.SendRaw(PacketType::Screen_Share_Frame, jpegData);
-                            // Also store locally for self-preview
                             m_ScreenShare.lastFrameData = jpegData;
                             m_ScreenShare.frameWidth = w;
                             m_ScreenShare.frameHeight = h;
@@ -1618,6 +1621,8 @@ namespace TalkMe {
                         nlohmann::json sj;
                         sj["width"] = 1920; sj["height"] = 1080; sj["fps"] = fps;
                         m_NetClient.Send(PacketType::Screen_Share_Start, sj.dump());
+                        std::fprintf(stderr, "[TalkMe] Screen_Share_Start sent, capture started: %s\n", m_ScreenCapture.IsRunning() ? "YES" : "NO");
+                        std::fflush(stderr);
                     },
                     [this]() {
                         m_ScreenCapture.Stop();
