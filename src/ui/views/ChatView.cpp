@@ -1182,7 +1182,8 @@ namespace TalkMe::UI::Views {
                         ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
                         if (GetOpenFileNameA(&ofn) && strlen(filePath) > 0) {
                             // Read file and send via File_Transfer_Request
-                            FILE* fp = fopen(filePath, "rb");
+                            FILE* fp = nullptr;
+                            fopen_s(&fp, filePath, "rb");
                             if (fp) {
                                 fseek(fp, 0, SEEK_END);
                                 long sz = ftell(fp);
