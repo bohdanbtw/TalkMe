@@ -571,14 +571,18 @@ namespace TalkMe {
 
                 UpdateOverlay();
 
-                // Update screen share texture from incoming frames
+                // Update screen share texture from incoming JPEG frames
                 if (m_ScreenShare.frameUpdated && !m_ScreenShare.lastFrameData.empty()) {
                     auto& tm = TalkMe::TextureManager::Get();
-                    if (!tm.GetTexture("screenshare"))
-                        tm.SetDevice(m_Graphics.GetDevice());
-                    tm.LoadFromBMP("screenshare",
+                    tm.SetDevice(m_Graphics.GetDevice());
+                    int fw = 0, fh = 0;
+                    tm.LoadFromMemory("screenshare",
                         m_ScreenShare.lastFrameData.data(),
-                        (int)m_ScreenShare.lastFrameData.size());
+                        (int)m_ScreenShare.lastFrameData.size(), &fw, &fh);
+                    if (fw > 0 && fh > 0) {
+                        m_ScreenShare.frameWidth = fw;
+                        m_ScreenShare.frameHeight = fh;
+                    }
                     m_ScreenShare.frameUpdated = false;
                 }
 

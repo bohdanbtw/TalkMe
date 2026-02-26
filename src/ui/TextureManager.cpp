@@ -1,4 +1,6 @@
+#define STB_IMAGE_IMPLEMENTATION
 #include "TextureManager.h"
+#include "../../vendor/stb_image.h"
 #include <cstring>
 #include <algorithm>
 
@@ -123,6 +125,18 @@ void TextureManager::Clear() {
         if (entry.texture) entry.texture->Release();
     }
     m_Textures.clear();
+}
+
+ID3D11ShaderResourceView* TextureManager::LoadFromMemory(const std::string& id, const uint8_t* data, int dataSize, int* outW, int* outH) {
+    if (!data || dataSize <= 0) return nullptr;
+    int w = 0, h = 0, channels = 0;
+    unsigned char* rgba = stbi_load_from_memory(data, dataSize, &w, &h, &channels, 4);
+    if (!rgba) return nullptr;
+    if (outW) *outW = w;
+    if (outH) *outH = h;
+    auto* srv = LoadFromRGBA(id, rgba, w, h);
+    stbi_image_free(rgba);
+    return srv;
 }
 
 int TextureManager::GetWidth(const std::string& id) const {
