@@ -124,7 +124,8 @@ namespace TalkMe {
         std::map<std::string, float> m_TypingUsers;  // username -> timestamp of last typing indicator
         std::chrono::steady_clock::time_point m_LastTypingSentTime;
 
-        std::set<std::string> m_OnlineUsers;  // set of currently online usernames
+        std::set<std::string> m_OnlineUsers;
+        std::map<std::string, std::string> m_UserStatuses;  // username -> custom status text
         int m_ReplyingToMessageId = 0;  // message ID being replied to (0 = not replying)
 
         struct ServerMember { std::string username; bool online = false; };

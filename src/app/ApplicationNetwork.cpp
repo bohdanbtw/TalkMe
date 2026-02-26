@@ -189,6 +189,13 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            if (msg.type == PacketType::Status_Update) {
+                const std::string user = j.value("u", "");
+                const std::string status = j.value("status", "");
+                if (!user.empty()) m_UserStatuses[user] = status;
+                continue;
+            }
+
             if (msg.type == PacketType::Presence_Update) {
                 const std::string user = j.value("u", "");
                 if (!user.empty()) {

@@ -534,6 +534,19 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Set_Status) {
+                std::string status = j.value("status", "");
+                if (status.size() > 128) status = status.substr(0, 128);
+                json out; out["u"] = m_Username; out["status"] = status;
+                auto buf = m_Server.CreateBroadcastBuffer(PacketType::Status_Update, out.dump());
+                {
+                    std::shared_lock lock(m_Server.GetRoomMutex());
+                    for (const auto& s : m_Server.GetAllSessions())
+                        s->SendShared(buf, false);
+                }
+                return;
+            }
+
             if (m_Header.type == PacketType::Screen_Share_Start) {
                 int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
                 if (cid == -1) return;
