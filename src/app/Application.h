@@ -23,6 +23,7 @@
 #include "../game/Chess.h"
 #include "../screen/ScreenCapture.h"
 #include "../screen/DXGICapture.h"
+#include "../screen/H264Encoder.h"
 #include "../game/Racing.h"
 
 namespace TalkMe {
@@ -153,6 +154,7 @@ namespace TalkMe {
         RacingGame m_Racing;
         ScreenCapture m_ScreenCapture;
         DXGICapture m_DXGICapture;
+        H264Decoder m_H264Decoder;
 
         struct CinemaState {
             bool active = false;

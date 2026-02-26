@@ -571,17 +571,34 @@ namespace TalkMe {
 
                 UpdateOverlay();
 
-                // Update screen share texture from incoming JPEG frames
-                if (m_ScreenShare.frameUpdated && !m_ScreenShare.lastFrameData.empty()) {
+                // Update screen share texture from incoming frames (JPEG or H.264)
+                if (m_ScreenShare.frameUpdated && m_ScreenShare.lastFrameData.size() > 1) {
                     auto& tm = TalkMe::TextureManager::Get();
                     tm.SetDevice(m_Graphics.GetDevice());
-                    int fw = 0, fh = 0;
-                    tm.LoadFromMemory("screenshare",
-                        m_ScreenShare.lastFrameData.data(),
-                        (int)m_ScreenShare.lastFrameData.size(), &fw, &fh);
-                    if (fw > 0 && fh > 0) {
-                        m_ScreenShare.frameWidth = fw;
-                        m_ScreenShare.frameHeight = fh;
+
+                    uint8_t codec = m_ScreenShare.lastFrameData[0];
+                    const uint8_t* payload = m_ScreenShare.lastFrameData.data() + 1;
+                    int payloadSize = (int)m_ScreenShare.lastFrameData.size() - 1;
+
+                    if (codec == 0) {
+                        // JPEG
+                        int fw = 0, fh = 0;
+                        tm.LoadFromMemory("screenshare", payload, payloadSize, &fw, &fh);
+                        if (fw > 0 && fh > 0) {
+                            m_ScreenShare.frameWidth = fw;
+                            m_ScreenShare.frameHeight = fh;
+                        }
+                    } else if (codec == 1) {
+                        // H.264
+                        if (!m_H264Decoder.IsInitialized())
+                            m_H264Decoder.Initialize(1920, 1080);
+                        std::vector<uint8_t> rgba;
+                        int fw = 0, fh = 0;
+                        if (m_H264Decoder.Decode(payload, payloadSize, rgba, fw, fh) && !rgba.empty()) {
+                            tm.LoadFromRGBA("screenshare", rgba.data(), fw, fh);
+                            m_ScreenShare.frameWidth = fw;
+                            m_ScreenShare.frameHeight = fh;
+                        }
                     }
                     m_ScreenShare.frameUpdated = false;
                 }

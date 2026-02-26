@@ -7,6 +7,7 @@
 #include <thread>
 #include <functional>
 #include <mutex>
+#include "H264Encoder.h"
 
 namespace TalkMe {
 
@@ -48,7 +49,7 @@ private:
     int m_CaptureWidth = 0;
     int m_CaptureHeight = 0;
 
-    // Fallback: if MF encoder fails, use JPEG
+    H264Encoder m_H264Encoder;
     bool m_UseJpegFallback = false;
 };
 
