@@ -37,7 +37,8 @@ namespace TalkMe::UI::Views {
         int screenShareH,
         const std::vector<std::string>* activeStreamers,
         std::string* viewingStream,
-        bool* streamMaximized)
+        bool* streamMaximized,
+        bool* showGifPicker)
     {
         float winH = ImGui::GetWindowHeight();
         float winW = ImGui::GetWindowWidth();
@@ -804,9 +805,8 @@ namespace TalkMe::UI::Views {
                     if (ImGui::Selectable("Upload Image...")) {
                         // TODO: open file dialog and upload via File_Transfer_Request
                     }
-                    if (ImGui::Selectable("GIF (F4)")) {
-                        // GIF picker toggled via F4 key or this menu item
-                    }
+                    if (ImGui::Selectable("GIF") && showGifPicker)
+                        *showGifPicker = true;
                     ImGui::EndPopup();
                 }
 

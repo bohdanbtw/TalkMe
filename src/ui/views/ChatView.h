@@ -41,6 +41,7 @@ namespace TalkMe::UI::Views {
         int screenShareH = 0,
         const std::vector<std::string>* activeStreamers = nullptr,
         std::string* viewingStream = nullptr,
-        bool* streamMaximized = nullptr
+        bool* streamMaximized = nullptr,
+        bool* showGifPicker = nullptr
     );
 }
