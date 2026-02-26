@@ -30,6 +30,7 @@ namespace TalkMe {
         std::string name;
         ChannelType type;
         std::string description;
+        int userLimit = 0;
     };
 
     struct Server {
