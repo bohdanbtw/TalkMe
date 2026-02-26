@@ -578,6 +578,13 @@ namespace TalkMe {
                     tm.SetDevice(m_Graphics.GetDevice());
                     for (auto& [user, si] : m_ScreenShare.activeStreams) {
                         if (!si.frameUpdated || si.lastFrameData.size() <= 1) continue;
+                        static int s_texLog = 0;
+                        if (s_texLog < 5) {
+                            std::fprintf(stderr, "[Render] Processing frame for '%s': %zu bytes, codec=%d\n",
+                                user.c_str(), si.lastFrameData.size(), si.lastFrameData[0]);
+                            std::fflush(stderr);
+                            s_texLog++;
+                        }
 
                         uint8_t codec = si.lastFrameData[0];
                         const uint8_t* payload = si.lastFrameData.data() + 1;
@@ -586,7 +593,13 @@ namespace TalkMe {
 
                         if (codec == 0) {
                             int fw = 0, fh = 0;
-                            tm.LoadFromMemory(texId, payload, payloadSize, &fw, &fh);
+                            auto* srv = tm.LoadFromMemory(texId, payload, payloadSize, &fw, &fh);
+                            static int s_jpegLog = 0;
+                            if (s_jpegLog < 5) {
+                                std::fprintf(stderr, "[Render] JPEG decode: %dx%d, texture=%p, payloadSize=%d\n", fw, fh, (void*)srv, payloadSize);
+                                std::fflush(stderr);
+                                s_jpegLog++;
+                            }
                             if (fw > 0 && fh > 0) { si.frameWidth = fw; si.frameHeight = fh; }
                         } else if (codec == 1) {
                             if (!m_H264Decoder.IsInitialized())
