@@ -196,6 +196,7 @@
     <ClInclude Include="src\network\ImageCache.h" />
     <ClInclude Include="src\ui\TextureManager.h" />
     <ClInclude Include="src\game\Chess.h" />
+    <ClInclude Include="src\game\FlappyBird.h" />
     <ClInclude Include="src\game\Racing.h" />
     <ClInclude Include="src\network\VoiceTransport.h" />
     <ClInclude Include="src\shared\PacketHandler.h" />
