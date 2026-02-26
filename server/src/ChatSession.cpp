@@ -539,6 +539,30 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Bot_Register) {
+                if (!j.contains("sid") || !j.contains("name")) return;
+                int sid = j["sid"];
+                if (!Database::Get().IsUserAdmin(sid, m_Username)) {
+                    SendPacket(PacketType::Admin_Action_Result, R"({"ok":false,"msg":"No permission"})");
+                    return;
+                }
+                std::string result = Database::Get().RegisterBot(sid, m_Username, j["name"]);
+                if (!result.empty()) SendPacket(PacketType::Bot_List_Response, result);
+                return;
+            }
+
+            if (m_Header.type == PacketType::Bot_Command) {
+                if (!j.contains("cid") || !j.contains("cmd")) return;
+                int cid = j["cid"];
+                json out;
+                out["u"] = m_Username;
+                out["cid"] = cid;
+                out["cmd"] = j["cmd"];
+                out["args"] = j.value("args", "");
+                m_Server.BroadcastToChannelMembers(cid, PacketType::Bot_Command, out.dump());
+                return;
+            }
+
             if (m_Header.type == PacketType::Admin_Move_User) {
                 if (!j.contains("sid") || !j.contains("u") || !j.contains("cid")) return;
                 int sid = j["sid"];

@@ -185,6 +185,12 @@ namespace TalkMe {
         Member_List_Request, // Client -> Server: request member list for a server
         Member_List_Response,// Server -> Client: list of members in a server with online status
 
+        // --- BOT API ---
+        Bot_Register,        // Client -> Server: register a bot (owner only)
+        Bot_Message,         // Server -> Bot / Bot -> Server: bot message relay
+        Bot_Command,         // Client -> Server: /command invoked in chat
+        Bot_List_Response,   // Server -> Client: list of bots in server
+
         // --- DIAGNOSTIC ---
         Echo_Request,
         Echo_Response
