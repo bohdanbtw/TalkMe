@@ -86,13 +86,21 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps) {
         return false;
     }
 
-    std::fprintf(stderr, "[H264Encoder] Found %u encoder(s), using first\n", count);
-    hr = ppActivates[0]->ActivateObject(__uuidof(IMFTransform), (void**)&m_Encoder);
+    std::fprintf(stderr, "[H264Encoder] Found %u encoder(s), trying each...\n", count);
+    for (UINT32 i = 0; i < count; i++) {
+        hr = ppActivates[i]->ActivateObject(__uuidof(IMFTransform), (void**)&m_Encoder);
+        if (SUCCEEDED(hr)) {
+            std::fprintf(stderr, "[H264Encoder] Encoder %u activated successfully\n", i);
+            break;
+        }
+        std::fprintf(stderr, "[H264Encoder] Encoder %u failed: 0x%08lx, trying next\n", i, hr);
+        m_Encoder = nullptr;
+    }
     for (UINT32 i = 0; i < count; i++) ppActivates[i]->Release();
     CoTaskMemFree(ppActivates);
 
-    if (FAILED(hr)) {
-        std::fprintf(stderr, "[H264Encoder] ActivateObject failed: 0x%08lx\n", hr);
+    if (!m_Encoder) {
+        std::fprintf(stderr, "[H264Encoder] All encoders failed\n");
         return false;
     }
 
