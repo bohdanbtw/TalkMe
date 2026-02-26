@@ -56,7 +56,26 @@ void ImageCache::RequestImage(const std::string& url) {
     }
 
     std::thread([this, url]() {
-        std::string data = HttpDownload(url);
+        std::string data;
+
+        // Handle data: URLs (base64 encoded)
+        if (url.find("data:image/") == 0) {
+            size_t commaPos = url.find(',');
+            if (commaPos != std::string::npos) {
+                std::string b64 = url.substr(commaPos + 1);
+                static const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                int val = 0, bits = -8;
+                for (char c : b64) {
+                    size_t p = chars.find(c);
+                    if (p == std::string::npos) continue;
+                    val = (val << 6) + (int)p;
+                    bits += 6;
+                    if (bits >= 0) { data += (char)((val >> bits) & 0xFF); bits -= 8; }
+                }
+            }
+        } else {
+            data = HttpDownload(url);
+        }
         CachedImage img;
         if (!data.empty()) {
             int w = 0, h = 0, ch = 0;

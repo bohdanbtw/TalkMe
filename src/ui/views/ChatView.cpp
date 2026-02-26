@@ -854,7 +854,7 @@ namespace TalkMe::UI::Views {
                         bool hasUrl = false;
                         while (pos < text.size()) {
                             size_t urlStart = std::string::npos;
-                            for (const char* prefix : {"https://", "http://"}) {
+                            for (const char* prefix : {"https://", "http://", "data:image/"}) {
                                 size_t f = text.find(prefix, pos);
                                 if (f != std::string::npos && (urlStart == std::string::npos || f < urlStart))
                                     urlStart = f;
@@ -911,10 +911,11 @@ namespace TalkMe::UI::Views {
                             for (const char* ext : {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
                                 if (lower.find(ext) != std::string::npos)
                                     isImage = true;
-                            // Also check for known image hosts
+                            // Also check for known image hosts and data URLs
                             if (lower.find("tenor.com") != std::string::npos || lower.find("giphy.com") != std::string::npos ||
                                 lower.find("imgur.com") != std::string::npos || lower.find("i.redd.it") != std::string::npos)
                                 isImage = true;
+                            if (lower.find("data:image/") == 0) isImage = true;
 
                             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.6f, 1.0f, 1.0f));
                             ImGui::TextWrapped("%s", url.c_str());
@@ -1176,43 +1177,54 @@ namespace TalkMe::UI::Views {
                 }
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Attach file or image");
                 if (ImGui::BeginPopup("AttachPopup")) {
-                    if (ImGui::Selectable("Upload Image/Video...")) {
-                        // Open Windows file dialog
+                    if (ImGui::Selectable("Upload Image...")) {
                         char filePath[MAX_PATH] = {};
                         OPENFILENAMEA ofn = {};
                         ofn.lStructSize = sizeof(ofn);
-                        ofn.lpstrFilter = "Images & Videos\0*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp;*.mp4;*.webm\0All Files\0*.*\0";
+                        ofn.lpstrFilter = "Images\0*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp\0All Files\0*.*\0";
                         ofn.lpstrFile = filePath;
                         ofn.nMaxFile = MAX_PATH;
                         ofn.Flags = OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
                         if (GetOpenFileNameA(&ofn) && strlen(filePath) > 0) {
-                            // Read file and send via File_Transfer_Request
                             FILE* fp = nullptr;
                             fopen_s(&fp, filePath, "rb");
                             if (fp) {
                                 fseek(fp, 0, SEEK_END);
                                 long sz = ftell(fp);
                                 fseek(fp, 0, SEEK_SET);
-                                if (sz > 0 && sz < 10 * 1024 * 1024) {
-                                    std::string filename = filePath;
-                                    size_t lastSlash = filename.find_last_of("\\/");
-                                    if (lastSlash != std::string::npos) filename = filename.substr(lastSlash + 1);
+                                if (sz > 0 && sz < 500 * 1024) {
+                                    std::vector<uint8_t> data(sz);
+                                    fread(data.data(), 1, sz, fp);
 
-                                    nlohmann::json req;
-                                    req["filename"] = filename;
-                                    req["size"] = sz;
-                                    netClient.Send(PacketType::File_Transfer_Request, req.dump());
+                                    // Detect MIME type from extension
+                                    std::string fname(filePath);
+                                    std::string mime = "image/png";
+                                    if (fname.find(".jpg") != std::string::npos || fname.find(".jpeg") != std::string::npos) mime = "image/jpeg";
+                                    else if (fname.find(".gif") != std::string::npos) mime = "image/gif";
+                                    else if (fname.find(".webp") != std::string::npos) mime = "image/webp";
+                                    else if (fname.find(".bmp") != std::string::npos) mime = "image/bmp";
 
-                                    // Read and send in chunks
-                                    std::vector<uint8_t> buf(65536);
-                                    while (!feof(fp)) {
-                                        size_t read = fread(buf.data(), 1, buf.size(), fp);
-                                        if (read > 0) {
-                                            std::vector<uint8_t> chunk(buf.begin(), buf.begin() + read);
-                                            netClient.SendRaw(PacketType::File_Transfer_Chunk, chunk);
-                                        }
+                                    // Base64 encode
+                                    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                                    std::string encoded;
+                                    encoded.reserve((sz + 2) / 3 * 4);
+                                    for (long i = 0; i < sz; i += 3) {
+                                        int n = (data[i] << 16) | (i + 1 < sz ? data[i + 1] << 8 : 0) | (i + 2 < sz ? data[i + 2] : 0);
+                                        encoded += b64[(n >> 18) & 63];
+                                        encoded += b64[(n >> 12) & 63];
+                                        encoded += (i + 1 < sz) ? b64[(n >> 6) & 63] : '=';
+                                        encoded += (i + 2 < sz) ? b64[n & 63] : '=';
                                     }
-                                    netClient.Send(PacketType::File_Transfer_Complete, "{}");
+
+                                    // Send as data URL message
+                                    std::string dataUrl = "data:" + mime + ";base64," + encoded;
+                                    nlohmann::json msgJ;
+                                    msgJ["cid"] = selectedChannelId;
+                                    msgJ["u"] = currentUser.username;
+                                    msgJ["msg"] = dataUrl;
+                                    netClient.Send(PacketType::Message_Text, msgJ.dump());
+                                } else if (sz >= 500 * 1024) {
+                                    // Too large — inform user
                                 }
                                 fclose(fp);
                             }
