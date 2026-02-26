@@ -21,7 +21,7 @@ void ScreenCapture::Stop() {
 }
 
 void ScreenCapture::CaptureLoop() {
-    int intervalMs = 1000 / std::max(1, m_Settings.fps);
+    int intervalMs = 1000 / (std::max)(1, m_Settings.fps);
     while (m_Running.load()) {
         auto start = std::chrono::steady_clock::now();
 
@@ -51,7 +51,7 @@ std::vector<uint8_t> ScreenCapture::CaptureFrame(int& outWidth, int& outHeight) 
     if (screenW > m_Settings.maxWidth || screenH > m_Settings.maxHeight) {
         float sx = (float)m_Settings.maxWidth / screenW;
         float sy = (float)m_Settings.maxHeight / screenH;
-        scale = std::min(sx, sy);
+        scale = (std::min)(sx, sy);
     }
 
     outWidth = (int)(screenW * scale);
