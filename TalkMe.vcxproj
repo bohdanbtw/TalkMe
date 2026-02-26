@@ -155,6 +155,7 @@
     <ClCompile Include="src\screen\H264Encoder.cpp" />
     <ClCompile Include="src\screen\AudioLoopback.cpp" />
     <ClCompile Include="src\network\TenorAPI.cpp" />
+    <ClCompile Include="src\network\ImageCache.cpp" />
     <ClCompile Include="src\ui\TextureManager.cpp" />
     <ClCompile Include="src\network\VoiceTransport.cpp" />
     <ClCompile Include="src\ui\views\ChatView.cpp" />
@@ -192,6 +193,7 @@
     <ClInclude Include="src\screen\H264Encoder.h" />
     <ClInclude Include="src\screen\AudioLoopback.h" />
     <ClInclude Include="src\network\TenorAPI.h" />
+    <ClInclude Include="src\network\ImageCache.h" />
     <ClInclude Include="src\ui\TextureManager.h" />
     <ClInclude Include="src\game\Chess.h" />
     <ClInclude Include="src\game\Racing.h" />
