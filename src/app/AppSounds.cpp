@@ -60,6 +60,7 @@ std::vector<uint8_t> BuildWavSoft(float freq, int durationMs, float volume) {
 void AppSounds::Generate() {
     m_JoinSound = BuildWavSoft(260.0f, 45, 0.055f);
     m_LeaveSound = BuildWavSoft(240.0f, 40, 0.05f);
+    m_MessageSound = BuildWavSoft(440.0f, 30, 0.04f);
 }
 
 void AppSounds::PlayJoin() const {
@@ -70,6 +71,11 @@ void AppSounds::PlayJoin() const {
 void AppSounds::PlayLeave() const {
     if (!m_LeaveSound.empty())
         PlaySoundA((LPCSTR)m_LeaveSound.data(), NULL, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
+}
+
+void AppSounds::PlayMessage() const {
+    if (!m_MessageSound.empty())
+        PlaySoundA((LPCSTR)m_MessageSound.data(), NULL, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
 }
 
 } // namespace TalkMe

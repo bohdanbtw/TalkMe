@@ -403,6 +403,8 @@ void Application::ProcessNetworkMessages() {
                                        j.value("u", "??"), j.value("msg", ""),
                                        GetCurrentTimeStr(),
                                        j.value("reply_to", 0) });
+                if (j.value("u", "") != m_CurrentUser.username && GetForegroundWindow() != m_Window.GetHwnd())
+                    m_Sounds.PlayMessage();
                 continue;
             }
         }

@@ -14,10 +14,12 @@ public:
 
     void PlayJoin() const;
     void PlayLeave() const;
+    void PlayMessage() const;
 
 private:
     std::vector<uint8_t> m_JoinSound;
     std::vector<uint8_t> m_LeaveSound;
+    std::vector<uint8_t> m_MessageSound;
 };
 
 } // namespace TalkMe
