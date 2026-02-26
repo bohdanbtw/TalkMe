@@ -907,9 +907,14 @@ namespace TalkMe::UI::Views {
                             bool isImage = false;
                             std::string lower = url;
                             for (auto& c : lower) c = (char)std::tolower((unsigned char)c);
+                            // Check if URL contains image extension (handles query params like ?w=300)
                             for (const char* ext : {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
-                                if (lower.size() > strlen(ext) && lower.compare(lower.size() - strlen(ext), strlen(ext), ext) == 0)
+                                if (lower.find(ext) != std::string::npos)
                                     isImage = true;
+                            // Also check for known image hosts
+                            if (lower.find("tenor.com") != std::string::npos || lower.find("giphy.com") != std::string::npos ||
+                                lower.find("imgur.com") != std::string::npos || lower.find("i.redd.it") != std::string::npos)
+                                isImage = true;
 
                             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.6f, 1.0f, 1.0f));
                             ImGui::TextWrapped("%s", url.c_str());
