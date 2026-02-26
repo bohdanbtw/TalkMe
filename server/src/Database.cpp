@@ -154,6 +154,8 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS roles (id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER, name TEXT, permissions INTEGER DEFAULT 0, color TEXT DEFAULT '#FFFFFF', position INTEGER DEFAULT 0);", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS user_roles (username TEXT, role_id INTEGER, PRIMARY KEY(username, role_id));", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS bots (id TEXT PRIMARY KEY, owner TEXT, name TEXT, token TEXT UNIQUE, server_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);", 0, 0, 0);
+        sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS blocked_users (blocker TEXT, blocked TEXT, PRIMARY KEY(blocker, blocked));", 0, 0, 0);
+        sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER, actor TEXT, action TEXT, target TEXT, details TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);", 0, 0, 0);
 
         sqlite3_stmt* countStmt = nullptr;
         if (sqlite3_prepare_v2(m_Db, "SELECT COUNT(*) FROM servers;", -1, &countStmt, 0) == SQLITE_OK &&
@@ -705,6 +707,78 @@ namespace TalkMe {
             sqlite3_finalize(stmt);
         }
         return users;
+    }
+
+    bool Database::BlockUser(const std::string& blocker, const std::string& blocked) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool ok = false;
+        if (sqlite3_prepare_v2(m_Db, "INSERT OR IGNORE INTO blocked_users (blocker, blocked) VALUES (?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, blocker.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, blocked.c_str(), -1, SQLITE_TRANSIENT);
+            ok = (sqlite3_step(stmt) == SQLITE_DONE);
+            sqlite3_finalize(stmt);
+        }
+        return ok;
+    }
+
+    bool Database::UnblockUser(const std::string& blocker, const std::string& blocked) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "DELETE FROM blocked_users WHERE blocker = ? AND blocked = ?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, blocker.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, blocked.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+        return true;
+    }
+
+    bool Database::IsBlocked(const std::string& blocker, const std::string& blocked) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        bool result = false;
+        if (sqlite3_prepare_v2(m_Db, "SELECT 1 FROM blocked_users WHERE blocker = ? AND blocked = ?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, blocker.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, blocked.c_str(), -1, SQLITE_TRANSIENT);
+            result = (sqlite3_step(stmt) == SQLITE_ROW);
+            sqlite3_finalize(stmt);
+        }
+        return result;
+    }
+
+    void Database::AddAuditLog(int serverId, const std::string& actor, const std::string& action, const std::string& target, const std::string& details) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "INSERT INTO audit_log (server_id, actor, action, target, details) VALUES (?, ?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            sqlite3_bind_text(stmt, 2, actor.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, action.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 4, target.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 5, details.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    std::string Database::GetAuditLogJSON(int serverId, int limit) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        json j = json::array();
+        sqlite3_stmt* stmt = nullptr;
+        std::string query = "SELECT actor, action, target, details, created_at FROM audit_log WHERE server_id = ? ORDER BY id DESC LIMIT " + std::to_string(limit) + ";";
+        if (sqlite3_prepare_v2(m_Db, query.c_str(), -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* a = (const char*)sqlite3_column_text(stmt, 0);
+                const char* act = (const char*)sqlite3_column_text(stmt, 1);
+                const char* t = (const char*)sqlite3_column_text(stmt, 2);
+                const char* d = (const char*)sqlite3_column_text(stmt, 3);
+                const char* ts = (const char*)sqlite3_column_text(stmt, 4);
+                j.push_back({ {"actor", a?a:""}, {"action", act?act:""}, {"target", t?t:""}, {"details", d?d:""}, {"time", ts?ts:""} });
+            }
+            sqlite3_finalize(stmt);
+        }
+        return j.dump();
     }
 
     bool Database::SetAvatar(const std::string& username, const std::string& avatarBase64) {

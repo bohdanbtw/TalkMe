@@ -51,6 +51,12 @@ namespace TalkMe {
         std::vector<std::string> GetServerMembers(int serverId);
         bool DeleteChannel(int channelId, const std::string& username);
 
+        bool BlockUser(const std::string& blocker, const std::string& blocked);
+        bool UnblockUser(const std::string& blocker, const std::string& blocked);
+        bool IsBlocked(const std::string& blocker, const std::string& blocked);
+        void AddAuditLog(int serverId, const std::string& actor, const std::string& action, const std::string& target, const std::string& details);
+        std::string GetAuditLogJSON(int serverId, int limit = 50);
+
         bool SetAvatar(const std::string& username, const std::string& avatarBase64);
         std::string GetAvatar(const std::string& username);
 

@@ -169,6 +169,8 @@ namespace TalkMe {
 
         bool m_CompactMode = false;
         float m_FontScale = 1.0f;
+        std::unordered_set<std::string> m_BlockedUsers;
+        bool m_IsInvisible = false;
 
         struct ChessGameState {
             bool active = false;

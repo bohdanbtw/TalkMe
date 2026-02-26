@@ -725,6 +725,31 @@ namespace TalkMe {
                 return;
             }
 
+            if (m_Header.type == PacketType::Block_User) {
+                std::string target = j.value("u", "");
+                if (!target.empty()) Database::Get().BlockUser(m_Username, target);
+                SendPacket(PacketType::Admin_Action_Result, R"({"ok":true,"msg":"User blocked"})");
+                return;
+            }
+
+            if (m_Header.type == PacketType::Unblock_User) {
+                std::string target = j.value("u", "");
+                if (!target.empty()) Database::Get().UnblockUser(m_Username, target);
+                SendPacket(PacketType::Admin_Action_Result, R"({"ok":true,"msg":"User unblocked"})");
+                return;
+            }
+
+            if (m_Header.type == PacketType::Audit_Log_Request) {
+                if (!j.contains("sid")) return;
+                int sid = j["sid"];
+                if (!Database::Get().IsUserAdmin(sid, m_Username)) {
+                    SendPacket(PacketType::Admin_Action_Result, R"({"ok":false,"msg":"No permission"})");
+                    return;
+                }
+                SendPacket(PacketType::Audit_Log_Response, Database::Get().GetAuditLogJSON(sid));
+                return;
+            }
+
             if (m_Header.type == PacketType::Set_Avatar) {
                 std::string avatarData = j.value("data", "");
                 if (avatarData.size() > 500000) return; // 500KB max base64
@@ -781,6 +806,7 @@ namespace TalkMe {
                 std::shared_lock lock(m_Server.GetRoomMutex());
                 for (const auto& s : m_Server.GetAllSessions())
                     if (s->GetUsername() == target) s->SendShared(buf, false);
+                Database::Get().AddAuditLog(sid, m_Username, "move_user", target, "Moved to channel " + std::to_string(newCid));
                 SendPacket(PacketType::Admin_Action_Result, R"({"ok":true,"msg":"User moved"})");
                 return;
             }

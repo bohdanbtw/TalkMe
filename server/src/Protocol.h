@@ -204,6 +204,13 @@ namespace TalkMe {
         // --- PAGINATION ---
         Message_History_Page,// Client -> Server: request older messages (before_id)
 
+        // --- SOCIAL ---
+        Block_User,          // Client -> Server: block a user
+        Unblock_User,        // Client -> Server: unblock a user
+        Set_Invisible,       // Client -> Server: set invisible mode on/off
+        Audit_Log_Request,   // Client -> Server: request audit log
+        Audit_Log_Response,  // Server -> Client: audit log entries
+
         // --- POLLS ---
         Poll_Create,         // Client -> Server: create a poll in channel
         Poll_Vote,           // Client -> Server: vote on a poll option
