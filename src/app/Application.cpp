@@ -315,7 +315,8 @@ namespace TalkMe {
             for (const auto& [uid, gain] : m_UserVolumes)
                 m_AudioEngine.SetUserGain(uid, gain);
         }
-        catch (...) {}
+        catch (const std::exception& e) { LOG_ERROR(std::string("LoadUserVolumes: ") + e.what()); }
+        catch (...) { LOG_ERROR("LoadUserVolumes: unknown exception"); }
     }
     m_Sounds.Generate();
     m_Overlay.Create(GetModuleHandle(nullptr));
@@ -1063,7 +1064,7 @@ namespace TalkMe {
                 if (hp != std::string::npos) oppDisp = oppDisp.substr(0, hp);
                 ImGui::Text("Lap %d/%d  |  Time: %.1fs  |  Speed: %.0f",
                     m_Racing.player.lap, RacingGame::kTotalLaps, m_Racing.raceTime,
-                    std::abs(m_Racing.player.speed) * 50.0f);
+                    (std::abs)(m_Racing.player.speed) * 50.0f);
 
                 ImDrawList* dl = ImGui::GetWindowDrawList();
                 ImVec2 origin = ImGui::GetCursorScreenPos();

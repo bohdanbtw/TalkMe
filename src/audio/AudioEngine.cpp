@@ -367,7 +367,7 @@ namespace TalkMe {
                 const int lostSnap = m_Internal->intervalPacketsLost.exchange(0, std::memory_order_relaxed);
                 const int expected = rxSnap + lostSnap;
                 rr.fractionLost = (expected > 0)
-                    ? static_cast<uint8_t>(std::min(
+                    ? static_cast<uint8_t>((std::min)(
                         (static_cast<float>(lostSnap) / static_cast<float>(expected)) * 256.0f,
                         255.0f))
                     : 0;
@@ -443,12 +443,12 @@ namespace TalkMe {
                 const double actualDeltaMs = static_cast<double>(
                     std::chrono::duration_cast<std::chrono::milliseconds>(
                         now - itTime->second).count());
-                const double transitDiff = std::abs(actualDeltaMs - expectedDeltaMs);
+                const double transitDiff = (std::abs)(actualDeltaMs - expectedDeltaMs);
                 if (transitDiff <= 200.0) {
                     std::lock_guard<std::mutex> lock(m_Internal->m_TelemetryMutex);
                     if (transitDiff > m_Internal->avgJitterMs)
                         m_Internal->maxJitterSpikeMs =
-                        std::max(m_Internal->maxJitterSpikeMs, transitDiff);
+                        (std::max)(m_Internal->maxJitterSpikeMs, transitDiff);
                     m_Internal->avgJitterMs =
                         m_Internal->avgJitterMs * 0.9375 + transitDiff * 0.0625;
                     m_Internal->currentLatencyMs = actualDeltaMs;
@@ -728,6 +728,10 @@ namespace TalkMe {
         if (m_Internal->deviceStarted)
             ma_device_uninit(&m_Internal->device);
         ma_pcm_rb_uninit(&m_Internal->captureRb);
+        if (m_Internal->systemAudioRbInit) {
+            ma_pcm_rb_uninit(&m_Internal->systemAudioRb);
+            m_Internal->systemAudioRbInit = false;
+        }
         {
             std::lock_guard<std::mutex> lk(m_Internal->m_TracksMutex);
             for (auto& tp : m_Internal->tracks) {
@@ -782,7 +786,7 @@ namespace TalkMe {
         if (targetMs > m_Internal->adaptiveBufferLevel) {
             m_Internal->adaptiveBufferLevel = targetMs;
         } else {
-            m_Internal->adaptiveBufferLevel = std::max(targetMs, m_Internal->adaptiveBufferLevel - 2);
+            m_Internal->adaptiveBufferLevel = (std::max)(targetMs, m_Internal->adaptiveBufferLevel - 2);
         }
         if (m_Internal->encoder) {
             const float loss = static_cast<float>(m_Internal->packetLossPercentage);

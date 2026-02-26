@@ -477,24 +477,27 @@ namespace TalkMe {
             sqlite3_step(stmt);
             int serverId = static_cast<int>(sqlite3_last_insert_rowid(m_Db));
             sqlite3_finalize(stmt);
-            sqlite3_prepare_v2(m_Db, "INSERT INTO server_members (username, server_id) VALUES (?, ?);", -1, &stmt, 0);
-            sqlite3_bind_text(stmt, 1, owner.c_str(), -1, SQLITE_STATIC);
-            sqlite3_bind_int(stmt, 2, serverId);
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
+            if (sqlite3_prepare_v2(m_Db, "INSERT INTO server_members (username, server_id) VALUES (?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+                sqlite3_bind_text(stmt, 1, owner.c_str(), -1, SQLITE_STATIC);
+                sqlite3_bind_int(stmt, 2, serverId);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
             const char* sql = "INSERT INTO channels (server_id, name, type) VALUES (?, ?, ?);";
-            sqlite3_prepare_v2(m_Db, sql, -1, &stmt, 0);
-            sqlite3_bind_int(stmt, 1, serverId);
-            sqlite3_bind_text(stmt, 2, "general", -1, SQLITE_STATIC);
-            sqlite3_bind_text(stmt, 3, "text", -1, SQLITE_STATIC);
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
-            sqlite3_prepare_v2(m_Db, sql, -1, &stmt, 0);
-            sqlite3_bind_int(stmt, 1, serverId);
-            sqlite3_bind_text(stmt, 2, "General", -1, SQLITE_STATIC);
-            sqlite3_bind_text(stmt, 3, "voice", -1, SQLITE_STATIC);
-            sqlite3_step(stmt);
-            sqlite3_finalize(stmt);
+            if (sqlite3_prepare_v2(m_Db, sql, -1, &stmt, 0) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, serverId);
+                sqlite3_bind_text(stmt, 2, "general", -1, SQLITE_STATIC);
+                sqlite3_bind_text(stmt, 3, "text", -1, SQLITE_STATIC);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+            if (sqlite3_prepare_v2(m_Db, sql, -1, &stmt, 0) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, serverId);
+                sqlite3_bind_text(stmt, 2, "General", -1, SQLITE_STATIC);
+                sqlite3_bind_text(stmt, 3, "voice", -1, SQLITE_STATIC);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
         }
     }
 

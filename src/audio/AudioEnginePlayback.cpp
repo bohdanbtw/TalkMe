@@ -37,7 +37,7 @@ namespace TalkMe {
                 if (tr->isBuffering) {
                     int maxJitter = internal->maxJitterSpikeMsAtomic.load(
                         std::memory_order_relaxed);
-                    int recoveryMs = std::max(40, std::min(maxJitter + 20, targetMs));
+                    int recoveryMs = (std::max)(40, (std::min)(maxJitter + 20, targetMs));
                     int thresholdMs = tr->coldStart ? targetMs : recoveryMs;
 
                     ma_uint32 requiredFrames = std::clamp(
@@ -82,7 +82,7 @@ namespace TalkMe {
                     tr->isBuffering = true;
                     tr->coldStart = false;
                     internal->adaptiveBufferLevel =
-                        std::min(internal->adaptiveBufferLevel + 20, internal->maxBufferMs);
+                        (std::min)(internal->adaptiveBufferLevel + 20, internal->maxBufferMs);
                     continue;
                 }
 
@@ -110,7 +110,7 @@ namespace TalkMe {
                 static_cast<int>(frameCount));
             internal->targetGain =
                 (mixRMS > 0.001f)
-                ? std::min(0.5f / (mixRMS * std::sqrt(static_cast<float>(activeCount))), 1.0f)
+                ? (std::min)(0.5f / (mixRMS * std::sqrt(static_cast<float>(activeCount))), 1.0f)
                 : 1.0f;
             internal->currentGain =
                 internal->currentGain * 0.95f + internal->targetGain * 0.05f;

@@ -33,7 +33,7 @@ void NativeAudioProcessor::Process(float* pcm, int samples, bool enableGate, boo
 
     if (enableGate) {
         for (int i = 0; i < samples; ++i) {
-            float absSample = std::abs(pcm[i]);
+            float absSample = (std::abs)(pcm[i]);
             m_envelope = (absSample > m_envelope)
                 ? m_envelope * 0.8f + absSample * 0.2f
                 : m_envelope * 0.999f + absSample * 0.001f;
