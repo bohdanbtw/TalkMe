@@ -439,7 +439,8 @@ namespace TalkMe {
                     if (m_ActiveVoiceChannelId != -1) m_ActiveVoiceChannelId = -1;
                     m_UserMuteStates.clear();
                     if (m_ScreenShare.iAmSharing) { m_DXGICapture.Stop(); m_ScreenShare.iAmSharing = false; }
-                    m_ScreenShare.someoneSharing = false;
+                    m_ScreenShare.activeStreams.clear();
+                    m_ScreenShare.viewingStream.clear();
                 }
 
                 // Remove self from voice members when leaving
@@ -571,36 +572,34 @@ namespace TalkMe {
 
                 UpdateOverlay();
 
-                // Update screen share texture from incoming frames (JPEG or H.264)
-                if (m_ScreenShare.frameUpdated && m_ScreenShare.lastFrameData.size() > 1) {
+                // Update screen share textures from active streams
+                {
                     auto& tm = TalkMe::TextureManager::Get();
                     tm.SetDevice(m_Graphics.GetDevice());
+                    for (auto& [user, si] : m_ScreenShare.activeStreams) {
+                        if (!si.frameUpdated || si.lastFrameData.size() <= 1) continue;
 
-                    uint8_t codec = m_ScreenShare.lastFrameData[0];
-                    const uint8_t* payload = m_ScreenShare.lastFrameData.data() + 1;
-                    int payloadSize = (int)m_ScreenShare.lastFrameData.size() - 1;
+                        uint8_t codec = si.lastFrameData[0];
+                        const uint8_t* payload = si.lastFrameData.data() + 1;
+                        int payloadSize = (int)si.lastFrameData.size() - 1;
+                        std::string texId = "screenshare_" + user;
 
-                    if (codec == 0) {
-                        // JPEG
-                        int fw = 0, fh = 0;
-                        tm.LoadFromMemory("screenshare", payload, payloadSize, &fw, &fh);
-                        if (fw > 0 && fh > 0) {
-                            m_ScreenShare.frameWidth = fw;
-                            m_ScreenShare.frameHeight = fh;
+                        if (codec == 0) {
+                            int fw = 0, fh = 0;
+                            tm.LoadFromMemory(texId, payload, payloadSize, &fw, &fh);
+                            if (fw > 0 && fh > 0) { si.frameWidth = fw; si.frameHeight = fh; }
+                        } else if (codec == 1) {
+                            if (!m_H264Decoder.IsInitialized())
+                                m_H264Decoder.Initialize(1920, 1080);
+                            std::vector<uint8_t> rgba;
+                            int fw = 0, fh = 0;
+                            if (m_H264Decoder.Decode(payload, payloadSize, rgba, fw, fh) && !rgba.empty()) {
+                                tm.LoadFromRGBA(texId, rgba.data(), fw, fh);
+                                si.frameWidth = fw; si.frameHeight = fh;
+                            }
                         }
-                    } else if (codec == 1) {
-                        // H.264
-                        if (!m_H264Decoder.IsInitialized())
-                            m_H264Decoder.Initialize(1920, 1080);
-                        std::vector<uint8_t> rgba;
-                        int fw = 0, fh = 0;
-                        if (m_H264Decoder.Decode(payload, payloadSize, rgba, fw, fh) && !rgba.empty()) {
-                            tm.LoadFromRGBA("screenshare", rgba.data(), fw, fh);
-                            m_ScreenShare.frameWidth = fw;
-                            m_ScreenShare.frameHeight = fh;
-                        }
+                        si.frameUpdated = false;
                     }
-                    m_ScreenShare.frameUpdated = false;
                 }
 
                 // Drain messages again so we never call Present() after user closed the window
@@ -1631,10 +1630,12 @@ namespace TalkMe {
                         dxSettings.quality = quality;
                         m_DXGICapture.Start(dxSettings, [this](const std::vector<uint8_t>& data, int w, int h, bool isKey) {
                             m_NetClient.SendRaw(PacketType::Screen_Share_Frame, data);
-                            m_ScreenShare.lastFrameData = data;
-                            m_ScreenShare.frameWidth = w;
-                            m_ScreenShare.frameHeight = h;
-                            m_ScreenShare.frameUpdated = true;
+                            auto& si = m_ScreenShare.activeStreams[m_CurrentUser.username];
+                            si.username = m_CurrentUser.username;
+                            si.lastFrameData = data;
+                            si.frameWidth = w;
+                            si.frameHeight = h;
+                            si.frameUpdated = true;
                         });
                         nlohmann::json sj;
                         sj["width"] = 1920; sj["height"] = 1080; sj["fps"] = fps;
@@ -1648,10 +1649,35 @@ namespace TalkMe {
                         m_NetClient.Send(PacketType::Screen_Share_Stop, "{}");
                     },
                     m_ScreenShare.iAmSharing,
-                    m_ScreenShare.someoneSharing,
-                    (void*)TalkMe::TextureManager::Get().GetTexture("screenshare"),
-                    m_ScreenShare.frameWidth,
-                    m_ScreenShare.frameHeight);
+                    !m_ScreenShare.activeStreams.empty(),
+                    [this]() -> void* {
+                        std::string key = m_ScreenShare.viewingStream;
+                        if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
+                        if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
+                        return key.empty() ? nullptr : (void*)TalkMe::TextureManager::Get().GetTexture("screenshare_" + key);
+                    }(),
+                    [this]() -> int {
+                        std::string key = m_ScreenShare.viewingStream;
+                        if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
+                        if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
+                        auto it = m_ScreenShare.activeStreams.find(key);
+                        return (it != m_ScreenShare.activeStreams.end()) ? it->second.frameWidth : 0;
+                    }(),
+                    [this]() -> int {
+                        std::string key = m_ScreenShare.viewingStream;
+                        if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
+                        if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
+                        auto it = m_ScreenShare.activeStreams.find(key);
+                        return (it != m_ScreenShare.activeStreams.end()) ? it->second.frameHeight : 0;
+                    }(),
+                    [this]() -> const std::vector<std::string>* {
+                        static std::vector<std::string> streamers;
+                        streamers.clear();
+                        for (const auto& [user, _] : m_ScreenShare.activeStreams) streamers.push_back(user);
+                        return streamers.empty() ? nullptr : &streamers;
+                    }(),
+                    &m_ScreenShare.viewingStream,
+                    &m_ScreenShare.maximized);
             }
         }
     }
