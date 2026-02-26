@@ -437,6 +437,8 @@ namespace TalkMe {
                     if (!m_VoiceMembers.empty()) m_VoiceMembers.clear();
                     if (m_ActiveVoiceChannelId != -1) m_ActiveVoiceChannelId = -1;
                     m_UserMuteStates.clear();
+                    if (m_ScreenShare.iAmSharing) { m_ScreenCapture.Stop(); m_ScreenShare.iAmSharing = false; }
+                    m_ScreenShare.someoneSharing = false;
                 }
 
                 // Remove self from voice members when leaving
@@ -1581,7 +1583,29 @@ namespace TalkMe {
                         return members.empty() ? nullptr : &members;
                     }(),
                     &m_ShowMemberList,
-                    m_SearchBuf, &m_ShowSearch);
+                    m_SearchBuf, &m_ShowSearch,
+                    [this](int fps, int quality) {
+                        m_ScreenShare.iAmSharing = true;
+                        m_ScreenShare.fps = fps;
+                        m_ScreenShare.quality = quality;
+                        CaptureSettings cs;
+                        cs.fps = fps;
+                        cs.quality = quality;
+                        m_ScreenCapture.Start(cs, [this](const std::vector<uint8_t>& bmpData, int w, int h) {
+                            m_NetClient.SendRaw(PacketType::Screen_Share_Frame, bmpData);
+                        });
+                        nlohmann::json sj;
+                        sj["width"] = 1920; sj["height"] = 1080; sj["fps"] = fps;
+                        m_NetClient.Send(PacketType::Screen_Share_Start, sj.dump());
+                    },
+                    [this]() {
+                        m_ScreenCapture.Stop();
+                        m_ScreenShare.iAmSharing = false;
+                        m_NetClient.Send(PacketType::Screen_Share_Stop, "{}");
+                    },
+                    m_ScreenShare.iAmSharing,
+                    m_ScreenShare.someoneSharing,
+                    nullptr, 0, 0);
             }
         }
     }
