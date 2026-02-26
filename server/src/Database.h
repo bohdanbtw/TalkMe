@@ -51,6 +51,9 @@ namespace TalkMe {
         std::vector<std::string> GetServerMembers(int serverId);
         bool DeleteChannel(int channelId, const std::string& username);
 
+        std::string RegisterBot(int serverId, const std::string& owner, const std::string& botName);
+        std::string GetServerBotsJSON(int serverId);
+
         bool AddSanction(int serverId, const std::string& username, const std::string& type, const std::string& reason, int durationMinutes, const std::string& createdBy);
         bool IsUserSanctioned(int serverId, const std::string& username, const std::string& type);
         bool RemoveSanction(int serverId, const std::string& username, const std::string& type);

@@ -591,15 +591,27 @@ namespace TalkMe::UI::Views {
                 ImGui::SameLine();
                 if (UI::AccentButton("Send", ImVec2(68, 32)) || enter) {
                     if (strlen(chatInputBuf) > 0) {
-                        nlohmann::json msgJ;
-                        msgJ["cid"] = selectedChannelId;
-                        msgJ["u"] = currentUser.username;
-                        msgJ["msg"] = std::string(chatInputBuf);
-                        if (replyingToMessageId && *replyingToMessageId > 0) {
-                            msgJ["reply_to"] = *replyingToMessageId;
-                            *replyingToMessageId = 0;
+                        std::string input(chatInputBuf);
+                        if (input.size() > 1 && input[0] == '/') {
+                            size_t spacePos = input.find(' ');
+                            std::string cmd = (spacePos != std::string::npos) ? input.substr(1, spacePos - 1) : input.substr(1);
+                            std::string args = (spacePos != std::string::npos) ? input.substr(spacePos + 1) : "";
+                            nlohmann::json cmdJ;
+                            cmdJ["cid"] = selectedChannelId;
+                            cmdJ["cmd"] = cmd;
+                            cmdJ["args"] = args;
+                            netClient.Send(PacketType::Bot_Command, cmdJ.dump());
+                        } else {
+                            nlohmann::json msgJ;
+                            msgJ["cid"] = selectedChannelId;
+                            msgJ["u"] = currentUser.username;
+                            msgJ["msg"] = input;
+                            if (replyingToMessageId && *replyingToMessageId > 0) {
+                                msgJ["reply_to"] = *replyingToMessageId;
+                                *replyingToMessageId = 0;
+                            }
+                            netClient.Send(PacketType::Message_Text, msgJ.dump());
                         }
-                        netClient.Send(PacketType::Message_Text, msgJ.dump());
                         memset(chatInputBuf, 0, 1024);
                         ImGui::SetKeyboardFocusHere(-1);
                     }

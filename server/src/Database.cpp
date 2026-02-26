@@ -699,6 +699,46 @@ namespace TalkMe {
         return users;
     }
 
+    std::string Database::RegisterBot(int serverId, const std::string& owner, const std::string& botName) {
+        std::unique_lock<std::shared_mutex> lock(m_RwMutex);
+        std::string botId = "bot_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+        std::default_random_engine rng(std::random_device{}());
+        std::uniform_int_distribution<> dist(0, 35);
+        const char charset[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+        std::string token;
+        for (int i = 0; i < 32; i++) token += charset[dist(rng)];
+
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "INSERT INTO bots (id, owner, name, token, server_id) VALUES (?, ?, ?, ?, ?);", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, botId.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 2, owner.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 3, botName.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(stmt, 4, token.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 5, serverId);
+            if (sqlite3_step(stmt) != SQLITE_DONE) { sqlite3_finalize(stmt); return ""; }
+            sqlite3_finalize(stmt);
+        }
+        json res; res["bot_id"] = botId; res["token"] = token; res["name"] = botName;
+        return res.dump();
+    }
+
+    std::string Database::GetServerBotsJSON(int serverId) {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        json j = json::array();
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "SELECT id, name, owner FROM bots WHERE server_id=?;", -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, serverId);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char* id = (const char*)sqlite3_column_text(stmt, 0);
+                const char* n = (const char*)sqlite3_column_text(stmt, 1);
+                const char* o = (const char*)sqlite3_column_text(stmt, 2);
+                j.push_back({ {"id", id ? id : ""}, {"name", n ? n : ""}, {"owner", o ? o : ""} });
+            }
+            sqlite3_finalize(stmt);
+        }
+        return j.dump();
+    }
+
     bool Database::AddSanction(int serverId, const std::string& username, const std::string& type, const std::string& reason, int durationMinutes, const std::string& createdBy) {
         std::unique_lock<std::shared_mutex> lock(m_RwMutex);
         sqlite3_stmt* stmt = nullptr;
