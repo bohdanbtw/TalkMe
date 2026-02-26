@@ -61,6 +61,7 @@ void AppSounds::Generate() {
     m_JoinSound = BuildWavSoft(260.0f, 45, 0.055f);
     m_LeaveSound = BuildWavSoft(240.0f, 40, 0.05f);
     m_MessageSound = BuildWavSoft(440.0f, 30, 0.04f);
+    m_MentionSound = BuildWavSoft(660.0f, 80, 0.1f);
 }
 
 void AppSounds::PlayJoin() const {
@@ -76,6 +77,11 @@ void AppSounds::PlayLeave() const {
 void AppSounds::PlayMessage() const {
     if (!m_MessageSound.empty())
         PlaySoundA((LPCSTR)m_MessageSound.data(), NULL, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
+}
+
+void AppSounds::PlayMention() const {
+    if (!m_MentionSound.empty())
+        PlaySoundA((LPCSTR)m_MentionSound.data(), NULL, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
 }
 
 } // namespace TalkMe

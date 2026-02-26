@@ -150,6 +150,13 @@ namespace TalkMe {
         TenorAPI m_TenorAPI;
         char m_StatusBuf[128] = "";
 
+        struct NotificationSettings {
+            float volume = 0.8f;
+            bool muteMentions = false;
+            bool muteMessages = false;
+            bool muteJoinLeave = false;
+        } m_NotifSettings;
+
         std::unordered_map<std::string, std::string> m_AvatarCache; // username -> base64 data
         std::unordered_set<std::string> m_AvatarRequested;
 

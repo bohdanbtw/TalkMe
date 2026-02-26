@@ -617,15 +617,36 @@ void Application::ProcessNetworkMessages() {
 
             if (msg.type == PacketType::Message_Text) {
                 int incomingCid = j.value("cid", 0);
+                std::string msgContent = j.value("msg", "");
                 m_Messages.push_back({ j.value("mid", 0), incomingCid,
-                                       j.value("u", "??"), j.value("msg", ""),
+                                       j.value("u", "??"), msgContent,
                                        GetCurrentTimeStr(),
                                        j.value("reply_to", 0) });
                 if (j.value("u", "") != m_CurrentUser.username) {
                     if (incomingCid != m_SelectedChannelId)
                         m_UnreadCounts[incomingCid]++;
-                    if (GetForegroundWindow() != m_Window.GetHwnd())
+
+                    // Check for mentions (@username#tag or @all)
+                    bool isMentioned = false;
+                    if (msgContent.find("@all") != std::string::npos)
+                        isMentioned = true;
+                    if (!isMentioned && msgContent.find("@" + m_CurrentUser.username) != std::string::npos)
+                        isMentioned = true;
+                    if (!isMentioned) {
+                        // Also check without #tag
+                        size_t hashPos = m_CurrentUser.username.find('#');
+                        if (hashPos != std::string::npos) {
+                            std::string shortName = m_CurrentUser.username.substr(0, hashPos);
+                            if (msgContent.find("@" + shortName) != std::string::npos)
+                                isMentioned = true;
+                        }
+                    }
+
+                    if (isMentioned && !m_NotifSettings.muteMentions) {
+                        m_Sounds.PlayMention();
+                    } else if (!m_NotifSettings.muteMessages && GetForegroundWindow() != m_Window.GetHwnd()) {
                         m_Sounds.PlayMessage();
+                    }
                 }
                 continue;
             }
