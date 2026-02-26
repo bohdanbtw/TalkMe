@@ -8,7 +8,7 @@
 
 namespace TalkMe::UI::Views {
 
-    struct UserVoiceState { bool muted = false; bool deafened = false; };
+    using UserVoiceState = Application::UserVoiceState;
 
     void RenderChannelView(
         NetworkClient& netClient,

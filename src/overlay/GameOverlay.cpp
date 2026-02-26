@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "GameOverlay.h"
 #include <objidl.h>
 #include <gdiplus.h>
@@ -252,13 +255,13 @@ namespace TalkMe {
                 float iconX = w - (float)m_Padding - 32.0f;
                 if (m.isDeafened) {
                     Gdiplus::SolidBrush redBrush(Gdiplus::Color(230, 220, 70, 70));
-                    gfx.DrawString(L"\x1F507", -1, &iconFont,
+                    gfx.DrawString(L"D", -1, &iconFont,
                         Gdiplus::RectF(iconX + 14.0f, yPos, 18.0f, (float)m_LineHeight),
                         &fmt, &redBrush);
                 }
                 if (m.isMuted) {
                     Gdiplus::SolidBrush orangeBrush(Gdiplus::Color(230, 240, 160, 60));
-                    gfx.DrawString(L"\x1F507", -1, &iconFont,
+                    gfx.DrawString(L"M", -1, &iconFont,
                         Gdiplus::RectF(iconX, yPos, 18.0f, (float)m_LineHeight),
                         &fmt, &orangeBrush);
                 }

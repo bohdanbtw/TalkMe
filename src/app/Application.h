@@ -121,7 +121,7 @@ namespace TalkMe {
         std::map<std::string, float> m_UserVolumes;  // client-side per-user volume (0 = mute, 1 = normal)
 
         struct UserVoiceState { bool muted = false; bool deafened = false; };
-        std::map<std::string, UserVoiceState> m_UserMuteStates;  // per-user mute/deafen state from server
+        std::map<std::string, UserVoiceState> m_UserMuteStates;
 
         std::map<std::string, float> m_TypingUsers;  // username -> timestamp of last typing indicator
         std::chrono::steady_clock::time_point m_LastTypingSentTime;

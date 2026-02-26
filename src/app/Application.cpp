@@ -980,7 +980,7 @@ namespace TalkMe {
                 }
 
                 // Draw track surface
-                dl->AddEllipse(ImVec2(cx, cy), RacingGame::kTrackRX, RacingGame::kTrackRY, IM_COL32(60, 60, 65, 180), 64, 2.0f);
+                dl->AddEllipse(ImVec2(cx, cy), ImVec2(RacingGame::kTrackRX, RacingGame::kTrackRY), IM_COL32(60, 60, 65, 180), 0.0f, 64, 2.0f);
 
                 // Draw cars
                 auto drawCar = [&](const RaceCar& car, ImU32 color) {
