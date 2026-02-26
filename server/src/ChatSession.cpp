@@ -249,25 +249,42 @@ namespace TalkMe {
             return;
         }
 
-        // Screen share frame is binary (BMP), must be handled before JSON parse
+        // Screen share frame is binary (JPEG), must be handled before JSON parse
         if (m_Header.type == PacketType::Screen_Share_Frame) {
             int cid = m_CurrentVoiceCid.load(std::memory_order_relaxed);
+            static int s_frameLog = 0;
+            if (s_frameLog < 5) {
+                std::fprintf(stderr, "[Server] Screen_Share_Frame: cid=%d, body=%zu bytes, user=%s\n",
+                    cid, m_Body.size(), m_Username.c_str());
+                std::fflush(stderr);
+            }
             if (cid == -1 || m_Body.empty()) return;
             PacketHeader h{ PacketType::Screen_Share_Frame, static_cast<uint32_t>(m_Body.size()) };
             h.ToNetwork();
             auto buf = std::make_shared<std::vector<uint8_t>>(sizeof(h) + m_Body.size());
             std::memcpy(buf->data(), &h, sizeof(h));
             std::memcpy(buf->data() + sizeof(h), m_Body.data(), m_Body.size());
-            // Broadcast to all voice channel members except sender
+            int relayCount = 0;
             {
                 std::shared_lock lock(m_Server.GetRoomMutex());
                 auto it = m_Server.GetVoiceChannels().find(cid);
                 if (it != m_Server.GetVoiceChannels().end()) {
-                    for (const auto& s : it->second)
-                        if (s.get() != this)
+                    for (const auto& s : it->second) {
+                        if (s.get() != this) {
                             s->SendShared(buf, true);
+                            relayCount++;
+                        }
+                    }
+                } else if (s_frameLog < 5) {
+                    std::fprintf(stderr, "[Server] Screen_Share_Frame: cid=%d NOT FOUND in voice channels!\n", cid);
+                    std::fflush(stderr);
                 }
             }
+            if (s_frameLog < 5) {
+                std::fprintf(stderr, "[Server] Screen_Share_Frame: relayed to %d clients\n", relayCount);
+                std::fflush(stderr);
+            }
+            s_frameLog++;
             return;
         }
 

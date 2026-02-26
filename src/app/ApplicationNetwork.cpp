@@ -51,6 +51,20 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
+            // ── Binary packets (not JSON) — handle before JSON validation ──
+            if (msg.type == PacketType::Screen_Share_Frame) {
+                static int s_recvLog = 0;
+                if (s_recvLog < 10)
+                    std::fprintf(stderr, "[Client] Received Screen_Share_Frame: %zu bytes\n", msg.data.size());
+                s_recvLog++;
+                if (!msg.data.empty()) {
+                    m_ScreenShare.someoneSharing = true;
+                    m_ScreenShare.lastFrameData = std::vector<uint8_t>(msg.data.begin(), msg.data.end());
+                    m_ScreenShare.frameUpdated = true;
+                }
+                continue;
+            }
+
             // ── All remaining packets require a JSON body ──────────────────
             if (msg.data.empty()) continue;
 
@@ -248,13 +262,7 @@ void Application::ProcessNetworkMessages() {
                 continue;
             }
 
-            if (msg.type == PacketType::Screen_Share_Frame) {
-                if (m_ScreenShare.someoneSharing && !msg.data.empty()) {
-                    m_ScreenShare.lastFrameData = std::vector<uint8_t>(msg.data.begin(), msg.data.end());
-                    m_ScreenShare.frameUpdated = true;
-                }
-                continue;
-            }
+            // Screen_Share_Frame handled above (before JSON validation)
 
             if (msg.type == PacketType::Admin_Action_Result) {
                 std::string action = j.value("action", "");
