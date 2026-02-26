@@ -328,6 +328,7 @@ namespace TalkMe {
         catch (...) { LOG_ERROR("LoadUserVolumes: unknown exception"); }
     }
     m_Sounds.Generate();
+    m_Soundboard.Generate();
     m_Overlay.Create(GetModuleHandle(nullptr));
     m_Overlay.SetCorner(m_OverlayCorner);
     m_Overlay.SetOpacity(m_OverlayOpacity);
@@ -724,6 +725,8 @@ namespace TalkMe {
             m_ShowFriendList = !m_ShowFriendList;
         if (ImGui::IsKeyPressed(ImGuiKey_F4))
             m_ShowGifPicker = !m_ShowGifPicker;
+        if (ImGui::IsKeyPressed(ImGuiKey_F5))
+            m_ShowSoundboard = !m_ShowSoundboard;
 
         if (m_CurrentState == AppState::Login) RenderLogin();
         else if (m_CurrentState == AppState::Login2FA) RenderLogin2FA();
@@ -1264,6 +1267,23 @@ namespace TalkMe {
             }
             ImGui::End();
             if (!tttOpen) m_TicTacToe.active = false;
+        }
+
+        // Soundboard (F5)
+        if (m_ShowSoundboard && m_CurrentState == AppState::MainApp) {
+            ImGui::SetNextWindowSize(ImVec2(250, 330), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin("Soundboard", &m_ShowSoundboard)) {
+                ImGui::TextDisabled("Click to play in voice channel");
+                ImGui::Separator();
+                ImGui::Dummy(ImVec2(0, 4));
+                const auto& sounds = m_Soundboard.GetSounds();
+                for (int i = 0; i < (int)sounds.size(); i++) {
+                    if (ImGui::Button(sounds[i].name.c_str(), ImVec2(210, 30)))
+                        m_Soundboard.Play(i);
+                    ImGui::Dummy(ImVec2(0, 2));
+                }
+            }
+            ImGui::End();
         }
 
         // GIF Picker (Tenor)
