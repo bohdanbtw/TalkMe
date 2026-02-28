@@ -1,7 +1,0 @@
-#!/bin/sh
-# Strip Co-authored-by trailers so commits are attributed only to you.
-msgfile="$1"
-[ -f "$msgfile" ] || exit 0
-tmp="${msgfile}.no-coauthor"
-grep -v 'Co-authored-by:' "$msgfile" > "$tmp" && mv "$tmp" "$msgfile"
-exit 0
