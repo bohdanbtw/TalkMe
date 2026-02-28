@@ -611,7 +611,7 @@ namespace TalkMe::UI::Views {
         float windowWidth  = ImGui::GetWindowWidth();
         float windowHeight = ImGui::GetWindowHeight();
         float leftOffset   = Styles::MainContentLeftOffset;
-        float areaW        = windowWidth - leftOffset - Styles::ServerRailWidth;
+        float areaW        = windowWidth - leftOffset;
 
         ImGui::SetCursorPos(ImVec2(leftOffset, 0));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, Styles::BgChat());

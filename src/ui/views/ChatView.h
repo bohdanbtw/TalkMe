@@ -42,6 +42,15 @@ namespace TalkMe::UI::Views {
         const std::vector<std::string>* activeStreamers = nullptr,
         std::string* viewingStream = nullptr,
         bool* streamMaximized = nullptr,
-        bool* showGifPicker = nullptr
+        bool* showGifPicker = nullptr,
+        std::function<void(float w, float h)> renderGifPanel = nullptr,
+        const std::string* mediaBaseUrl = nullptr,
+        std::function<void(std::vector<uint8_t>, std::string)>* onImageUpload = nullptr,
+        std::function<void(const std::string&)>* requestAttachment = nullptr,
+        std::function<const TalkMe::AttachmentDisplay*(const std::string&)>* getAttachmentDisplay = nullptr,
+        std::function<void(const std::string&)>* onAttachmentClick = nullptr,
+        std::function<void()> requestOlderMessages = nullptr,
+        const bool* loadingOlder = nullptr,
+        std::function<void(int channelId, int fullyVisibleMid)> onReadAnchorAdvanced = nullptr
     );
 }

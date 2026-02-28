@@ -405,6 +405,10 @@ imgui.ini
 *.db-wal
 *.db-shm
 
+# Secrets folder (API keys, server IP) - do not commit
+secret/
+!secret/secrets.example
+
 # Cursor IDE
 .cursor/
 

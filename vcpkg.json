@@ -6,6 +6,7 @@
     "asio",
     "opus",
     "nlohmann-json",
+    "sqlite3",
     "speexdsp",
     "libvpx",
     "stb",

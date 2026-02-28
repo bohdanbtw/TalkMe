@@ -11,6 +11,7 @@
 #include <ctime>
 #include <random>
 #include <cstdio>
+#include <fstream>
 #include <sstream>
 #include <iomanip>
 
@@ -26,6 +27,22 @@ namespace {
                 out << '%' << std::hex << std::uppercase << std::setw(2) << std::setfill('0') << (int)c;
         }
         return out.str();
+    }
+
+    static const char kBase64Chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string Base64Encode(const std::string& raw) {
+        std::string out;
+        out.reserve(((raw.size() + 2) / 3) * 4);
+        for (size_t i = 0; i < raw.size(); i += 3) {
+            unsigned int n = (unsigned char)raw[i] << 16;
+            if (i + 1 < raw.size()) n |= (unsigned char)raw[i + 1] << 8;
+            if (i + 2 < raw.size()) n |= (unsigned char)raw[i + 2];
+            out += kBase64Chars[(n >> 18) & 63];
+            out += kBase64Chars[(n >> 12) & 63];
+            out += (i + 1 < raw.size()) ? kBase64Chars[(n >> 6) & 63] : '=';
+            out += (i + 2 < raw.size()) ? kBase64Chars[n & 63] : '=';
+        }
+        return out;
     }
 }
 using asio::ip::tcp;
@@ -464,7 +481,8 @@ namespace TalkMe {
 
             if (m_Header.type == PacketType::Select_Text_Channel) {
                 if (!j.contains("cid") || !j["cid"].is_number_integer()) return;
-                SendPacket(PacketType::Message_History_Response, Database::Get().GetMessageHistoryJSON(j["cid"]));
+                const int cid = j["cid"];
+                SendPacket(PacketType::Message_History_Response, Database::Get().GetMessageHistoryEnvelopeJSON(cid, 0, 0, 0, 0, 0, 50));
                 return;
             }
 
@@ -492,8 +510,12 @@ namespace TalkMe {
             if (m_Header.type == PacketType::Edit_Message_Request) {
                 if (!j.contains("mid") || !j.contains("msg") || !j.contains("cid")) return;
                 if (Database::Get().EditMessage(j["mid"], m_Username, j["msg"])) {
-                    int cid = j["cid"];
-                    m_Server.BroadcastToAll(PacketType::Message_History_Response, Database::Get().GetMessageHistoryJSON(cid));
+                    const int cid = j["cid"];
+                    json res;
+                    res["mid"] = j["mid"];
+                    res["cid"] = cid;
+                    res["msg"] = j["msg"];
+                    m_Server.BroadcastToChannelMembers(cid, PacketType::Message_Edit, res.dump());
                 }
                 return;
             }
@@ -501,8 +523,12 @@ namespace TalkMe {
             if (m_Header.type == PacketType::Pin_Message_Request) {
                 if (!j.contains("mid") || !j.contains("cid") || !j.contains("pin")) return;
                 if (Database::Get().PinMessage(j["mid"], j["cid"], m_Username, j["pin"])) {
-                    int cid = j["cid"];
-                    m_Server.BroadcastToAll(PacketType::Message_History_Response, Database::Get().GetMessageHistoryJSON(cid));
+                    const int cid = j["cid"];
+                    json res;
+                    res["mid"] = j["mid"];
+                    res["cid"] = cid;
+                    res["pin"] = j["pin"];
+                    m_Server.BroadcastToChannelMembers(cid, PacketType::Message_Pin_Update, res.dump());
                 }
                 return;
             }
@@ -539,6 +565,24 @@ namespace TalkMe {
                 res["action"] = "upload_finished";
                 res["id"] = m_UploadId;
                 SendPacket(PacketType::File_Transfer_Complete, res.dump());
+                return;
+            }
+
+            if (m_Header.type == PacketType::Media_Request) {
+                if (!j.contains("id") || !j["id"].is_string()) return;
+                std::string id = j["id"].get<std::string>();
+                if (id.empty() || id.find("..") != std::string::npos) return;
+                std::filesystem::path filePath = std::filesystem::path("attachments") / id;
+                if (!std::filesystem::is_regular_file(filePath)) return;
+                std::ifstream file(filePath, std::ios::binary);
+                if (!file) return;
+                std::string raw((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                file.close();
+                if (raw.size() > 10 * 1024 * 1024) return; // 10MB max
+                json res;
+                res["id"] = id;
+                res["data"] = Base64Encode(raw);
+                SendPacket(PacketType::Media_Response, res.dump());
                 return;
             }
 
@@ -719,11 +763,15 @@ namespace TalkMe {
 
             if (m_Header.type == PacketType::Message_History_Page) {
                 if (!j.contains("cid")) return;
-                int cid = j["cid"];
-                int beforeId = j.value("before", 0);
-                int limit = j.value("limit", 50);
+                const int cid = j["cid"];
+                const int beforeId = j.value("before", 0);
+                const int afterId = j.value("after", 0);
+                const int anchorId = j.value("anchor", 0);
+                const int limit = j.value("limit", 50);
+                const int beforeLimit = j.value("before_limit", 0);
+                const int afterLimit = j.value("after_limit", 0);
                 SendPacket(PacketType::Message_History_Response,
-                    Database::Get().GetMessageHistoryJSON(cid, beforeId, limit));
+                    Database::Get().GetMessageHistoryEnvelopeJSON(cid, beforeId, afterId, anchorId, beforeLimit, afterLimit, limit));
                 return;
             }
 

@@ -43,7 +43,7 @@ TextureManager::TextureEntry TextureManager::CreateTexture(const uint8_t* rgba, 
     return entry;
 }
 
-ID3D11ShaderResourceView* TextureManager::LoadFromRGBA(const std::string& id, const uint8_t* rgba, int width, int height) {
+ID3D11ShaderResourceView* TextureManager::LoadFromRGBA(const std::string& id, const uint8_t* rgba, int width, int height, bool flipY) {
     std::lock_guard lock(m_Mutex);
     auto it = m_Textures.find(id);
     if (it != m_Textures.end()) {
@@ -51,7 +51,17 @@ ID3D11ShaderResourceView* TextureManager::LoadFromRGBA(const std::string& id, co
         if (it->second.texture) it->second.texture->Release();
     }
 
-    auto entry = CreateTexture(rgba, width, height);
+    const uint8_t* src = rgba;
+    std::vector<uint8_t> flipped;
+    if (flipY && rgba && width > 0 && height > 0) {
+        flipped.resize(static_cast<size_t>(width) * height * 4);
+        int rowBytes = width * 4;
+        for (int y = height - 1; y >= 0; --y)
+            std::memcpy(flipped.data() + (height - 1 - y) * rowBytes, rgba + y * rowBytes, rowBytes);
+        src = flipped.data();
+    }
+
+    auto entry = CreateTexture(src, width, height);
     m_Textures[id] = entry;
     return entry.srv;
 }

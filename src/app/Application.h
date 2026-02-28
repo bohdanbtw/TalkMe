@@ -27,10 +27,14 @@
 #include "../screen/DXGICapture.h"
 #include "../screen/H264Encoder.h"
 #include "../screen/AudioLoopback.h"
-#include "../network/TenorAPI.h"
+#include "../network/KlipyGifProvider.h"
+#include "../ui/GifPickerPanel.h"
+#include "../core/Secrets.h"
+#include <memory>
 #include "../game/Racing.h"
 #include "../game/FlappyBird.h"
 #include "../game/TicTacToe.h"
+#include "../storage/MessageCacheDb.h"
 
 namespace TalkMe {
     enum class AppState { Login, Login2FA, Register, MainApp };
@@ -60,9 +64,32 @@ namespace TalkMe {
         int replyToId = 0;
         bool pinned = false;
         std::map<std::string, std::vector<std::string>> reactions;
+        std::string attachmentId;  // server attachment id; display via media URL
+    };
+
+    struct ChannelMessageState {
+        std::vector<ChatMessage> messages;
+        int lastReadMessageId = 0;  // messages with id > this are unread when channel not focused
+        int oldestLoadedMid = 0;
+        int newestLoadedMid = 0;
+        bool hasMoreOlder = true;
+        bool hasMoreNewer = true;
+        bool loadingOlder = false;
+        bool loadingNewer = false;
+        bool loadingLatest = false;
+        bool initialPageRequested = false;  // avoid re-requesting when channel is empty
     };
 
     struct UserVoiceState { bool muted = false; bool deafened = false; };
+
+    // Attachment fetched via Media_Request (TCP, no port 5557 needed)
+    struct AttachmentDisplay {
+        bool ready = false;
+        bool failed = false;
+        std::string textureId;
+        int width = 0;
+        int height = 0;
+    };
 
     class Application {
     public:
@@ -84,8 +111,9 @@ namespace TalkMe {
         void RenderMainApp();
 
     private:
-        std::string m_ServerIP = "94.26.90.11";
+        std::string m_ServerIP;       // from secret/secrets "server_ip", or set in Settings
         int m_ServerPort = 5555;
+        std::string m_MediaBaseUrl;   // e.g. http://<server_ip>:5557 for GET /media/<id>
         std::string m_Title;
         int m_Width, m_Height;
         AppWindow m_Window;
@@ -105,10 +133,15 @@ namespace TalkMe {
         UserSession m_CurrentUser;
 
         std::vector<Server> m_ServerList;
-        std::vector<ChatMessage> m_Messages;
+        std::map<int, ChannelMessageState> m_ChannelStates;
+        MessageCacheDb m_MessageCacheDb;
+        std::chrono::steady_clock::time_point m_LastReadAnchorPersistTime{};
+
+        std::vector<ChatMessage>& GetChannelMessages(int channelId);
 
         int m_SelectedServerId = -1;
         int m_SelectedChannelId = -1;
+        int m_PrevSelectedChannelId = -1;
         int m_ActiveVoiceChannelId = -1;
         int m_PrevActiveVoiceChannelId = -2;
         /// Thread-safe: voice callback only pushes when this != -1 (so we never play voice after leaving).
@@ -149,8 +182,9 @@ namespace TalkMe {
         bool m_ShowSearch = false;
         bool m_ShowShortcuts = false;
         bool m_ShowGifPicker = false;
-        char m_GifSearchBuf[128] = "";
-        TenorAPI m_TenorAPI;
+        std::unique_ptr<UI::GifPickerPanel> m_GifPickerPanel;
+        std::function<void(float, float)> m_GifPanelRender;
+        int m_EmotionsPanelTab = 2;       // 0=Emoji, 1=Stickers, 2=GIFs
         char m_StatusBuf[128] = "";
 
         struct NotificationSettings {
@@ -162,6 +196,38 @@ namespace TalkMe {
 
         std::unordered_map<std::string, std::string> m_AvatarCache;
         std::unordered_set<std::string> m_AvatarRequested;
+
+        // Pending image upload: after File_Transfer_Request we wait for upload_approved, then send chunks.
+        std::vector<uint8_t> m_PendingUploadData;
+        std::string m_PendingUploadFilename;
+        int m_PendingUploadChannelId = -1;
+
+        std::function<void(std::vector<uint8_t>, std::string)> m_OnImageUpload;
+        std::function<void(const std::string&)> m_RequestAttachmentFn;
+        std::function<const AttachmentDisplay*(const std::string&)> m_GetAttachmentDisplayFn;
+        std::function<void(const std::string&)> m_OnAttachmentClickFn;
+
+        // TCP attachment fetch (Media_Request/Media_Response) so attachments work without port 5557
+        std::unordered_map<std::string, AttachmentDisplay> m_AttachmentCache;
+        std::unordered_set<std::string> m_AttachmentRequested;
+        std::unordered_map<std::string, std::vector<uint8_t>> m_AttachmentFileData;  // raw file bytes for Save
+
+        // In-app image viewer (Discord-style popup)
+        std::string m_ViewingAttachmentId;
+        float m_AttachmentViewerZoom = 1.0f;
+        bool m_AttachmentViewerOpen = false;
+        double m_AttachmentViewerOpenTime = 0.0;  // time when viewer was opened (to ignore opening click)
+
+        void StartImageUpload(std::vector<uint8_t> data, std::string filename, int channelId);
+        void RequestAttachment(const std::string& id);
+        const AttachmentDisplay* GetAttachmentDisplay(const std::string& id) const;
+        const std::vector<uint8_t>* GetAttachmentFileData(const std::string& id) const;
+        void RenderAttachmentViewer();
+
+        std::string GetStateCachePath() const;
+        std::string GetMessageCacheDbPath() const;
+        void LoadStateCache();
+        void SaveStateCache();
 
         struct PollOption { std::string text; int votes = 0; bool iVoted = false; };
         struct Poll { int id = 0; int channelId = 0; std::string question; std::string creator; std::vector<PollOption> options; };

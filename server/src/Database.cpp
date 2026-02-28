@@ -158,6 +158,10 @@ namespace TalkMe {
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS blocked_users (blocker TEXT, blocked TEXT, PRIMARY KEY(blocker, blocked));", 0, 0, 0);
         sqlite3_exec(m_Db, "CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER, actor TEXT, action TEXT, target TEXT, details TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);", 0, 0, 0);
 
+        // Indexes for efficient chat paging / reactions.
+        sqlite3_exec(m_Db, "CREATE INDEX IF NOT EXISTS idx_messages_channel_id_id ON messages(channel_id, id);", 0, 0, 0);
+        sqlite3_exec(m_Db, "CREATE INDEX IF NOT EXISTS idx_reactions_message_id ON reactions(message_id);", 0, 0, 0);
+
         sqlite3_stmt* countStmt = nullptr;
         if (sqlite3_prepare_v2(m_Db, "SELECT COUNT(*) FROM servers;", -1, &countStmt, 0) == SQLITE_OK &&
             sqlite3_step(countStmt) == SQLITE_ROW && sqlite3_column_int(countStmt, 0) == 0) {
@@ -574,55 +578,220 @@ namespace TalkMe {
     }
 
     std::string Database::GetMessageHistoryJSON(int channelId, int beforeId, int limit) {
-        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
-        json j = json::array();
-        sqlite3_stmt* stmt;
-        std::string query = "SELECT id, channel_id, sender, content, time, IFNULL(edited_at, ''), is_pinned, IFNULL(attachment_id, ''), IFNULL(reply_to, 0) FROM messages WHERE channel_id = ?";
-        if (beforeId > 0) query += " AND id < " + std::to_string(beforeId);
-        query += " ORDER BY id DESC LIMIT " + std::to_string(std::min(limit, 100));
-        if (sqlite3_prepare_v2(m_Db, query.c_str(), -1, &stmt, 0) == SQLITE_OK) {
-            sqlite3_bind_int(stmt, 1, channelId);
-            while (sqlite3_step(stmt) == SQLITE_ROW) {
-                const char* u = (const char*)sqlite3_column_text(stmt, 2);
-                const char* m = (const char*)sqlite3_column_text(stmt, 3);
-                const char* t = (const char*)sqlite3_column_text(stmt, 4);
-                const char* editVal = (const char*)sqlite3_column_text(stmt, 5);
-                const char* attVal = (const char*)sqlite3_column_text(stmt, 7);
-                int replyTo = sqlite3_column_int(stmt, 8);
-                int mid = sqlite3_column_int(stmt, 0);
-                json entry = { {"mid", mid}, {"cid", sqlite3_column_int(stmt, 1)}, {"u", u ? u : ""}, {"msg", m ? m : ""}, {"time", t ? t : ""}, {"edit", editVal ? editVal : ""}, {"pin", sqlite3_column_int(stmt, 6) != 0}, {"attachment", attVal ? attVal : ""} };
-                if (replyTo > 0) entry["reply_to"] = replyTo;
+        // Legacy array response preserved for compatibility with older clients.
+        // Newer code should prefer GetMessageHistoryEnvelopeJSON().
+        json env = nlohmann::json::parse(GetMessageHistoryEnvelopeJSON(channelId, beforeId, 0, 0, 0, 0, limit), nullptr, false);
+        if (!env.is_object() || !env.contains("messages") || !env["messages"].is_array()) {
+            json fallback = json::array();
+            fallback.push_back({ {"cid", channelId} });
+            return fallback.dump();
+        }
+        json out = env["messages"];
+        if (out.empty()) out.push_back({ {"cid", channelId} });
+        return out.dump();
+    }
 
-                sqlite3_stmt* rStmt = nullptr;
-                if (sqlite3_prepare_v2(m_Db, "SELECT emoji, GROUP_CONCAT(username) FROM reactions WHERE message_id = ? GROUP BY emoji;", -1, &rStmt, 0) == SQLITE_OK) {
-                    sqlite3_bind_int(rStmt, 1, mid);
-                    json reactions = json::object();
-                    while (sqlite3_step(rStmt) == SQLITE_ROW) {
-                        const char* em = (const char*)sqlite3_column_text(rStmt, 0);
-                        const char* us = (const char*)sqlite3_column_text(rStmt, 1);
-                        if (em && us) {
-                            json arr = json::array();
-                            std::string uStr(us);
-                            size_t p = 0;
-                            while ((p = uStr.find(',')) != std::string::npos) {
-                                arr.push_back(uStr.substr(0, p));
-                                uStr.erase(0, p + 1);
-                            }
-                            if (!uStr.empty()) arr.push_back(uStr);
-                            reactions[em] = arr;
-                        }
-                    }
-                    sqlite3_finalize(rStmt);
-                    if (!reactions.empty()) entry["reactions"] = reactions;
-                }
-                j.push_back(entry);
-            }
+    static int ClampLimit(int v, int lo, int hi) {
+        if (v < lo) return lo;
+        if (v > hi) return hi;
+        return v;
+    }
+
+    static void SplitCommaList(const char* s, nlohmann::json& outArr) {
+        if (!s || !*s) return;
+        std::string uStr(s);
+        size_t p = 0;
+        while ((p = uStr.find(',')) != std::string::npos) {
+            outArr.push_back(uStr.substr(0, p));
+            uStr.erase(0, p + 1);
+        }
+        if (!uStr.empty()) outArr.push_back(uStr);
+    }
+
+    static bool ExistsMessage(sqlite3* db, int channelId, const char* sql, int idValue) {
+        sqlite3_stmt* stmt = nullptr;
+        bool ok = false;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, channelId);
+            sqlite3_bind_int(stmt, 2, idValue);
+            ok = (sqlite3_step(stmt) == SQLITE_ROW);
             sqlite3_finalize(stmt);
         }
-        std::reverse(j.begin(), j.end());
-        if (j.empty())
-            j.push_back({ {"cid", channelId} });
-        return j.dump();
+        return ok;
+    }
+
+    std::string Database::GetMessageHistoryEnvelopeJSON(
+        int channelId, int beforeId, int afterId, int anchorId, int beforeLimit, int afterLimit, int limit)
+    {
+        std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+
+        limit = ClampLimit(limit, 1, 100);
+        beforeLimit = ClampLimit(beforeLimit, 0, 100);
+        afterLimit = ClampLimit(afterLimit, 0, 100);
+
+        json messages = json::array();
+        std::vector<int> mids;
+        mids.reserve((size_t)limit);
+
+        auto pushRow = [&](sqlite3_stmt* stmt) {
+            const int mid = sqlite3_column_int(stmt, 0);
+            const char* u = (const char*)sqlite3_column_text(stmt, 2);
+            const char* m = (const char*)sqlite3_column_text(stmt, 3);
+            const char* t = (const char*)sqlite3_column_text(stmt, 4);
+            const char* editVal = (const char*)sqlite3_column_text(stmt, 5);
+            const char* attVal = (const char*)sqlite3_column_text(stmt, 7);
+            const int replyTo = sqlite3_column_int(stmt, 8);
+            json entry = {
+                {"mid", mid},
+                {"cid", sqlite3_column_int(stmt, 1)},
+                {"u", u ? u : ""},
+                {"msg", m ? m : ""},
+                {"time", t ? t : ""},
+                {"edit", editVal ? editVal : ""},
+                {"pin", sqlite3_column_int(stmt, 6) != 0},
+                // Keep both keys for compatibility (client previously read `attachment`).
+                {"attachment", attVal ? attVal : ""},
+                {"attachment_id", attVal ? attVal : ""}
+            };
+            if (replyTo > 0) entry["reply_to"] = replyTo;
+            messages.push_back(std::move(entry));
+            mids.push_back(mid);
+        };
+
+        const char* baseSelect =
+            "SELECT id, channel_id, sender, content, time, IFNULL(edited_at, ''), is_pinned, IFNULL(attachment_id, ''), IFNULL(reply_to, 0) "
+            "FROM messages WHERE channel_id = ? ";
+
+        // ---- Fetch messages ----
+        if (anchorId > 0) {
+            // Older (including anchor), newest->oldest then reversed.
+            {
+                sqlite3_stmt* stmt = nullptr;
+                std::string q = std::string(baseSelect) + "AND id <= ? ORDER BY id DESC LIMIT ?;";
+                if (sqlite3_prepare_v2(m_Db, q.c_str(), -1, &stmt, 0) == SQLITE_OK) {
+                    sqlite3_bind_int(stmt, 1, channelId);
+                    sqlite3_bind_int(stmt, 2, anchorId);
+                    sqlite3_bind_int(stmt, 3, (beforeLimit > 0 ? beforeLimit + 1 : 1)); // include anchor
+                    while (sqlite3_step(stmt) == SQLITE_ROW) pushRow(stmt);
+                    sqlite3_finalize(stmt);
+                }
+            }
+            // Reverse the older portion so far (oldest->newest).
+            std::reverse(messages.begin(), messages.end());
+            std::reverse(mids.begin(), mids.end());
+
+            // Newer (after anchor)
+            {
+                sqlite3_stmt* stmt = nullptr;
+                std::string q = std::string(baseSelect) + "AND id > ? ORDER BY id ASC LIMIT ?;";
+                if (sqlite3_prepare_v2(m_Db, q.c_str(), -1, &stmt, 0) == SQLITE_OK) {
+                    sqlite3_bind_int(stmt, 1, channelId);
+                    sqlite3_bind_int(stmt, 2, anchorId);
+                    sqlite3_bind_int(stmt, 3, (afterLimit > 0 ? afterLimit : 0));
+                    while (sqlite3_step(stmt) == SQLITE_ROW) pushRow(stmt);
+                    sqlite3_finalize(stmt);
+                }
+            }
+        }
+        else if (afterId > 0) {
+            sqlite3_stmt* stmt = nullptr;
+            std::string q = std::string(baseSelect) + "AND id > ? ORDER BY id ASC LIMIT ?;";
+            if (sqlite3_prepare_v2(m_Db, q.c_str(), -1, &stmt, 0) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, channelId);
+                sqlite3_bind_int(stmt, 2, afterId);
+                sqlite3_bind_int(stmt, 3, limit);
+                while (sqlite3_step(stmt) == SQLITE_ROW) pushRow(stmt);
+                sqlite3_finalize(stmt);
+            }
+        }
+        else {
+            sqlite3_stmt* stmt = nullptr;
+            std::string q = std::string(baseSelect) + "AND (? = 0 OR id < ?) ORDER BY id DESC LIMIT ?;";
+            if (sqlite3_prepare_v2(m_Db, q.c_str(), -1, &stmt, 0) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, channelId);
+                sqlite3_bind_int(stmt, 2, beforeId);
+                sqlite3_bind_int(stmt, 3, beforeId);
+                sqlite3_bind_int(stmt, 4, limit);
+                while (sqlite3_step(stmt) == SQLITE_ROW) pushRow(stmt);
+                sqlite3_finalize(stmt);
+            }
+            std::reverse(messages.begin(), messages.end());
+            std::reverse(mids.begin(), mids.end());
+        }
+
+        // ---- Batch reactions ----
+        if (!mids.empty()) {
+            std::string in = "(";
+            for (size_t i = 0; i < mids.size(); ++i) {
+                if (i) in += ",";
+                in += "?";
+            }
+            in += ")";
+
+            // message_id -> emoji -> [users...]
+            std::map<int, json> reactionsByMessage;
+
+            sqlite3_stmt* rStmt = nullptr;
+            std::string rq = "SELECT message_id, emoji, GROUP_CONCAT(username) "
+                             "FROM reactions WHERE message_id IN " + in +
+                             " GROUP BY message_id, emoji;";
+            if (sqlite3_prepare_v2(m_Db, rq.c_str(), -1, &rStmt, 0) == SQLITE_OK) {
+                for (size_t i = 0; i < mids.size(); ++i)
+                    sqlite3_bind_int(rStmt, (int)i + 1, mids[i]);
+
+                while (sqlite3_step(rStmt) == SQLITE_ROW) {
+                    const int mid = sqlite3_column_int(rStmt, 0);
+                    const char* em = (const char*)sqlite3_column_text(rStmt, 1);
+                    const char* us = (const char*)sqlite3_column_text(rStmt, 2);
+                    if (!em || !*em) continue;
+                    auto& obj = reactionsByMessage[mid];
+                    if (!obj.is_object()) obj = json::object();
+                    json arr = json::array();
+                    SplitCommaList(us, arr);
+                    if (!arr.empty()) obj[em] = std::move(arr);
+                }
+                sqlite3_finalize(rStmt);
+            }
+
+            if (!reactionsByMessage.empty()) {
+                for (auto& msg : messages) {
+                    const int mid = msg.value("mid", 0);
+                    auto it = reactionsByMessage.find(mid);
+                    if (it != reactionsByMessage.end() && it->second.is_object() && !it->second.empty())
+                        msg["reactions"] = it->second;
+                }
+            }
+        }
+
+        // ---- Meta ----
+        int oldestMid = 0;
+        int newestMid = 0;
+        if (!messages.empty()) {
+            oldestMid = messages.front().value("mid", 0);
+            newestMid = messages.back().value("mid", 0);
+        }
+
+        bool hasMoreOlder = false;
+        bool hasMoreNewer = false;
+        if (oldestMid > 0) {
+            hasMoreOlder = ExistsMessage(m_Db, channelId,
+                "SELECT 1 FROM messages WHERE channel_id = ? AND id < ? LIMIT 1;",
+                oldestMid);
+        }
+        if (newestMid > 0) {
+            hasMoreNewer = ExistsMessage(m_Db, channelId,
+                "SELECT 1 FROM messages WHERE channel_id = ? AND id > ? LIMIT 1;",
+                newestMid);
+        }
+
+        json env;
+        env["cid"] = channelId;
+        env["messages"] = std::move(messages);
+        env["oldest_mid"] = oldestMid;
+        env["newest_mid"] = newestMid;
+        env["has_more_older"] = hasMoreOlder;
+        env["has_more_newer"] = hasMoreNewer;
+        return env.dump();
     }
 
     void Database::SaveMessage(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId, int replyTo) {

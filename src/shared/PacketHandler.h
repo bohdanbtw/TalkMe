@@ -58,6 +58,34 @@ namespace TalkMe {
             return j.dump();
         }
 
+        /// Request a page of messages: beforeId=0 gives latest page; beforeId>0 gives older messages before that id.
+        static std::string MessageHistoryPagePayload(int cid, int beforeId, int limit = 50) {
+            nlohmann::json j;
+            j["cid"] = cid;
+            j["before"] = beforeId;
+            j["limit"] = limit;
+            return j.dump();
+        }
+
+        /// Request newer messages after afterId (ascending).
+        static std::string MessageHistoryAfterPayload(int cid, int afterId, int limit = 50) {
+            nlohmann::json j;
+            j["cid"] = cid;
+            j["after"] = afterId;
+            j["limit"] = limit;
+            return j.dump();
+        }
+
+        /// Request a window around an anchor message id.
+        static std::string MessageHistoryAroundPayload(int cid, int anchorId, int beforeLimit = 100, int afterLimit = 100) {
+            nlohmann::json j;
+            j["cid"] = cid;
+            j["anchor"] = anchorId;
+            j["before_limit"] = beforeLimit;
+            j["after_limit"] = afterLimit;
+            return j.dump();
+        }
+
         static std::string JoinVoiceChannelPayload(int cid) {
             nlohmann::json j;
             j["cid"] = cid;

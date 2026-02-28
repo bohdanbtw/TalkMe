@@ -105,10 +105,13 @@ namespace TalkMe {
         Message_Text,
         Message_Edit,
         Message_Delete,
+        Message_Pin_Update,
         Message_History_Response,
         File_Transfer_Request,
         File_Transfer_Chunk,
         File_Transfer_Complete,
+        Media_Request,       // Client -> Server: request attachment by id (JSON {"id":"<id>"})
+        Media_Response,     // Server -> Client: attachment data (JSON {"id":"<id>","data":"<base64>"})
 
         Voice_Data,          // DEPRECATED
         Voice_Data_Opus,

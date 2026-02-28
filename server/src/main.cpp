@@ -42,7 +42,7 @@ int main(int argc, char* argv[]) {
         if (thread_count == 0) thread_count = 4;
         thread_count = std::min(thread_count, kMaxThreads);
 
-        std::cout << "TalkMe Server running on 5555 with "
+        std::cout << "TalkMe Server running on 5555 (TCP), 5557 (media HTTP) with "
             << thread_count << " threads...\n";
 
         std::vector<std::thread> threads;

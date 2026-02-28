@@ -17,9 +17,12 @@
 #include <windows.h>
 #include <mmsystem.h>
 #include <shlobj.h>
+#include <commdlg.h>
 #include <dxgi1_4.h>
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "comdlg32.lib")
+#include "../ui/TextureManager.h"
 
 namespace {
 
@@ -43,12 +46,49 @@ namespace {
         int   samplesUsed = 0;
     };
 
+    // Load app icon from assets into TextureManager as "friends_icon" (for server rail). Returns true if loaded.
+    static bool LoadFriendsIconOnce() {
+        std::string path = TalkMe::ConfigManager::GetConfigDirectory() + "\\assets\\app_48x48.ico";
+        HICON hIcon = (HICON)::LoadImageA(nullptr, path.c_str(), IMAGE_ICON, 48, 48, LR_LOADFROMFILE);
+        if (!hIcon) return false;
+        HDC hdc = ::CreateCompatibleDC(nullptr);
+        if (!hdc) { ::DestroyIcon(hIcon); return false; }
+        BITMAPINFOHEADER bih = {};
+        bih.biSize = sizeof(BITMAPINFOHEADER);
+        bih.biWidth = 48;
+        bih.biHeight = -48;
+        bih.biPlanes = 1;
+        bih.biBitCount = 32;
+        bih.biCompression = BI_RGB;
+        BITMAPINFO bmi = {};
+        bmi.bmiHeader = bih;
+        void* bits = nullptr;
+        HBITMAP hBmp = ::CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (!hBmp || !bits) { ::DeleteDC(hdc); ::DestroyIcon(hIcon); return false; }
+        HGDIOBJ old = ::SelectObject(hdc, hBmp);
+        ::DrawIconEx(hdc, 0, 0, hIcon, 48, 48, 0, nullptr, DI_NORMAL);
+        ::SelectObject(hdc, old);
+        std::vector<uint8_t> rgba(48 * 48 * 4);
+        const uint8_t* bgra = (const uint8_t*)bits;
+        for (int i = 0; i < 48 * 48; i++) {
+            rgba[i * 4 + 0] = bgra[i * 4 + 2];
+            rgba[i * 4 + 1] = bgra[i * 4 + 1];
+            rgba[i * 4 + 2] = bgra[i * 4 + 0];
+            rgba[i * 4 + 3] = bgra[i * 4 + 3];
+        }
+        TalkMe::TextureManager::Get().LoadFromRGBA("friends_icon", rgba.data(), 48, 48, false);
+        ::DeleteObject(hBmp);
+        ::DeleteDC(hdc);
+        ::DestroyIcon(hIcon);
+        return true;
+    }
+
 } // anonymous namespace
 
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx11.h>
-#include "../ui/TextureManager.h"
+#include "../network/ImageCache.h"
 #include <nlohmann/json.hpp>
 
 #include "../ui/Theme.h"
@@ -195,6 +235,22 @@ namespace TalkMe {
             m_Graphics.ClearAndPresent(clear, ImGui::GetDrawData());
         });
         if (!m_Window.Create(m_Width, m_Height, m_Title) || !m_Graphics.Init(m_Window.GetHwnd()) || !m_Graphics.InitImGui()) return false;
+        TalkMe::Secrets::Load();
+        if (!TalkMe::Secrets::GetServerIp().empty())
+            m_ServerIP = TalkMe::Secrets::GetServerIp();
+        m_GifPickerPanel = std::make_unique<UI::GifPickerPanel>(TalkMe::Secrets::GetKlipyApiKey());
+        m_GifPanelRender = m_GifPickerPanel->MakeRenderCallback([this](const std::string& url, const std::string&) {
+            if (m_SelectedChannelId != -1) {
+                nlohmann::json msgJ;
+                msgJ["cid"] = m_SelectedChannelId;
+                msgJ["u"] = m_CurrentUser.username;
+                msgJ["msg"] = url;
+                m_NetClient.Send(PacketType::Message_Text, msgJ.dump());
+            }
+            m_ShowGifPicker = false;
+            ImGui::CloseCurrentPopup();
+            m_GifPickerPanel->OnClosed();
+        });
     m_NetworkWakeEvent = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
     m_QuitEvent = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (m_NetworkWakeEvent) {
@@ -358,6 +414,325 @@ namespace TalkMe {
     return true;
     }
 
+    void Application::StartImageUpload(std::vector<uint8_t> data, std::string filename, int channelId) {
+        if (channelId < 0 || data.empty()) return;
+        m_PendingUploadData = std::move(data);
+        m_PendingUploadFilename = std::move(filename);
+        m_PendingUploadChannelId = channelId;
+        nlohmann::json req;
+        req["filename"] = m_PendingUploadFilename;
+        req["size"] = static_cast<int>(m_PendingUploadData.size());
+        m_NetClient.Send(PacketType::File_Transfer_Request, req.dump());
+    }
+
+    void Application::RequestAttachment(const std::string& id) {
+        if (id.empty()) return;
+        if (m_AttachmentCache.count(id) || m_AttachmentRequested.count(id)) return;
+        m_AttachmentRequested.insert(id);
+        nlohmann::json req;
+        req["id"] = id;
+        m_NetClient.Send(PacketType::Media_Request, req.dump());
+    }
+
+    const AttachmentDisplay* Application::GetAttachmentDisplay(const std::string& id) const {
+        auto it = m_AttachmentCache.find(id);
+        return (it != m_AttachmentCache.end()) ? &it->second : nullptr;
+    }
+
+    const std::vector<uint8_t>* Application::GetAttachmentFileData(const std::string& id) const {
+        auto it = m_AttachmentFileData.find(id);
+        return (it != m_AttachmentFileData.end()) ? &it->second : nullptr;
+    }
+
+    void Application::RenderAttachmentViewer() {
+        if (m_ViewingAttachmentId.empty()) return;
+
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(viewport->WorkPos);
+        ImGui::SetNextWindowSize(viewport->WorkSize);
+        ImGui::SetNextWindowFocus();
+        // 75% transparent background (25% opaque black)
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.25f));
+        ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar;
+        if (!ImGui::Begin("##AttachmentViewer", nullptr, flags)) {
+            ImGui::End();
+            ImGui::PopStyleColor();
+            return;
+        }
+
+        // Zoom with mouse wheel anywhere on the viewer window (both directions: scroll up = zoom in, scroll down = zoom out)
+        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows)) {
+            float wheel = ImGui::GetIO().MouseWheel;
+            if (wheel != 0.0f) {
+                float factor = (wheel > 0.0f) ? 1.15f : (1.0f / 1.15f);
+                m_AttachmentViewerZoom *= factor;
+                m_AttachmentViewerZoom = (std::max)(0.25f, (std::min)(4.0f, m_AttachmentViewerZoom));
+            }
+        }
+
+        const float topBarH = 52.0f;
+        const float topBarY = viewport->WorkPos.y;
+        // Top bar background so Save/Close are visible
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(ImVec2(viewport->WorkPos.x, topBarY), ImVec2(viewport->WorkPos.x + viewport->WorkSize.x, topBarY + topBarH), IM_COL32(0, 0, 0, 200));
+
+        ImGui::SetCursorScreenPos(ImVec2(viewport->WorkPos.x + 16.0f, topBarY + 10.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(14.0f, 10.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.45f, 0.22f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.55f, 0.28f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.18f, 0.38f, 0.18f, 1.0f));
+        const std::vector<uint8_t>* fileData = GetAttachmentFileData(m_ViewingAttachmentId);
+        if (ImGui::Button("Save") && fileData && !fileData->empty()) {
+            char path[MAX_PATH] = {};
+            size_t ext = m_ViewingAttachmentId.rfind('.');
+            const char* defaultExt = (ext != std::string::npos) ? m_ViewingAttachmentId.c_str() + ext + 1 : "png";
+            OPENFILENAMEA ofn = {};
+            ofn.lStructSize = sizeof(ofn);
+            ofn.lpstrFilter = "Images\0*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp\0All Files\0*.*\0";
+            ofn.lpstrFile = path;
+            ofn.nMaxFile = MAX_PATH;
+            ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
+            ofn.lpstrDefExt = defaultExt;
+            if (GetSaveFileNameA(&ofn) && path[0]) {
+                FILE* f = nullptr;
+                if (fopen_s(&f, path, "wb") == 0 && f) {
+                    fwrite(fileData->data(), 1, fileData->size(), f);
+                    fclose(f);
+                }
+            }
+        }
+        ImGui::PopStyleColor(3);
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.22f, 0.22f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.65f, 0.28f, 0.28f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.45f, 0.18f, 0.18f, 1.0f));
+        if (ImGui::Button("Close") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            m_ViewingAttachmentId.clear();
+            m_AttachmentViewerZoom = 1.0f;
+        }
+        ImGui::PopStyleColor(3);
+        ImGui::SameLine();
+        ImGui::SetCursorScreenPos(ImVec2(viewport->WorkPos.x + 220.0f, topBarY + 12.0f));
+        ImGui::SetNextItemWidth(180.0f);
+        ImGui::SliderFloat("##Zoom", &m_AttachmentViewerZoom, 0.25f, 4.0f, "Zoom %.2fx", ImGuiSliderFlags_NoInput);
+        ImGui::PopStyleVar();
+
+        const AttachmentDisplay* att = GetAttachmentDisplay(m_ViewingAttachmentId);
+        ImVec2 imageScreenMin(0.0f, 0.0f), imageScreenMax(0.0f, 0.0f);
+        bool imageRectValid = false;
+
+        if (!att || !att->ready) {
+            ImGui::SetCursorScreenPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f - 40.0f, viewport->WorkPos.y + topBarH + (viewport->WorkSize.y - topBarH) * 0.5f - 10.0f));
+            ImGui::TextDisabled("Loading...");
+        } else {
+            auto* srv = TextureManager::Get().GetTexture(att->textureId);
+            if (srv && att->width > 0 && att->height > 0) {
+                float areaW = viewport->WorkSize.x;
+                float areaH = viewport->WorkSize.y - topBarH;
+                // 1x = image fills 100% of popup (fit to window); zoom slider is relative to that
+                float fitZoom = (std::min)(areaW / (float)att->width, areaH / (float)att->height);
+                float scale = fitZoom * m_AttachmentViewerZoom;
+                float dispW = (float)att->width * scale;
+                float dispH = (float)att->height * scale;
+                // Scrollable area: image can extend past window when zoomed in
+                ImGui::SetCursorScreenPos(ImVec2(viewport->WorkPos.x, topBarY + topBarH));
+                ImGui::BeginChild("##ImageArea", ImVec2(areaW, areaH), ImGuiChildFlags_None);
+                float contentW = (std::max)(dispW, areaW);
+                float contentH = (std::max)(dispH, areaH);
+                ImGui::Dummy(ImVec2(contentW, contentH));
+                ImGui::SetCursorPos(ImVec2((contentW - dispW) * 0.5f, (contentH - dispH) * 0.5f));
+                ImVec2 uv0(0.0f, 0.0f), uv1(1.0f, 1.0f);
+                ImGui::Image((ImTextureID)srv, ImVec2(dispW, dispH), uv0, uv1);
+                imageScreenMin = ImGui::GetItemRectMin();
+                imageScreenMax = ImGui::GetItemRectMax();
+                imageRectValid = true;
+                // Drag to pan when zoomed in (content larger than visible area)
+                if ((dispW > areaW || dispH > areaH) && ImGui::IsWindowHovered() && ImGui::IsMouseDown(0)) {
+                    ImVec2 delta = ImGui::GetIO().MouseDelta;
+                    ImGui::SetScrollX(ImGui::GetScrollX() - delta.x);
+                    ImGui::SetScrollY(ImGui::GetScrollY() - delta.y);
+                }
+                ImGui::EndChild();
+            } else {
+                ImGui::SetCursorScreenPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f - 70.0f, viewport->WorkPos.y + topBarH + (viewport->WorkSize.y - topBarH) * 0.5f - 10.0f));
+                ImGui::TextDisabled("Failed to load image (use Close above)");
+            }
+        }
+
+        // Click anywhere on the window outside the image and outside the top bar to close.
+        // Only when image is actually shown (imageRectValid) and past a short grace period
+        // so the opening click/release does not immediately close the viewer.
+        if (ImGui::IsMouseClicked(0) && imageRectValid && (ImGui::GetTime() - m_AttachmentViewerOpenTime) > 0.25) {
+            ImVec2 mp = ImGui::GetIO().MousePos;
+            bool inView = (mp.x >= viewport->WorkPos.x && mp.y >= viewport->WorkPos.y &&
+                mp.x < viewport->WorkPos.x + viewport->WorkSize.x && mp.y < viewport->WorkPos.y + viewport->WorkSize.y);
+            bool inTopBar = (mp.y >= topBarY && mp.y < topBarY + topBarH);
+            bool onImage = (mp.x >= imageScreenMin.x && mp.y >= imageScreenMin.y && mp.x < imageScreenMax.x && mp.y < imageScreenMax.y);
+            if (inView && !inTopBar && !onImage) {
+                m_ViewingAttachmentId.clear();
+                m_AttachmentViewerZoom = 1.0f;
+            }
+        }
+
+        ImGui::End();
+        ImGui::PopStyleColor();
+    }
+
+    std::vector<ChatMessage>& Application::GetChannelMessages(int channelId) {
+        return m_ChannelStates[channelId].messages;
+    }
+
+    std::string Application::GetStateCachePath() const {
+        if (m_CurrentUser.email.empty()) return {};
+        std::string s = m_CurrentUser.email;
+        for (char& c : s) {
+            if (c == '@' || c == '.' || c == ':' || c == '\\' || c == '/') c = '_';
+        }
+        return ConfigManager::GetConfigDirectory() + "\\state_cache_" + s + ".json";
+    }
+
+    std::string Application::GetMessageCacheDbPath() const {
+        if (m_CurrentUser.email.empty()) return {};
+        std::string s = m_CurrentUser.email;
+        for (char& c : s) {
+            if (c == '@' || c == '.' || c == ':' || c == '\\' || c == '/') c = '_';
+        }
+        return ConfigManager::GetConfigDirectory() + "\\message_cache_" + s + ".db";
+    }
+
+    void Application::LoadStateCache() {
+        std::string path = GetStateCachePath();
+        if (path.empty()) return;
+        std::ifstream f(path);
+        if (!f.is_open()) return;
+        try {
+            json j = json::parse(f);
+            if (j.contains("user") && j["user"] != m_CurrentUser.email) return;
+            if (j.contains("servers") && j["servers"].is_array()) {
+                m_ServerList.clear();
+                for (const auto& item : j["servers"]) {
+                    Server s;
+                    s.id = item.value("id", 0);
+                    s.name = item.value("name", "");
+                    s.inviteCode = item.value("code", "");
+                    if (j.contains("channels") && j["channels"].contains(std::to_string(s.id))) {
+                        for (const auto& ch : j["channels"][std::to_string(s.id)]) {
+                            Channel c;
+                            c.id = ch.value("id", 0);
+                            c.name = ch.value("name", "");
+                            std::string typeStr = ch.value("type", "text");
+                            if (typeStr == "voice") c.type = ChannelType::Voice;
+                            else if (typeStr == "cinema") c.type = ChannelType::Cinema;
+                            else if (typeStr == "announcement") c.type = ChannelType::Announcement;
+                            else c.type = ChannelType::Text;
+                            c.description = ch.value("desc", "");
+                            c.userLimit = ch.value("limit", 0);
+                            s.channels.push_back(std::move(c));
+                        }
+                    }
+                    m_ServerList.push_back(std::move(s));
+                }
+                if (!m_ServerList.empty() && m_SelectedServerId == -1)
+                    m_SelectedServerId = m_ServerList[0].id;
+            }
+            if (j.contains("messages") && j["messages"].is_object()) {
+                for (auto& [cidStr, arr] : j["messages"].items()) {
+                    int cid = 0;
+                    try { cid = std::stoi(cidStr); } catch (...) { continue; }
+                    if (!arr.is_array()) continue;
+                    auto& msgs = m_ChannelStates[cid].messages;
+                    msgs.clear();
+                    for (const auto& item : arr) {
+                        ChatMessage cm;
+                        cm.id = item.value("mid", 0);
+                        cm.channelId = item.value("cid", cid);
+                        cm.sender = item.value("u", "");
+                        cm.content = item.value("msg", "");
+                        cm.timestamp = item.value("time", "");
+                        cm.replyToId = item.value("reply_to", 0);
+                        cm.pinned = item.value("pin", false);
+                        cm.attachmentId = item.value("attachment", "");
+                        if (item.contains("reactions") && item["reactions"].is_object()) {
+                            for (auto& [emoji, users] : item["reactions"].items()) {
+                                std::vector<std::string> list;
+                                if (users.is_array()) for (const auto& u : users) list.push_back(u.get<std::string>());
+                                cm.reactions[emoji] = std::move(list);
+                            }
+                        }
+                        msgs.push_back(std::move(cm));
+                    }
+                    if (j.contains("last_read") && j["last_read"].contains(cidStr))
+                        m_ChannelStates[cid].lastReadMessageId = j["last_read"][cidStr].get<int>();
+                }
+            }
+        } catch (...) { /* ignore corrupt cache */ }
+    }
+
+    void Application::SaveStateCache() {
+        std::string path = GetStateCachePath();
+        if (path.empty()) return;
+        try {
+            json j;
+            j["user"] = m_CurrentUser.email;
+            j["servers"] = json::array();
+            for (const auto& s : m_ServerList) {
+                json sj;
+                sj["id"] = s.id;
+                sj["name"] = s.name;
+                sj["code"] = s.inviteCode;
+                j["servers"].push_back(sj);
+            }
+            j["channels"] = json::object();
+            for (const auto& s : m_ServerList) {
+                json chArr = json::array();
+                for (const auto& ch : s.channels) {
+                    json cj;
+                    cj["id"] = ch.id;
+                    cj["name"] = ch.name;
+                    const char* typeStr = "text";
+                    if (ch.type == ChannelType::Voice) typeStr = "voice";
+                    else if (ch.type == ChannelType::Cinema) typeStr = "cinema";
+                    else if (ch.type == ChannelType::Announcement) typeStr = "announcement";
+                    cj["type"] = typeStr;
+                    cj["desc"] = ch.description;
+                    cj["limit"] = ch.userLimit;
+                    chArr.push_back(cj);
+                }
+                j["channels"][std::to_string(s.id)] = chArr;
+            }
+            j["messages"] = json::object();
+            j["last_read"] = json::object();
+            const size_t kMaxMessagesPerChannel = 500;
+            for (const auto& [cid, state] : m_ChannelStates) {
+                std::string cidStr = std::to_string(cid);
+                j["messages"][cidStr] = json::array();
+                for (const auto& m : state.messages) {
+                    json mj;
+                    mj["mid"] = m.id;
+                    mj["cid"] = m.channelId;
+                    mj["u"] = m.sender;
+                    mj["msg"] = m.content;
+                    mj["time"] = m.timestamp;
+                    mj["reply_to"] = m.replyToId;
+                    mj["pin"] = m.pinned;
+                    mj["attachment"] = m.attachmentId;
+                    mj["reactions"] = m.reactions;
+                    j["messages"][cidStr].push_back(mj);
+                }
+                if (state.messages.size() > kMaxMessagesPerChannel) {
+                    json& arr = j["messages"][cidStr];
+                    json newArr = json::array();
+                    size_t start = arr.size() - kMaxMessagesPerChannel;
+                    for (size_t i = start; i < arr.size(); ++i) newArr.push_back(arr[i]);
+                    arr = std::move(newArr);
+                }
+                j["last_read"][cidStr] = state.lastReadMessageId;
+            }
+            std::ofstream of(path);
+            if (of.is_open()) of << j.dump(1);
+        } catch (...) { /* ignore save errors */ }
+    }
+
     // -------------------------------------------------------------------------
     // Main loop (Run)
     // Order: 1) Pump messages  2) Wait (quit/wake/timeout)  3) Network + echo
@@ -386,10 +761,13 @@ namespace TalkMe {
                 if (done || !m_Window.GetHwnd()) break;
 
                 // STEP 2: Wait for quit, network wake, or any input (mouse, keyboard, paint).
-                // OPTIMIZATION: Use INFINITE (0% CPU) when idle, but cap at 250ms when in
-                // a voice channel to ensure background keepalives (Ping/Hello) don't starve.
+                // OPTIMIZATION: Use INFINITE (0% CPU) when idle, but cap when we need continuous redraws:
+                // - In a voice channel: 250ms so keepalives don't starve.
+                // - GIF panel open: ~60 fps so the panel and animated GIFs render without mouse movement.
                 DWORD waitMs = INFINITE;
-                if (m_ActiveVoiceChannelId != -1 && m_NetClient.IsConnected()) {
+                if (m_ShowGifPicker) {
+                    waitMs = 16;
+                } else if (m_ActiveVoiceChannelId != -1 && m_NetClient.IsConnected()) {
                     waitMs = 250;
                 }
 
@@ -587,6 +965,10 @@ namespace TalkMe {
                 {
                     auto& tm = TalkMe::TextureManager::Get();
                     tm.SetDevice(m_Graphics.GetDevice());
+                    static bool s_friendsIconLoaded = false;
+                    if (!s_friendsIconLoaded && tm.GetTexture("friends_icon") == nullptr) {
+                        s_friendsIconLoaded = LoadFriendsIconOnce();
+                    }
                     for (auto& [user, si] : m_ScreenShare.activeStreams) {
                         if (!si.frameUpdated || si.lastFrameData.size() <= 1) continue;
                         static int s_texLog = 0;
@@ -1286,74 +1668,7 @@ namespace TalkMe {
             ImGui::End();
         }
 
-        // GIF Picker (Tenor)
-        if (m_ShowGifPicker && m_CurrentState == AppState::MainApp) {
-            ImGui::SetNextWindowSize(ImVec2(420, 350), ImGuiCond_FirstUseEver);
-            if (ImGui::Begin("GIF Search (Tenor)", &m_ShowGifPicker)) {
-                ImGui::PushItemWidth(-70);
-                bool searchEnter = ImGui::InputTextWithHint("##gif_search", "Search GIFs...", m_GifSearchBuf, sizeof(m_GifSearchBuf), ImGuiInputTextFlags_EnterReturnsTrue);
-                ImGui::PopItemWidth();
-                ImGui::SameLine();
-                if ((ImGui::Button("Search", ImVec2(60, 0)) || searchEnter) && strlen(m_GifSearchBuf) > 0) {
-                    m_TenorAPI.Search(m_GifSearchBuf, 20, nullptr);
-                }
-
-                if (m_TenorAPI.IsSearching()) {
-                    ImGui::TextDisabled("Searching...");
-                }
-
-                ImGui::Separator();
-                ImGui::BeginChild("GifResults", ImVec2(0, 0), false);
-
-                auto results = m_TenorAPI.GetCachedResults();
-                if (results.empty() && !m_TenorAPI.IsSearching()) {
-                    ImGui::TextDisabled("Search for GIFs above, or click Trending");
-                    ImGui::Dummy(ImVec2(0, 4));
-                    if (ImGui::Button("Trending GIFs")) {
-                        m_TenorAPI.Trending(20, nullptr);
-                    }
-                }
-
-                float colW = 190.0f;
-                int cols = (std::max)(1, (int)(ImGui::GetContentRegionAvail().x / colW));
-                int col = 0;
-
-                for (const auto& gif : results) {
-                    ImGui::PushID(gif.id.c_str());
-
-                    std::string label = gif.title;
-                    if (label.size() > 25) label = label.substr(0, 24) + "...";
-                    if (label.empty()) label = "GIF";
-
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.2f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.25f, 0.35f, 1.0f));
-                    if (ImGui::Button(label.c_str(), ImVec2(colW - 10, 50))) {
-                        // Send GIF URL as a chat message
-                        if (m_SelectedChannelId != -1) {
-                            nlohmann::json msgJ;
-                            msgJ["cid"] = m_SelectedChannelId;
-                            msgJ["u"] = m_CurrentUser.username;
-                            msgJ["msg"] = gif.gifUrl;
-                            m_NetClient.Send(PacketType::Message_Text, msgJ.dump());
-                            m_ShowGifPicker = false;
-                        }
-                    }
-                    ImGui::PopStyleColor(2);
-                    if (ImGui::IsItemHovered() && !gif.gifUrl.empty()) {
-                        ImGui::SetTooltip("%s\n%s", gif.title.c_str(), gif.gifUrl.c_str());
-                    }
-
-                    col++;
-                    if (col < cols) ImGui::SameLine();
-                    else col = 0;
-
-                    ImGui::PopID();
-                }
-
-                ImGui::EndChild();
-            }
-            ImGui::End();
-        }
+        // GIF picker is now rendered inline above chat input via renderGifPanel callback in RenderChannelView
 
         if (m_ShowShortcuts) {
             ImGui::SetNextWindowSize(ImVec2(300, 250), ImGuiCond_FirstUseEver);
@@ -1629,7 +1944,7 @@ namespace TalkMe {
         }
         else if (m_ShowFriendList) {
             float left = UI::Styles::MainContentLeftOffset;
-            float friendW = ImGui::GetWindowWidth() - left - UI::Styles::ServerRailWidth;
+            float friendW = ImGui::GetWindowWidth() - left;
             ImGui::SetCursorPos(ImVec2(left, 0));
             ImGui::PushStyleColor(ImGuiCol_ChildBg, UI::Styles::BgChat());
             ImGui::BeginChild("FriendsTab", ImVec2(friendW, ImGui::GetWindowHeight()), false);
@@ -1891,15 +2206,45 @@ namespace TalkMe {
                     if (ch.type == ChannelType::Text && !firstTextCh) firstTextCh = &ch;
                 }
                 if (!currentValid) {
-                    if (firstTextCh) {
+                    if (firstTextCh)
                         m_SelectedChannelId = firstTextCh->id;
-                        m_NetClient.Send(PacketType::Select_Text_Channel, PacketHandler::SelectTextChannelPayload(firstTextCh->id));
-                    }
                     else
                         m_SelectedChannelId = -1;
                 }
 
-                UI::Views::RenderChannelView(m_NetClient, m_CurrentUser, *it, m_Messages, m_SelectedChannelId, m_ActiveVoiceChannelId, m_VoiceMembers, m_SpeakingTimers, m_UserVolumes,
+                if (m_SelectedChannelId != -1) {
+                    if (m_SelectedChannelId != m_PrevSelectedChannelId) {
+                        m_PrevSelectedChannelId = m_SelectedChannelId;
+                    }
+                    auto& state = m_ChannelStates[m_SelectedChannelId];
+                    if (state.messages.empty() && !state.loadingLatest && !state.loadingOlder && !state.initialPageRequested) {
+                        state.loadingLatest = true;
+                        state.initialPageRequested = true;
+
+                        // Fast resume: load from local cache immediately, then ask server around that anchor.
+                        const int anchor = m_MessageCacheDb.GetLastReadMid(m_SelectedChannelId);
+                        if (anchor > 0) {
+                            auto cached = m_MessageCacheDb.LoadAround(m_SelectedChannelId, anchor, 100, 100);
+                            if (!cached.empty()) state.messages = std::move(cached);
+                            m_NetClient.Send(PacketType::Message_History_Page, PacketHandler::MessageHistoryAroundPayload(m_SelectedChannelId, anchor, 100, 100));
+                        } else {
+                            m_NetClient.Send(PacketType::Message_History_Page, PacketHandler::MessageHistoryPagePayload(m_SelectedChannelId, 0, 50));
+                        }
+                    }
+                }
+
+                m_OnImageUpload = [this](std::vector<uint8_t> data, std::string filename) {
+                    StartImageUpload(std::move(data), std::move(filename), m_SelectedChannelId);
+                };
+                m_RequestAttachmentFn = [this](const std::string& id) { RequestAttachment(id); };
+                m_GetAttachmentDisplayFn = [this](const std::string& id) { return GetAttachmentDisplay(id); };
+                m_OnAttachmentClickFn = [this](const std::string& id) {
+                    m_ViewingAttachmentId = id;
+                    m_AttachmentViewerZoom = 1.0f;
+                    m_AttachmentViewerOpen = true;
+                    m_AttachmentViewerOpenTime = ImGui::GetTime();
+                };
+                UI::Views::RenderChannelView(m_NetClient, m_CurrentUser, *it, GetChannelMessages(m_SelectedChannelId), m_SelectedChannelId, m_ActiveVoiceChannelId, m_VoiceMembers, m_SpeakingTimers, m_UserVolumes,
                     [this](const std::string& uid, float g) {
                         m_UserVolumes[uid] = g;
                         m_AudioEngine.SetUserGain(uid, g);
@@ -2012,14 +2357,112 @@ namespace TalkMe {
                     }(),
                     &m_ScreenShare.viewingStream,
                     &m_ScreenShare.maximized,
-                    &m_ShowGifPicker);
+                    &m_ShowGifPicker,
+                    (m_CurrentState == AppState::MainApp && m_GifPickerPanel) ? std::function<void(float, float)>([this](float w, float h) {
+                        ImGui::BeginChild("EmotionsPanel", ImVec2(w, h), true, ImGuiWindowFlags_NoScrollbar);
+                        const float tabBtnW = 84.0f;
+                        const float tabGap = 6.0f;
+                        float totalTabsW = tabBtnW * 3.0f + tabGap * 2.0f;
+                        ImGui::SetCursorPosX((w - totalTabsW) * 0.5f);
+                        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+                        if (m_EmotionsPanelTab == 0) {
+                            ImGui::PushStyleColor(ImGuiCol_Button, TalkMe::UI::Styles::ButtonSubtle());
+                            ImGui::PushStyleColor(ImGuiCol_Text, TalkMe::UI::Styles::Accent());
+                        }
+                        if (ImGui::Button("Emoji", ImVec2(tabBtnW, 32))) m_EmotionsPanelTab = 0;
+                        if (m_EmotionsPanelTab == 0) ImGui::PopStyleColor(2);
+                        ImGui::SameLine(0, tabGap);
+                        if (m_EmotionsPanelTab == 1) {
+                            ImGui::PushStyleColor(ImGuiCol_Button, TalkMe::UI::Styles::ButtonSubtle());
+                            ImGui::PushStyleColor(ImGuiCol_Text, TalkMe::UI::Styles::Accent());
+                        }
+                        if (ImGui::Button("Stickers", ImVec2(tabBtnW, 32))) m_EmotionsPanelTab = 1;
+                        if (m_EmotionsPanelTab == 1) ImGui::PopStyleColor(2);
+                        ImGui::SameLine(0, tabGap);
+                        if (m_EmotionsPanelTab == 2) {
+                            ImGui::PushStyleColor(ImGuiCol_Button, TalkMe::UI::Styles::ButtonSubtle());
+                            ImGui::PushStyleColor(ImGuiCol_Text, TalkMe::UI::Styles::Accent());
+                        }
+                        if (ImGui::Button("GIFs", ImVec2(tabBtnW, 32))) m_EmotionsPanelTab = 2;
+                        if (m_EmotionsPanelTab == 2) ImGui::PopStyleColor(2);
+                        ImGui::PopStyleVar();
+                        ImGui::Separator();
+
+                        if (m_EmotionsPanelTab == 0) {
+                            const char* emojis[] = { "\xf0\x9f\x98\x80", "\xf0\x9f\x98\x81", "\xf0\x9f\x98\x82", "\xf0\x9f\x98\x83", "\xf0\x9f\x98\x84", "\xf0\x9f\x98\x85", "\xf0\x9f\x98\x86", "\xf0\x9f\x98\x89", "\xf0\x9f\x98\x8a", "\xf0\x9f\x99\x82", "\xf0\x9f\x91\x8d", "\xf0\x9f\x91\x8e", "\xf0\x9f\xa4\x94", "\xe2\x9d\xa4", "\xf0\x9f\x92\x94", "\xf0\x9f\x98\xa2", "\xf0\x9f\x98\xa1", "\xf0\x9f\x98\xa0" };
+                            int n = (int)(sizeof(emojis) / sizeof(emojis[0]));
+                            int cols = (std::max)(1, (int)(w / 44));
+                            for (int i = 0; i < n; i++) {
+                                ImGui::PushID(i);
+                                if (ImGui::Button(emojis[i], ImVec2(36, 36))) {
+                                    size_t len = strlen(m_ChatInputBuf);
+                                    const char* utf8 = emojis[i];
+                                    size_t add = 0;
+                                    while (utf8[add] && len + add < 1023) add++;
+                                    if (len + add < 1024) {
+                                        for (size_t k = 0; k < add; k++) m_ChatInputBuf[len + k] = utf8[k];
+                                        m_ChatInputBuf[len + add] = '\0';
+                                    }
+                                }
+                                ImGui::PopID();
+                                if ((i + 1) % cols != 0) ImGui::SameLine();
+                            }
+                        } else if (m_EmotionsPanelTab == 1) {
+                            ImGui::TextDisabled("Stickers coming soon.");
+                        } else {
+                            float cw = ImGui::GetContentRegionAvail().x;
+                            float ch = ImGui::GetContentRegionAvail().y;
+                            if (m_GifPickerPanel->HasApiKey() && m_GifPanelRender)
+                                m_GifPanelRender(cw, ch);
+                            else
+                                ImGui::TextDisabled("Add klipy_api_key to secret/secrets.");
+                        }
+                        ImGui::EndChild();
+                    }) : std::function<void(float, float)>(),
+                    &m_MediaBaseUrl,
+                    &m_OnImageUpload,
+                    &m_RequestAttachmentFn,
+                    &m_GetAttachmentDisplayFn,
+                    &m_OnAttachmentClickFn,
+                    [this]() {
+                        if (m_SelectedChannelId == -1) return;
+                        auto& state = m_ChannelStates[m_SelectedChannelId];
+                        if (state.loadingOlder || state.loadingLatest || state.messages.empty()) return;
+                        static double s_lastOlderRequest = 0.0;
+                        double t = ImGui::GetTime();
+                        if (t - s_lastOlderRequest < 0.5) return;
+                        s_lastOlderRequest = t;
+                        int oldestId = state.messages.front().id;
+                        state.loadingOlder = true;
+                        m_NetClient.Send(PacketType::Message_History_Page, PacketHandler::MessageHistoryPagePayload(m_SelectedChannelId, oldestId, 50));
+                    },
+                    m_SelectedChannelId != -1 ? &m_ChannelStates[m_SelectedChannelId].loadingOlder : nullptr,
+                    [this](int cid, int mid) {
+                        if (cid <= 0 || mid <= 0) return;
+                        auto& state = m_ChannelStates[cid];
+                        if (mid <= state.lastReadMessageId) return;
+                        state.lastReadMessageId = mid;
+                        m_MessageCacheDb.AdvanceLastReadMid(cid, mid);
+                        m_UnreadCounts[cid] = 0;
+
+                        auto now = std::chrono::steady_clock::now();
+                        if (m_LastReadAnchorPersistTime.time_since_epoch().count() == 0 ||
+                            std::chrono::duration_cast<std::chrono::milliseconds>(now - m_LastReadAnchorPersistTime).count() > 1000) {
+                            SaveStateCache();
+                            m_LastReadAnchorPersistTime = now;
+                        }
+                    });
             }
         }
+        RenderAttachmentViewer();
     }
 
     void Application::Cleanup() {
         if (m_CleanedUp) return;
         m_CleanedUp = true;
+
+        m_GifPanelRender = nullptr;
+        m_GifPickerPanel.reset();
 
         LOG_APP("Starting cleanup...");
         m_ShuttingDown.store(true);

@@ -132,6 +132,7 @@ namespace TalkMe {
 
         // --- ASIO handles -------------------------------------------------------
         asio::ip::tcp::acceptor   m_Acceptor;
+        asio::ip::tcp::acceptor   m_MediaAcceptor;  // HTTP GET /media/<id> on port 5557
         asio::ip::udp::socket     m_VoiceUdpSocket;
         asio::io_context& m_IoContext;
 
@@ -160,6 +161,7 @@ namespace TalkMe {
 
         // --- Internal helpers ---------------------------------------------------
         void DoAccept();
+        void DoAcceptMedia();
         void StartVoiceUdpReceive();
         void StartConnectionHealthCheck();
         void StartVoiceOptimizationTimer();

@@ -7,9 +7,12 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <unordered_set>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
+#include <sstream>
 
 using json = nlohmann::json;
 using asio::ip::tcp;
@@ -103,12 +106,16 @@ namespace {
 // ---------------------------------------------------------------------------
 namespace TalkMe {
 
+    static constexpr short kMediaPort = 5557;
+
     TalkMeServer::TalkMeServer(asio::io_context& io_context, short port)
         : m_Acceptor(io_context, tcp::endpoint(tcp::v4(), port))
+        , m_MediaAcceptor(io_context, tcp::endpoint(tcp::v4(), kMediaPort))
         , m_VoiceUdpSocket(io_context, udp::endpoint(udp::v4(), VOICE_PORT))
         , m_IoContext(io_context)
     {
         DoAccept();
+        DoAcceptMedia();
         StartVoiceUdpReceive();
         StartVoiceOptimizationTimer();
         StartConnectionHealthCheck();
@@ -745,6 +752,103 @@ namespace TalkMe {
     }
 
     // ---------------------------------------------------------------------------
+    // HTTP media server: GET /media/<id> serves file from attachments/<id>
+    // ---------------------------------------------------------------------------
+    namespace {
+        std::string ContentTypeFromExtension(const std::string& id) {
+            std::string lower = id;
+            for (char& c : lower) c = (char)std::tolower((unsigned char)c);
+            size_t dot = lower.rfind('.');
+            if (dot == std::string::npos) return "application/octet-stream";
+            std::string ext = lower.substr(dot);
+            if (ext == ".png") return "image/png";
+            if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
+            if (ext == ".gif") return "image/gif";
+            if (ext == ".webp") return "image/webp";
+            if (ext == ".bmp") return "image/bmp";
+            if (ext == ".mp4") return "video/mp4";
+            if (ext == ".webm") return "video/webm";
+            return "application/octet-stream";
+        }
+
+        void HandleMediaRequest(tcp::socket socket) {
+            auto sock_ptr = std::make_shared<tcp::socket>(std::move(socket));
+            auto buf = std::make_shared<asio::streambuf>();
+            asio::async_read_until(*sock_ptr, *buf, "\r\n", [sock_ptr, buf](std::error_code ec, std::size_t) {
+                if (ec) { sock_ptr->close(); return; }
+                std::istream is(buf.get());
+                std::string line;
+                if (!std::getline(is, line) || line.empty()) { sock_ptr->close(); return; }
+                // Parse "GET /media/xxx HTTP/1.x"
+                if (line.size() < 10 || line.compare(0, 4, "GET ") != 0) {
+                    std::string bad = "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n";
+                    asio::write(*sock_ptr, asio::buffer(bad));
+                    sock_ptr->close();
+                    return;
+                }
+                size_t pathStart = 4;
+                size_t pathEnd = line.find(' ', pathStart);
+                if (pathEnd == std::string::npos) { sock_ptr->close(); return; }
+                std::string path = line.substr(pathStart, pathEnd - pathStart);
+                const std::string prefix = "/media/";
+                if (path.size() < prefix.size() + 1 || path.compare(0, prefix.size(), prefix) != 0) {
+                    std::string bad = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
+                    asio::write(*sock_ptr, asio::buffer(bad));
+                    sock_ptr->close();
+                    return;
+                }
+                std::string id = path.substr(prefix.size());
+                if (id.empty() || id.find("..") != std::string::npos) {
+                    std::string bad = "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n";
+                    asio::write(*sock_ptr, asio::buffer(bad));
+                    sock_ptr->close();
+                    return;
+                }
+                std::filesystem::path filePath = std::filesystem::path("attachments") / id;
+                if (!std::filesystem::is_regular_file(filePath)) {
+                    std::string bad = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
+                    asio::write(*sock_ptr, asio::buffer(bad));
+                    sock_ptr->close();
+                    return;
+                }
+                std::ifstream file(filePath, std::ios::binary | std::ios::ate);
+                if (!file) {
+                    std::string bad = "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n";
+                    asio::write(*sock_ptr, asio::buffer(bad));
+                    sock_ptr->close();
+                    return;
+                }
+                std::streamsize fileSize = file.tellg();
+                file.seekg(0);
+                std::vector<char> body(static_cast<size_t>(fileSize));
+                if (!file.read(body.data(), fileSize)) {
+                    std::string bad = "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n";
+                    asio::write(*sock_ptr, asio::buffer(bad));
+                    sock_ptr->close();
+                    return;
+                }
+                std::string contentType = ContentTypeFromExtension(id);
+                std::ostringstream resp;
+                resp << "HTTP/1.1 200 OK\r\nContent-Type: " << contentType
+                     << "\r\nContent-Length: " << fileSize << "\r\nConnection: close\r\n\r\n";
+                std::string header = resp.str();
+                std::vector<asio::const_buffer> buffers;
+                buffers.push_back(asio::buffer(header));
+                buffers.push_back(asio::buffer(body.data(), body.size()));
+                asio::write(*sock_ptr, buffers);
+                sock_ptr->close();
+            });
+        }
+    }
+
+    void TalkMeServer::DoAcceptMedia() {
+        m_MediaAcceptor.async_accept([this](std::error_code ec, tcp::socket socket) {
+            if (!ec) HandleMediaRequest(std::move(socket));
+            DoAcceptMedia();
+        });
+    }
+
+    // ---------------------------------------------------------------------------
     // Buffer factories
     // ---------------------------------------------------------------------------
     std::shared_ptr<std::vector<uint8_t>>
@@ -770,12 +874,13 @@ namespace TalkMe {
     void TalkMeServer::BroadcastToChannelMembers(int channelId, PacketType type, const std::string& payload) {
         std::vector<std::string> allowedUsers = Database::Get().GetUsersInServerByChannel(channelId);
         if (allowedUsers.empty()) return;
+        std::unordered_set<std::string> allowedSet(allowedUsers.begin(), allowedUsers.end());
         auto buffer = CreateBuffer(type, payload);
 
         std::shared_lock lock(m_RoomMutex);
         for (const auto& session : m_AllSessions) {
             const std::string& username = session->GetUsername();
-            if (!username.empty() && std::find(allowedUsers.begin(), allowedUsers.end(), username) != allowedUsers.end()) {
+            if (!username.empty() && allowedSet.find(username) != allowedSet.end()) {
                 session->SendShared(buffer, false);
             }
         }

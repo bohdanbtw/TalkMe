@@ -22,10 +22,10 @@ namespace TalkMe::UI {
     };
 
     struct Styles {
-        // ---- Layout: channel sidebar left, server rail right ----
+        // ---- Layout: server rail far left, channel list next, chat right ----
         static constexpr float SidebarWidth          = 240.0f;
         static constexpr float ServerRailWidth       = 64.0f;
-        static constexpr float MainContentLeftOffset = 240.0f;
+        static constexpr float MainContentLeftOffset = ServerRailWidth + SidebarWidth;  // 304: rail + channel list
         static constexpr float FooterHeight          = 150.0f;
         static constexpr float SectionPadding        = 14.0f;
         static constexpr float ItemPadding           = 6.0f;

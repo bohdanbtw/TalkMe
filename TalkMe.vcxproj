@@ -133,6 +133,7 @@
       <AdditionalIncludeDirectories>$(SolutionDir)src;$(SolutionDir)vendor;$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <AdditionalOptions>%(AdditionalOptions) /FS</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -149,15 +150,18 @@
     <ClCompile Include="src\audio\OpusCodec.cpp" />
     <ClCompile Include="src\audio\AudioEngine.cpp" />
     <ClCompile Include="src\core\Logger.cpp" />
+    <ClCompile Include="src\core\Secrets.cpp" />
     <ClCompile Include="src\overlay\GameOverlay.cpp" />
     <ClCompile Include="src\screen\ScreenCapture.cpp" />
     <ClCompile Include="src\screen\DXGICapture.cpp" />
     <ClCompile Include="src\screen\H264Encoder.cpp" />
     <ClCompile Include="src\screen\AudioLoopback.cpp" />
-    <ClCompile Include="src\network\TenorAPI.cpp" />
+    <ClCompile Include="src\storage\MessageCacheDb.cpp" />
+    <ClCompile Include="src\network\KlipyGifProvider.cpp" />
     <ClCompile Include="src\network\ImageCache.cpp" />
     <ClCompile Include="src\ui\MarkdownRenderer.cpp" />
     <ClCompile Include="src\ui\TextureManager.cpp" />
+    <ClCompile Include="src\ui\GifPickerPanel.cpp" />
     <ClCompile Include="src\network\VoiceTransport.cpp" />
     <ClCompile Include="src\ui\views\ChatView.cpp" />
     <ClCompile Include="src\ui\views\SettingsView.cpp" />
@@ -188,14 +192,16 @@
     <ClInclude Include="src\audio\OpusCodec.h" />
     <ClInclude Include="src\audio\AudioEngine.h" />
     <ClInclude Include="src\core\Logger.h" />
+    <ClInclude Include="src\core\Secrets.h" />
     <ClInclude Include="src\overlay\GameOverlay.h" />
     <ClInclude Include="src\screen\ScreenCapture.h" />
     <ClInclude Include="src\screen\DXGICapture.h" />
     <ClInclude Include="src\screen\H264Encoder.h" />
     <ClInclude Include="src\screen\AudioLoopback.h" />
-    <ClInclude Include="src\network\TenorAPI.h" />
+    <ClInclude Include="src\network\KlipyGifProvider.h" />
     <ClInclude Include="src\network\ImageCache.h" />
     <ClInclude Include="src\ui\TextureManager.h" />
+    <ClInclude Include="src\ui\GifPickerPanel.h" />
     <ClInclude Include="src\game\Chess.h" />
     <ClInclude Include="src\game\FlappyBird.h" />
     <ClInclude Include="src\game\TicTacToe.h" />
@@ -205,6 +211,7 @@
     <ClInclude Include="src\network\VoiceTransport.h" />
     <ClInclude Include="src\shared\PacketHandler.h" />
     <ClInclude Include="src\shared\Protocol.h" />
+    <ClInclude Include="src\storage\MessageCacheDb.h" />
     <ClInclude Include="src\ui\views\ChatView.h" />
     <ClInclude Include="src\ui\views\SettingsView.h" />
     <ClInclude Include="src\ui\views\SidebarView.h" />
@@ -236,6 +243,7 @@
     <None Include="QUICK_REFERENCE.md" />
     <None Include="README_FIX.md" />
     <None Include="resource.h" />
+    <None Include="secret\secrets" />
     <None Include="SUMMARY.md" />
     <None Include="TECHNICAL_ANALYSIS.md" />
     <None Include="TESTING_CHECKLIST.md" />
