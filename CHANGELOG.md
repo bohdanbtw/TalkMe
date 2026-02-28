@@ -4,6 +4,33 @@ All notable changes to the **TalkMe client** are documented here. The format is 
 
 ---
 
+## [1.4.0] — 2026-02-28
+
+### Added
+
+- **Friends button in server rail** — The Friends entry is now in the left server rail (same column as the "+" and server icons). It uses the app icon from the assets folder (`app_48x48.ico`) when available, with a "Fr" text fallback. Selection is shown with the same accent bar as the selected server.
+- **GIF panel: click outside to close** — When the GIF/Emotions panel is open, clicking anywhere outside the panel (chat area, sidebar, etc.) closes it.
+- **Secrets folder in .gitignore** — The entire `secret/` directory is ignored; `secret/secrets.example` remains trackable as a template.
+
+### Changed
+
+- **Sidebar layout** — Friends was removed from the channel list. The top-of-sidebar Friends button and the "+" button for adding channels were removed. The "+" next to "TEXT CHANNELS" and "VOICE CHANNELS" was removed; the server rail "+" (create/join server) is unchanged.
+- **GIF panel size and position** — The GIF/Emotions panel no longer takes the full content area. It uses ~30% of the content width and is right-aligned; the chat area uses the remaining ~70% when the panel is open.
+- **Emotions panel tabs** — The active tab (Emoji / Stickers / GIFs) uses accent styling and a fixed height (32px) for a clearer selected state.
+- **Footer** — Long usernames are truncated with an ellipsis (full name in tooltip). Mic, Spk, and Info buttons use shorter labels and consistent padding so they are not cut off.
+- **GIF picker UI** — The redundant "GIFs" heading under the tabs was removed; the tab label is sufficient.
+
+### Fixed
+
+- **GIF panel rendering when idle** — The GIF panel and animated GIFs now update continuously when the panel is open. The main loop uses a 16 ms wait when the GIF panel is visible so redraws occur without mouse movement.
+
+### Technical
+
+- **App icon for Friends** — The app icon is loaded from `%LocalAppData%\TalkMe\assets\app_48x48.ico` (or exe-relative `src/assets`) via GDI (`LoadImage`, `CreateDIBSection`, `DrawIconEx`), converted to RGBA, and registered in TextureManager as `friends_icon`. Loaded once after the D3D device is set.
+- **.gitignore** — `secret/` added; `!secret/secrets.example` keeps the example file trackable.
+
+---
+
 ## [1.3.0] — 2026-02-24
 
 ### Added
@@ -63,5 +90,6 @@ All notable changes to the **TalkMe client** are documented here. The format is 
 - **Minor (1.X.0)** — New features, medium refactors, notable improvements.
 - **Major (X.0.0)** — Large updates, breaking changes, major redesign.
 
+[1.4.0]: https://github.com/bohdanbtw/TalkMe/releases/tag/v1.4.0
 [1.3.0]: https://github.com/bohdanbtw/TalkMe/releases/tag/v1.3.0
 [1.0.0]: https://github.com/bohdanbtw/TalkMe/releases/tag/v1.0.0

@@ -6,6 +6,7 @@
 #include "../core/ConfigManager.h"
 #include <imgui.h>
 #include "../ui/TextureManager.h"
+#include <stb_image.h>
 #include <nlohmann/json.hpp>
 #include <cstring>
 #include <algorithm>
@@ -114,6 +115,12 @@ void Application::ProcessNetworkMessages() {
                 m_CurrentUser.isLoggedIn = true;
                 m_CurrentState           = AppState::MainApp;
                 m_StatusMessage[0]       = '\0';
+                m_MediaBaseUrl          = "http://" + m_ServerIP + ":5557";
+                {
+                    const std::string dbPath = GetMessageCacheDbPath();
+                    if (!dbPath.empty()) m_MessageCacheDb.Open(dbPath);
+                }
+                LoadStateCache();
                 continue;
             }
 
@@ -466,9 +473,18 @@ void Application::ProcessNetworkMessages() {
             }
 
             if (msg.type == PacketType::Server_List_Response) {
+                std::vector<Server> oldList = std::move(m_ServerList);
                 m_ServerList.clear();
-                for (const auto& item : j)
-                    m_ServerList.push_back({ item["id"], item["name"], item["code"] });
+                for (const auto& item : j) {
+                    Server s;
+                    s.id = item["id"];
+                    s.name = item["name"];
+                    s.inviteCode = item["code"];
+                    auto it = std::find_if(oldList.begin(), oldList.end(), [&s](const Server& o) { return o.id == s.id; });
+                    if (it != oldList.end())
+                        s.channels = it->channels;
+                    m_ServerList.push_back(std::move(s));
+                }
                 if (!m_ServerList.empty() && m_SelectedServerId == -1) {
                     m_SelectedServerId = m_ServerList[0].id;
                     m_NetClient.Send(PacketType::Get_Server_Content_Request,
@@ -476,6 +492,7 @@ void Application::ProcessNetworkMessages() {
                     { nlohmann::json mj; mj["sid"] = m_SelectedServerId;
                       m_NetClient.Send(PacketType::Member_List_Request, mj.dump()); }
                 }
+                SaveStateCache();
                 continue;
             }
 
@@ -500,32 +517,148 @@ void Application::ProcessNetworkMessages() {
                         }
                     }
                 }
+                SaveStateCache();
+                continue;
+            }
+
+            if (msg.type == PacketType::File_Transfer_Complete) {
+                std::string action = j.value("action", "");
+                if (action == "upload_approved" && j.contains("id") && !m_PendingUploadData.empty()) {
+                    std::string id = j["id"].get<std::string>();
+                    const size_t chunkSize = 32 * 1024;
+                    for (size_t offset = 0; offset < m_PendingUploadData.size(); offset += chunkSize) {
+                        size_t len = (std::min)(chunkSize, m_PendingUploadData.size() - offset);
+                        std::vector<uint8_t> chunk(m_PendingUploadData.data() + offset, m_PendingUploadData.data() + offset + len);
+                        m_NetClient.SendRaw(PacketType::File_Transfer_Chunk, chunk);
+                    }
+                    m_NetClient.Send(PacketType::File_Transfer_Complete, "{}");
+                    json msgJ;
+                    msgJ["cid"] = m_PendingUploadChannelId;
+                    msgJ["u"] = m_CurrentUser.username;
+                    msgJ["msg"] = "";
+                    msgJ["attachment_id"] = id;
+                    m_NetClient.Send(PacketType::Message_Text, msgJ.dump());
+                    m_PendingUploadData.clear();
+                    m_PendingUploadFilename.clear();
+                    m_PendingUploadChannelId = -1;
+                }
+                continue;
+            }
+
+            if (msg.type == PacketType::Media_Response) {
+                if (!j.contains("id") || !j.contains("data") || !j["data"].is_string()) continue;
+                std::string id = j["id"].get<std::string>();
+                std::string b64 = j["data"].get<std::string>();
+                m_AttachmentRequested.erase(id);
+                static const std::string b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                std::string raw;
+                raw.reserve((b64.size() / 4) * 3);
+                int val = 0, bits = -8;
+                for (char c : b64) {
+                    size_t p = b64chars.find(c);
+                    if (p == std::string::npos) { if (c == '=') break; continue; }
+                    val = (val << 6) + (int)p;
+                    bits += 6;
+                    if (bits >= 0) { raw += (char)((val >> bits) & 0xFF); bits -= 8; }
+                }
+                m_AttachmentFileData[id] = std::vector<uint8_t>(raw.begin(), raw.end());
+                int w = 0, h = 0, ch = 0;
+                unsigned char* pixels = stbi_load_from_memory(
+                    reinterpret_cast<const unsigned char*>(raw.data()), (int)raw.size(), &w, &h, &ch, 4);
+                if (pixels && w > 0 && h > 0) {
+                    auto& tm = TextureManager::Get();
+                    std::string texId = "att_" + id;
+                    tm.LoadFromRGBA(texId, pixels, w, h);
+                    stbi_image_free(pixels);
+                    AttachmentDisplay disp;
+                    disp.ready = true;
+                    disp.failed = false;
+                    disp.textureId = texId;
+                    disp.width = w;
+                    disp.height = h;
+                    m_AttachmentCache[id] = std::move(disp);
+                } else {
+                    if (pixels) stbi_image_free(pixels);
+                    AttachmentDisplay disp;
+                    disp.ready = false;
+                    disp.failed = true;
+                    m_AttachmentCache[id] = std::move(disp);
+                }
                 continue;
             }
 
             if (msg.type == PacketType::Message_History_Response) {
-                if (!j.empty()) {
-                    const int cid = j[0]["cid"];
-                    m_Messages.erase(
-                        std::remove_if(m_Messages.begin(), m_Messages.end(),
-                                       [cid](const ChatMessage& m) { return m.channelId == cid; }),
-                        m_Messages.end());
-                    for (const auto& item : j) {
-                        if (!item.contains("mid")) continue;
-                        ChatMessage cm{ item.value("mid", 0), item["cid"],
+                nlohmann::json arr;
+                int cid = 0;
+                bool hasMeta = false;
+                int oldestMid = 0;
+                int newestMid = 0;
+                bool hasMoreOlder = false;
+                bool hasMoreNewer = false;
+
+                if (j.is_object() && j.contains("messages") && j["messages"].is_array()) {
+                    cid = j.value("cid", 0);
+                    arr = j["messages"];
+                    hasMeta = true;
+                    oldestMid = j.value("oldest_mid", 0);
+                    newestMid = j.value("newest_mid", 0);
+                    hasMoreOlder = j.value("has_more_older", false);
+                    hasMoreNewer = j.value("has_more_newer", false);
+                } else if (j.is_array()) {
+                    arr = j;
+                    if (!arr.empty() && arr[0].is_object()) cid = arr[0].value("cid", 0);
+                }
+
+                if (cid > 0 && arr.is_array()) {
+                    auto& state = m_ChannelStates[cid];
+                    const bool wasLoadingOlder = state.loadingOlder;
+
+                    std::vector<ChatMessage> newMsgs;
+                    for (const auto& item : arr) {
+                        if (!item.is_object() || !item.contains("mid")) continue;
+                        ChatMessage cm{ item.value("mid", 0), item.value("cid", cid),
                                         item.value("u", ""), item.value("msg", ""),
                                         item.value("time", "Old"),
                                         item.value("reply_to", 0),
                                         item.value("pin", false) };
+                        cm.attachmentId = item.value("attachment_id", item.value("attachment", ""));
                         if (item.contains("reactions") && item["reactions"].is_object()) {
                             for (auto& [emoji, users] : item["reactions"].items()) {
                                 std::vector<std::string> userList;
-                                for (const auto& u : users) userList.push_back(u.get<std::string>());
-                                cm.reactions[emoji] = userList;
+                                for (const auto& u : users) if (u.is_string()) userList.push_back(u.get<std::string>());
+                                cm.reactions[emoji] = std::move(userList);
                             }
                         }
-                        m_Messages.push_back(std::move(cm));
+                        newMsgs.push_back(std::move(cm));
                     }
+
+                    if (!newMsgs.empty()) {
+                        m_MessageCacheDb.UpsertMessages(newMsgs);
+                        m_MessageCacheDb.PruneKeepLast(cid, 2000);
+                    }
+
+                    if (wasLoadingOlder && !state.messages.empty() && !newMsgs.empty()) {
+                        int oldestCurrent = state.messages.front().id;
+                        if (newMsgs.back().id < oldestCurrent)
+                            state.messages.insert(state.messages.begin(), newMsgs.begin(), newMsgs.end());
+                    } else if (!newMsgs.empty()) {
+                        state.messages = std::move(newMsgs);
+                    }
+
+                    state.loadingOlder = false;
+                    state.loadingLatest = false;
+
+                    if (hasMeta) {
+                        state.oldestLoadedMid = oldestMid;
+                        state.newestLoadedMid = newestMid;
+                        state.hasMoreOlder = hasMoreOlder;
+                        state.hasMoreNewer = hasMoreNewer;
+                    } else if (!state.messages.empty()) {
+                        state.oldestLoadedMid = state.messages.front().id;
+                        state.newestLoadedMid = state.messages.back().id;
+                    }
+
+                    SaveStateCache();
                 }
                 continue;
             }
@@ -594,17 +727,21 @@ void Application::ProcessNetworkMessages() {
             if (msg.type == PacketType::Reaction_Update) {
                 const int mid = j.value("mid", 0);
                 if (mid > 0 && j.contains("reactions")) {
-                    for (auto& m : m_Messages) {
-                        if (m.id == mid) {
-                            m.reactions.clear();
-                            for (auto& [emoji, users] : j["reactions"].items()) {
-                                std::vector<std::string> userList;
-                                for (const auto& u : users) userList.push_back(u.get<std::string>());
-                                m.reactions[emoji] = userList;
+                    for (auto& [cid, state] : m_ChannelStates) {
+                        for (auto& m : state.messages) {
+                            if (m.id == mid) {
+                                m.reactions.clear();
+                                for (auto& [emoji, users] : j["reactions"].items()) {
+                                    std::vector<std::string> userList;
+                                    for (const auto& u : users) userList.push_back(u.get<std::string>());
+                                    m.reactions[emoji] = userList;
+                                }
+                                SaveStateCache();
+                                goto reaction_done;
                             }
-                            break;
                         }
                     }
+                    reaction_done:;
                 }
                 continue;
             }
@@ -612,28 +749,75 @@ void Application::ProcessNetworkMessages() {
             if (msg.type == PacketType::Message_Edit) {
                 const int mid = j.value("mid", 0);
                 const std::string newMsg = j.value("msg", "");
-                for (auto& m : m_Messages) {
-                    if (m.id == mid) { m.content = newMsg; break; }
+                for (auto& [cid, state] : m_ChannelStates) {
+                    for (auto& m : state.messages) {
+                        if (m.id == mid) {
+                            m.content = newMsg;
+                            m_MessageCacheDb.UpsertMessages(std::vector<ChatMessage>{ m });
+                            SaveStateCache();
+                            goto edit_done;
+                        }
+                    }
+                }
+                edit_done:;
+                continue;
+            }
+
+            if (msg.type == PacketType::Message_Pin_Update) {
+                const int mid = j.value("mid", 0);
+                const bool pin = j.value("pin", false);
+                const int cid = j.value("cid", 0);
+                if (mid > 0) {
+                    if (cid > 0) {
+                        auto& state = m_ChannelStates[cid];
+                        for (auto& m : state.messages) {
+                            if (m.id == mid) { m.pinned = pin; m_MessageCacheDb.UpsertMessages(std::vector<ChatMessage>{ m }); SaveStateCache(); break; }
+                        }
+                    } else {
+                        for (auto& [c, state] : m_ChannelStates) {
+                            for (auto& m : state.messages) {
+                                if (m.id == mid) { m.pinned = pin; m_MessageCacheDb.UpsertMessages(std::vector<ChatMessage>{ m }); SaveStateCache(); goto pin_done; }
+                            }
+                        }
+                        pin_done:;
+                    }
                 }
                 continue;
             }
 
             if (msg.type == PacketType::Message_Delete) {
                 const int mid = j.value("mid", 0);
-                m_Messages.erase(
-                    std::remove_if(m_Messages.begin(), m_Messages.end(),
-                                   [mid](const ChatMessage& m) { return m.id == mid; }),
-                    m_Messages.end());
+                for (auto& [cid, state] : m_ChannelStates) {
+                    auto it = std::remove_if(state.messages.begin(), state.messages.end(),
+                        [mid](const ChatMessage& m) { return m.id == mid; });
+                    if (it != state.messages.end()) {
+                        state.messages.erase(it, state.messages.end());
+                        SaveStateCache();
+                        break;
+                    }
+                }
                 continue;
             }
 
             if (msg.type == PacketType::Message_Text) {
                 int incomingCid = j.value("cid", 0);
                 std::string msgContent = j.value("msg", "");
-                m_Messages.push_back({ j.value("mid", 0), incomingCid,
-                                       j.value("u", "??"), msgContent,
-                                       GetCurrentTimeStr(),
-                                       j.value("reply_to", 0) });
+                int newMid = j.value("mid", 0);
+                ChatMessage cm{ newMid, incomingCid, j.value("u", "??"), msgContent,
+                                GetCurrentTimeStr(), j.value("reply_to", 0), false };
+                cm.attachmentId = j.value("attachment_id", "");
+                auto& state = m_ChannelStates[incomingCid];
+                state.messages.push_back(std::move(cm));
+                if (!state.messages.empty())
+                    m_MessageCacheDb.UpsertMessages(std::vector<ChatMessage>{ state.messages.back() });
+
+                // Maintain bounded in-memory window for active paging.
+                constexpr size_t kMaxWindow = 200;
+                if (state.messages.size() > kMaxWindow) {
+                    state.messages.erase(state.messages.begin(), state.messages.begin() + (state.messages.size() - kMaxWindow));
+                }
+
+                SaveStateCache();
                 if (j.value("u", "") != m_CurrentUser.username) {
                     if (incomingCid != m_SelectedChannelId)
                         m_UnreadCounts[incomingCid]++;

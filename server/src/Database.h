@@ -40,6 +40,19 @@ namespace TalkMe {
         std::string GetUserServersJSON(const std::string& username);
         std::string GetServerContentJSON(int serverId);
         std::string GetMessageHistoryJSON(int channelId, int beforeId = 0, int limit = 50);
+        // Envelope response for efficient paging. Supports:
+        // - latest: beforeId=0, afterId=0, anchorId=0
+        // - older:  beforeId>0
+        // - newer:  afterId>0
+        // - around: anchorId>0 with beforeLimit/afterLimit
+        std::string GetMessageHistoryEnvelopeJSON(
+            int channelId,
+            int beforeId = 0,
+            int afterId = 0,
+            int anchorId = 0,
+            int beforeLimit = 0,
+            int afterLimit = 0,
+            int limit = 50);
         void SaveMessage(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId = "", int replyTo = 0);
         int SaveMessageReturnId(int cid, const std::string& sender, const std::string& msg, const std::string& attachmentId = "", int replyTo = 0);
         int GetServerIdForChannel(int cid);

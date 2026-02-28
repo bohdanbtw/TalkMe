@@ -61,7 +61,26 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     // 2. Set DPI awareness for high-resolution screens
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    // 3. Start the application
+    // 3. Single instance: only one TalkMe in tray. Second launch brings existing window to front.
+    static const char kSingleInstanceMutex[] = "TalkMe_SingleInstance_Mutex";
+    HANDLE hSingleMutex = ::CreateMutexA(nullptr, TRUE, kSingleInstanceMutex);
+    if (hSingleMutex != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
+        ::CloseHandle(hSingleMutex);
+        // Find existing TalkMe window (class name from AppWindow) and ask it to show
+        const wchar_t kTalkMeClass[] = L"TalkMeClass";
+        for (int retry = 0; retry < 50; ++retry) {
+            HWND existing = ::FindWindowW(kTalkMeClass, nullptr);
+            if (existing != nullptr) {
+                ::PostMessageW(existing, WM_APP + 10, 0, 0);  // WM_TALKME_RESTORE
+                return 0;
+            }
+            ::Sleep(100);
+        }
+        return 0;  // existing instance not ready, exit without starting another
+    }
+    // First instance: keep mutex (do not close) so it stays owned until process exits
+
+    // 4. Start the application
     TalkMe::Application app("TalkMe", 1920, 1080);
     if (app.Initialize()) {
         app.Run();

@@ -102,6 +102,27 @@
     <ClCompile Include="src\overlay\GameOverlay.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\screen\ScreenCapture.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\screen\DXGICapture.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\screen\H264Encoder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\screen\AudioLoopback.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\storage\MessageCacheDb.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\TextureManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\GifPickerPanel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="vendor\qrcodegen.hpp">
@@ -182,6 +203,9 @@
     <ClInclude Include="src\network\VoiceTransport.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\storage\MessageCacheDb.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="src\core\Logger.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -189,6 +213,30 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\shared\PacketHandler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\screen\ScreenCapture.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\screen\DXGICapture.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\screen\H264Encoder.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\screen\AudioLoopback.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\TextureManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\GifPickerPanel.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Chess.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Racing.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -199,10 +247,26 @@
     <None Include="Version.h">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="00_START_HERE.md" />
+    <None Include="BUGFIX_SUMMARY.md" />
+    <None Include="DEPLOYMENT_SUMMARY.md" />
+    <None Include="DOCUMENTATION_INDEX.md" />
+    <None Include="FILES_CREATED.md" />
+    <None Include="FINAL_VERIFICATION.md" />
+    <None Include="FIX_COMPLETION_STATUS.md" />
+    <None Include="QUICK_REFERENCE.md" />
+    <None Include="README_FIX.md" />
+    <None Include="SUMMARY.md" />
+    <None Include="TECHNICAL_ANALYSIS.md" />
+    <None Include="TESTING_CHECKLIST.md" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="TalkMe.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="COMMIT_MESSAGE.txt" />
+    <Text Include="🎉_COMPLETION_BANNER.txt" />
   </ItemGroup>
 </Project>

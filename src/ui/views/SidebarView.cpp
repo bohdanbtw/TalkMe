@@ -1,6 +1,7 @@
 #include "SidebarView.h"
 #include "../Components.h"
 #include "../Styles.h"
+#include "../TextureManager.h"
 #include "../../shared/PacketHandler.h"
 #include "../../core/ConfigManager.h"
 #include <string>
@@ -23,22 +24,179 @@ namespace TalkMe::UI::Views {
         float railW = Styles::ServerRailWidth;
 
         // ================================================================
-        //  LEFT PANEL: Channel sidebar
+        //  FAR LEFT: Server rail (Discord-style: server icons first)
         // ================================================================
         ImGui::SetCursorPos(ImVec2(0, 0));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, Styles::BgSidebar());
+        ImGui::BeginChild("ServerRail", ImVec2(railW, windowHeight), false, ImGuiWindowFlags_NoScrollbar);
+
+        float btnSz = 42.0f;
+        float btnX  = (railW - btnSz) * 0.5f;
+
+        ImGui::Dummy(ImVec2(0, 12));
+
+        // Create / Join server button
+        ImGui::SetCursorPosX(btnX);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+        if (ImGui::Button("+##new_srv", ImVec2(btnSz, btnSz)))
+            ImGui::OpenPopup("CreateServerPopup");
+        ImGui::PopStyleVar();
+
+        ImGui::Dummy(ImVec2(0, 4));
+
+        // Friends button (same rail style as server icons; use app icon from assets when available)
+        if (showFriendList && *showFriendList) {
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            dl->AddRectFilled(
+                ImVec2(p.x + btnSz - 2, p.y + 8),
+                ImVec2(p.x + btnSz + 2, p.y + btnSz - 8),
+                Styles::ColSelectedIndicator(), 2.0f);
+        }
+        ImGui::SetCursorPosX(btnX);
+        void* friendsTex = (void*)TalkMe::TextureManager::Get().GetTexture("friends_icon");
+        bool friendsClicked = false;
+        if (friendsTex) {
+            ImGui::PushStyleColor(ImGuiCol_Button, Styles::Accent());
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::AccentHover());
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, Styles::AccentDim());
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+            friendsClicked = ImGui::ImageButton("##friends_btn", (ImTextureID)friendsTex, ImVec2(btnSz, btnSz), ImVec2(0, 0), ImVec2(1, 1));
+            ImGui::PopStyleVar();
+            ImGui::PopStyleColor(3);
+        } else {
+            friendsClicked = UI::AccentButton("Fr", ImVec2(btnSz, btnSz));
+        }
+        if (friendsClicked && showFriendList) {
+            *showFriendList = true;
+            showSettings = false;
+            selectedChannelId = -1;
+            selectedServerId = -1;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Friends / Direct Messages");
+        ImGui::Dummy(ImVec2(0, 4));
+
+        // Create / Join popup
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Styles::PopupPadding, Styles::PopupPadding));
+        ImGui::PushStyleColor(ImGuiCol_PopupBg, Styles::BgPopup());
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, Styles::ButtonSubtle());
+        if (ImGui::BeginPopup("CreateServerPopup")) {
+            ImGui::Text("Create a Server");
+            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::SetNextItemWidth(220);
+            ImGui::InputText("##sname", newServerNameBuf, 64);
+            ImGui::Dummy(ImVec2(0, 4));
+            if (UI::AccentButton("Create", ImVec2(220, 30))) {
+                if (strlen(newServerNameBuf) > 0) {
+                    netClient.Send(PacketType::Create_Server_Request, PacketHandler::CreateServerPayload(newServerNameBuf, currentUser.username));
+                    memset(newServerNameBuf, 0, 64);
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+            ImGui::Dummy(ImVec2(0, 6));
+            ImGui::PushStyleColor(ImGuiCol_Separator, Styles::Separator());
+            ImGui::Separator();
+            ImGui::PopStyleColor();
+            ImGui::Dummy(ImVec2(0, 6));
+            ImGui::Text("Join with Code");
+            ImGui::Dummy(ImVec2(0, 4));
+            static char joinCode[10] = "";
+            ImGui::SetNextItemWidth(220);
+            ImGui::InputText("##jcode", joinCode, 10);
+            ImGui::Dummy(ImVec2(0, 4));
+            if (UI::AccentButton("Join", ImVec2(220, 30))) {
+                netClient.Send(PacketType::Join_Server_Request, PacketHandler::JoinServerPayload(joinCode, currentUser.username));
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::PopStyleColor(2);
+        ImGui::PopStyleVar();
+
+        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::PushStyleColor(ImGuiCol_Separator, Styles::Separator());
+        ImGui::Separator();
+        ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0, 8));
+
+        // Server buttons
+        for (const auto& server : servers) {
+            ImGui::SetCursorPosX(btnX);
+
+            if (selectedServerId == server.id) {
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                ImVec2 p = ImGui::GetCursorScreenPos();
+                dl->AddRectFilled(
+                    ImVec2(p.x + btnSz - 2, p.y + 8),
+                    ImVec2(p.x + btnSz + 2, p.y + btnSz - 8),
+                    Styles::ColSelectedIndicator(), 2.0f);
+            }
+
+            ImGui::PushID(server.id);
+            std::string initials = server.name.substr(0, 2);
+            if (UI::AccentButton(initials.c_str(), ImVec2(btnSz, btnSz))) {
+                selectedServerId = server.id;
+                showSettings = false;
+                if (showFriendList) *showFriendList = false;
+                netClient.Send(PacketType::Get_Server_Content_Request, PacketHandler::GetServerContentPayload(server.id));
+                { nlohmann::json mj; mj["sid"] = server.id;
+                  netClient.Send(PacketType::Member_List_Request, mj.dump()); }
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 6));
+                ImGui::SetTooltip("%s", server.name.c_str());
+                ImGui::PopStyleVar();
+            }
+            if (ImGui::BeginPopupContextItem()) {
+                if (ImGui::Selectable("Copy Invite Code"))
+                    ImGui::SetClipboardText(server.inviteCode.c_str());
+                ImGui::Separator();
+                if (ImGui::Selectable("Rename Server")) {
+                    strncpy_s(newServerNameBuf, 64, server.name.c_str(), _TRUNCATE);
+                    ImGui::OpenPopup("RenameServerPopup");
+                }
+                ImGui::PushStyleColor(ImGuiCol_Text, Styles::Error());
+                if (ImGui::Selectable("Delete Server")) {
+                    nlohmann::json dj; dj["sid"] = server.id;
+                    netClient.Send(PacketType::Delete_Server_Request, dj.dump());
+                    if (selectedServerId == server.id) { selectedServerId = -1; selectedChannelId = -1; }
+                }
+                ImGui::PopStyleColor();
+                ImGui::PushStyleColor(ImGuiCol_Text, Styles::Error());
+                if (ImGui::Selectable("Leave Server")) {
+                    nlohmann::json lj; lj["sid"] = server.id;
+                    netClient.Send(PacketType::Leave_Server_Request, lj.dump());
+                    if (selectedServerId == server.id) {
+                        selectedServerId = -1;
+                        selectedChannelId = -1;
+                    }
+                }
+                ImGui::PopStyleColor();
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+            ImGui::Dummy(ImVec2(0, 4));
+        }
+
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+
+        // ================================================================
+        //  LEFT PANEL: Channel list (next to server rail)
+        // ================================================================
+        ImGui::SetCursorPos(ImVec2(railW, 0));
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, Styles::BgSidebar());
         ImGui::BeginChild("ChannelSidebar", ImVec2(sW, windowHeight), false, ImGuiWindowFlags_NoScrollbar);
 
-        // Header
-        ImGui::Dummy(ImVec2(0, 14));
+        ImGui::Dummy(ImVec2(0, 12));
         ImGui::Indent(18);
         if (selectedServerId != -1) {
             std::string sName = "Loading...";
             for (const auto& s : servers)
                 if (s.id == selectedServerId) sName = s.name;
             ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
-            ImGui::SetWindowFontScale(1.2f);
-            ImGui::Text("%s", sName.c_str());
+            ImGui::SetWindowFontScale(1.15f);
+            ImGui::TextUnformatted(sName.c_str());
             ImGui::SetWindowFontScale(1.0f);
             ImGui::PopStyleColor();
         } else {
@@ -50,26 +208,19 @@ namespace TalkMe::UI::Views {
         ImGui::Separator();
         ImGui::PopStyleColor();
 
-        // Channel list
+        // Channel list (when a server is selected)
         if (selectedServerId != -1) {
             const Server* cur = nullptr;
             for (const auto& s : servers)
                 if (s.id == selectedServerId) { cur = &s; break; }
 
             if (cur) {
-                float addBtnX = sW - Styles::AddButtonMargin - Styles::AddButtonSize - 6;
-
-                // Text channels
+                // Text channels (no + button)
                 ImGui::Dummy(ImVec2(0, Styles::SectionPadding));
                 ImGui::Indent(16);
                 ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
                 ImGui::Text("TEXT CHANNELS");
                 ImGui::PopStyleColor();
-                ImGui::SameLine(addBtnX);
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
-                if (ImGui::Button("+##add_text", ImVec2(Styles::AddButtonSize, Styles::AddButtonSize)))
-                    ImGui::OpenPopup("CreateChannelPopup");
-                ImGui::PopStyleVar();
                 ImGui::Unindent(16);
                 ImGui::Dummy(ImVec2(0, 4));
 
@@ -92,7 +243,7 @@ namespace TalkMe::UI::Views {
                         if (selectedChannelId != ch.id) {
                             selectedChannelId = ch.id;
                             showSettings = false;
-                            netClient.Send(PacketType::Select_Text_Channel, PacketHandler::SelectTextChannelPayload(ch.id));
+                            if (showFriendList) *showFriendList = false;
                             if (unreadCounts) (*unreadCounts)[ch.id] = 0;
                         }
                     }
@@ -109,17 +260,12 @@ namespace TalkMe::UI::Views {
                     if (sel) ImGui::PopStyleColor(2);
                 }
 
-                // Voice channels
+                // Voice channels (no + button)
                 ImGui::Dummy(ImVec2(0, Styles::SectionPadding));
                 ImGui::Indent(16);
                 ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
                 ImGui::Text("VOICE CHANNELS");
                 ImGui::PopStyleColor();
-                ImGui::SameLine(addBtnX);
-                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
-                if (ImGui::Button("+##add_voice", ImVec2(Styles::AddButtonSize, Styles::AddButtonSize)))
-                    ImGui::OpenPopup("CreateChannelPopup");
-                ImGui::PopStyleVar();
                 ImGui::Unindent(16);
                 ImGui::Dummy(ImVec2(0, 4));
 
@@ -131,10 +277,12 @@ namespace TalkMe::UI::Views {
 
                     if (active) ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
                     ImGui::Indent(10);
-                    if (ImGui::Selectable(label.c_str(), active, 0, ImVec2(sW - 30, 26))) {
+                    if (ImGui::Selectable(label.c_str(), active, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(sW - 30, 26))) {
                         selectedChannelId = ch.id;
                         showSettings = false;
-                        if (activeVoiceChannelId != ch.id) {
+                        if (showFriendList) *showFriendList = false;
+                        // Single-click opens the voice window; double-click joins the voice chat.
+                        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && activeVoiceChannelId != ch.id) {
                             activeVoiceChannelId = ch.id;
                             netClient.Send(PacketType::Join_Voice_Channel, PacketHandler::JoinVoiceChannelPayload(ch.id));
                         }
@@ -176,6 +324,7 @@ namespace TalkMe::UI::Views {
                             if (selectedChannelId != ch.id) {
                                 selectedChannelId = ch.id;
                                 showSettings = false;
+                                if (showFriendList) *showFriendList = false;
                                 nlohmann::json cj; cj["cid"] = ch.id;
                                 netClient.Send(PacketType::Cinema_Join, cj.dump());
                             }
@@ -210,7 +359,7 @@ namespace TalkMe::UI::Views {
                             if (selectedChannelId != ch.id) {
                                 selectedChannelId = ch.id;
                                 showSettings = false;
-                                netClient.Send(PacketType::Select_Text_Channel, PacketHandler::SelectTextChannelPayload(ch.id));
+                                if (showFriendList) *showFriendList = false;
                                 if (unreadCounts) (*unreadCounts)[ch.id] = 0;
                             }
                         }
@@ -221,7 +370,7 @@ namespace TalkMe::UI::Views {
             }
         }
 
-        // Create channel popup
+        // Create channel popup (kept for context menus or future use)
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Styles::PopupPadding, Styles::PopupPadding));
         ImGui::PushStyleColor(ImGuiCol_PopupBg, Styles::BgPopup());
         ImGui::PushStyleColor(ImGuiCol_FrameBg, Styles::ButtonSubtle());
@@ -262,32 +411,41 @@ namespace TalkMe::UI::Views {
         float pad = 12.0f;
         float innerW = sW - pad * 2;
 
-        ImGui::Dummy(ImVec2(0, 16));
+        ImGui::Dummy(ImVec2(0, 14));
         ImGui::Indent(pad);
-        size_t hashPos = currentUser.username.find('#');
-        if (hashPos != std::string::npos) {
-            ImGui::Text("%s", currentUser.username.substr(0, hashPos).c_str());
-            ImGui::SameLine(0, 0);
-            ImGui::TextDisabled("%s", currentUser.username.substr(hashPos).c_str());
-        } else {
-            ImGui::Text("%s", currentUser.username.c_str());
+        // Username with truncation and ellipsis when too long for footer
+        const size_t maxUsernameChars = 18;
+        std::string displayName = currentUser.username;
+        if (displayName.size() > maxUsernameChars) {
+            displayName = displayName.substr(0, maxUsernameChars - 3) + "...";
         }
+        size_t hashPos = displayName.find('#');
+        if (hashPos != std::string::npos) {
+            ImGui::TextUnformatted(displayName.substr(0, hashPos).c_str());
+            ImGui::SameLine(0, 0);
+            ImGui::TextDisabled("%s", displayName.substr(hashPos).c_str());
+        } else {
+            ImGui::TextUnformatted(displayName.c_str());
+        }
+        if (currentUser.username.size() > maxUsernameChars && ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", currentUser.username.c_str());
 
-        ImGui::Dummy(ImVec2(0, 8));
+        ImGui::Dummy(ImVec2(0, 10));
 
         float btnH = 30.0f;
-        float gap = 4.0f;
-        float btnW3 = (innerW - gap * 2) / 3.0f;
+        float gap = 6.0f;
+        float btnW3 = (innerW - gap * 2.0f) / 3.0f;
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 4.0f));
 
         bool wasMuted = selfMuted;
         bool wasDeafened = selfDeafened;
 
-        // Row 1: MIC | SPK | INF
+        // Row 1: Mic | Spk | Info — clear labels that fit in footer
         if (wasMuted) {
             ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonDanger());
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::ButtonDangerHover());
         }
-        if (ImGui::Button(wasMuted ? "MIC X" : "MIC", ImVec2(btnW3, btnH))) {
+        if (ImGui::Button("Mic", ImVec2(btnW3, btnH))) {
             selfMuted = !selfMuted;
             if (!selfMuted && selfDeafened) selfDeafened = false;
         }
@@ -300,7 +458,7 @@ namespace TalkMe::UI::Views {
             ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonDanger());
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::ButtonDangerHover());
         }
-        if (ImGui::Button(wasDeafened ? "SPK X" : "SPK", ImVec2(btnW3, btnH))) {
+        if (ImGui::Button("Spk", ImVec2(btnW3, btnH))) {
             selfDeafened = !selfDeafened;
             if (selfDeafened) selfMuted = true;
         }
@@ -314,10 +472,12 @@ namespace TalkMe::UI::Views {
             ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonSubtle());
             ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
         }
-        if (ImGui::Button("INF", ImVec2(btnW3, btnH)) && inVoice)
+        if (ImGui::Button("Info", ImVec2(btnW3, btnH)) && inVoice)
             ImGui::OpenPopup("VoiceInfoPopup");
         if (!inVoice) ImGui::PopStyleColor(2);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip(inVoice ? "Voice Call Info" : "Not in a voice channel");
+
+        ImGui::PopStyleVar();
 
         // Voice info popup (no scrolling; centred when opened)
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18, 16));
@@ -397,15 +557,9 @@ namespace TalkMe::UI::Views {
         ImGui::PopStyleColor();
         ImGui::PopStyleVar();
 
-        // Row 2: FRIENDS | SETTINGS
+        // Row 2: SETTINGS only (Friends moved to top of channel sidebar)
         ImGui::Dummy(ImVec2(0, 4));
-        float btnW2 = (innerW - gap) / 2.0f;
-        if (ImGui::Button("Friends", ImVec2(btnW2, btnH)) && showFriendList) {
-            *showFriendList = !*showFriendList;
-            if (*showFriendList) showSettings = false;
-        }
-        ImGui::SameLine(0, gap);
-        if (ImGui::Button("Settings", ImVec2(btnW2, btnH))) {
+        if (ImGui::Button("Settings", ImVec2(innerW, btnH))) {
             showSettings = !showSettings;
             if (showSettings && showFriendList) *showFriendList = false;
         }
@@ -413,130 +567,6 @@ namespace TalkMe::UI::Views {
         ImGui::Unindent(pad);
         ImGui::EndChild();
         ImGui::PopStyleColor();
-
-        ImGui::EndChild();
-        ImGui::PopStyleColor();
-
-        // ================================================================
-        //  RIGHT PANEL: Server rail
-        // ================================================================
-        ImGui::SetCursorPos(ImVec2(parentW - railW, 0));
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, Styles::BgSidebar());
-        ImGui::BeginChild("ServerRail", ImVec2(railW, windowHeight), false, ImGuiWindowFlags_NoScrollbar);
-
-        float btnSz = 42.0f;
-        float btnX  = (railW - btnSz) * 0.5f;
-
-        ImGui::Dummy(ImVec2(0, 12));
-
-        // Create / Join server button
-        ImGui::SetCursorPosX(btnX);
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
-        if (ImGui::Button("+##new_srv", ImVec2(btnSz, btnSz)))
-            ImGui::OpenPopup("CreateServerPopup");
-        ImGui::PopStyleVar();
-
-        // Create / Join popup
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(Styles::PopupPadding, Styles::PopupPadding));
-        ImGui::PushStyleColor(ImGuiCol_PopupBg, Styles::BgPopup());
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, Styles::ButtonSubtle());
-        if (ImGui::BeginPopup("CreateServerPopup")) {
-            ImGui::Text("Create a Server");
-            ImGui::Dummy(ImVec2(0, 4));
-            ImGui::SetNextItemWidth(220);
-            ImGui::InputText("##sname", newServerNameBuf, 64);
-            ImGui::Dummy(ImVec2(0, 4));
-            if (UI::AccentButton("Create", ImVec2(220, 30))) {
-                if (strlen(newServerNameBuf) > 0) {
-                    netClient.Send(PacketType::Create_Server_Request, PacketHandler::CreateServerPayload(newServerNameBuf, currentUser.username));
-                    memset(newServerNameBuf, 0, 64);
-                    ImGui::CloseCurrentPopup();
-                }
-            }
-            ImGui::Dummy(ImVec2(0, 6));
-            ImGui::PushStyleColor(ImGuiCol_Separator, Styles::Separator());
-            ImGui::Separator();
-            ImGui::PopStyleColor();
-            ImGui::Dummy(ImVec2(0, 6));
-            ImGui::Text("Join with Code");
-            ImGui::Dummy(ImVec2(0, 4));
-            static char joinCode[10] = "";
-            ImGui::SetNextItemWidth(220);
-            ImGui::InputText("##jcode", joinCode, 10);
-            ImGui::Dummy(ImVec2(0, 4));
-            if (UI::AccentButton("Join", ImVec2(220, 30))) {
-                netClient.Send(PacketType::Join_Server_Request, PacketHandler::JoinServerPayload(joinCode, currentUser.username));
-                ImGui::CloseCurrentPopup();
-            }
-            ImGui::EndPopup();
-        }
-        ImGui::PopStyleColor(2);
-        ImGui::PopStyleVar();
-
-        ImGui::Dummy(ImVec2(0, 8));
-        ImGui::PushStyleColor(ImGuiCol_Separator, Styles::Separator());
-        ImGui::Separator();
-        ImGui::PopStyleColor();
-        ImGui::Dummy(ImVec2(0, 8));
-
-        // Server buttons
-        for (const auto& server : servers) {
-            ImGui::SetCursorPosX(btnX);
-
-            // Selection indicator (right edge bar)
-            if (selectedServerId == server.id) {
-                ImDrawList* dl = ImGui::GetWindowDrawList();
-                ImVec2 p = ImGui::GetCursorScreenPos();
-                dl->AddRectFilled(
-                    ImVec2(p.x + btnSz + btnX - 2, p.y + 8),
-                    ImVec2(p.x + btnSz + btnX + 2, p.y + btnSz - 8),
-                    Styles::ColSelectedIndicator(), 2.0f);
-            }
-
-            ImGui::PushID(server.id);
-            std::string initials = server.name.substr(0, 2);
-            if (UI::AccentButton(initials.c_str(), ImVec2(btnSz, btnSz))) {
-                selectedServerId = server.id;
-                showSettings = false;
-                netClient.Send(PacketType::Get_Server_Content_Request, PacketHandler::GetServerContentPayload(server.id));
-                { nlohmann::json mj; mj["sid"] = server.id;
-                  netClient.Send(PacketType::Member_List_Request, mj.dump()); }
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 6));
-                ImGui::SetTooltip("%s", server.name.c_str());
-                ImGui::PopStyleVar();
-            }
-            if (ImGui::BeginPopupContextItem()) {
-                if (ImGui::Selectable("Copy Invite Code"))
-                    ImGui::SetClipboardText(server.inviteCode.c_str());
-                ImGui::Separator();
-                if (ImGui::Selectable("Rename Server")) {
-                    strncpy_s(newServerNameBuf, 64, server.name.c_str(), _TRUNCATE);
-                    ImGui::OpenPopup("RenameServerPopup");
-                }
-                ImGui::PushStyleColor(ImGuiCol_Text, Styles::Error());
-                if (ImGui::Selectable("Delete Server")) {
-                    nlohmann::json dj; dj["sid"] = server.id;
-                    netClient.Send(PacketType::Delete_Server_Request, dj.dump());
-                    if (selectedServerId == server.id) { selectedServerId = -1; selectedChannelId = -1; }
-                }
-                ImGui::PopStyleColor();
-                ImGui::PushStyleColor(ImGuiCol_Text, Styles::Error());
-                if (ImGui::Selectable("Leave Server")) {
-                    nlohmann::json lj; lj["sid"] = server.id;
-                    netClient.Send(PacketType::Leave_Server_Request, lj.dump());
-                    if (selectedServerId == server.id) {
-                        selectedServerId = -1;
-                        selectedChannelId = -1;
-                    }
-                }
-                ImGui::PopStyleColor();
-                ImGui::EndPopup();
-            }
-            ImGui::PopID();
-            ImGui::Dummy(ImVec2(0, 4));
-        }
 
         ImGui::EndChild();
         ImGui::PopStyleColor();

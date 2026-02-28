@@ -43,12 +43,28 @@ namespace TalkMe::UI::Views {
         const std::vector<std::string>* activeStreamers,
         std::string* viewingStream,
         bool* streamMaximized,
-        bool* showGifPicker)
+        bool* showGifPicker,
+        std::function<void(float w, float h)> renderGifPanel,
+        const std::string* mediaBaseUrl,
+        std::function<void(std::vector<uint8_t>, std::string)>* onImageUpload,
+        std::function<void(const std::string&)>* requestAttachment,
+        std::function<const TalkMe::AttachmentDisplay*(const std::string&)>* getAttachmentDisplay,
+        std::function<void(const std::string&)>* onAttachmentClick,
+        std::function<void()> requestOlderMessages,
+        const bool* loadingOlder,
+        std::function<void(int channelId, int fullyVisibleMid)> onReadAnchorAdvanced)
     {
         float winH = ImGui::GetWindowHeight();
         float winW = ImGui::GetWindowWidth();
         float left = Styles::MainContentLeftOffset;
-        float areaW = winW - left - Styles::ServerRailWidth;
+        float contentW = winW - left;
+        // When GIF panel is open, it takes 30% of content area on the right; chat uses the rest
+        float gifPanelW = 0.0f;
+        if (showGifPicker && *showGifPicker) {
+            gifPanelW = contentW * 0.30f;
+            if (gifPanelW < 200.0f) gifPanelW = 200.0f;
+        }
+        float areaW = contentW - gifPanelW;
 
         ImGui::SetCursorPos(ImVec2(left, 0));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, Styles::BgChat());
@@ -424,9 +440,11 @@ namespace TalkMe::UI::Views {
                 ImGui::EndChild(); // VoiceGrid
                 } // close !hideUsers
 
-                // ====== Bottom action bar: 3 buttons centered ======
+                const bool inThisVoiceCall = (activeVoiceChannelId == selectedChannelId);
+
+                // ====== Bottom action bar ======
                 ImGui::Dummy(ImVec2(0, 8));
-                float btnBarW = 380.0f;
+                float btnBarW = inThisVoiceCall ? 380.0f : 160.0f;
                 float btnBarX = (areaW - btnBarW) * 0.5f;
                 if (btnBarX < 10.0f) btnBarX = 10.0f;
                 ImGui::SetCursorPosX(btnBarX);
@@ -434,45 +452,59 @@ namespace TalkMe::UI::Views {
                 float actionBtnH = 38.0f;
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
 
-                // Button 1: Leave (red)
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.12f, 0.12f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.18f, 0.18f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
-                if (ImGui::Button("Leave", ImVec2(100, actionBtnH))) {
-                    activeVoiceChannelId = -1;
-                    netClient.Send(PacketType::Join_Voice_Channel, PacketHandler::JoinVoiceChannelPayload(-1));
-                }
-                ImGui::PopStyleColor(3);
-
-                // Button 2: Screen Share (blue) or Stop (if sharing)
-                ImGui::SameLine(0, 12);
-                if (isScreenSharing) {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.3f, 0.1f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.35f, 0.12f, 1.0f));
+                if (!inThisVoiceCall) {
+                    // Not connected: show Join button only.
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.55f, 0.25f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.65f, 0.3f, 1.0f));
                     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
-                    if (ImGui::Button("Stop Share", ImVec2(130, actionBtnH))) {
-                        if (onStopScreenShare) onStopScreenShare();
+                    if (ImGui::Button("Join call", ImVec2(160, actionBtnH))) {
+                        activeVoiceChannelId = selectedChannelId;
+                        netClient.Send(PacketType::Join_Voice_Channel, PacketHandler::JoinVoiceChannelPayload(selectedChannelId));
                     }
                     ImGui::PopStyleColor(3);
                 } else {
-                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.65f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.42f, 0.75f, 1.0f));
+                    // Connected: show Leave / Screen Share / Games.
+
+                    // Button 1: Leave (red)
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.12f, 0.12f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.18f, 0.18f, 1.0f));
                     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
-                    if (ImGui::Button("Screen Share", ImVec2(130, actionBtnH))) {
-                        ImGui::OpenPopup("ScreenShareSetup");
+                    if (ImGui::Button("Leave", ImVec2(100, actionBtnH))) {
+                        activeVoiceChannelId = -1;
+                        netClient.Send(PacketType::Join_Voice_Channel, PacketHandler::JoinVoiceChannelPayload(-1));
+                    }
+                    ImGui::PopStyleColor(3);
+
+                    // Button 2: Screen Share (blue) or Stop (if sharing)
+                    ImGui::SameLine(0, 12);
+                    if (isScreenSharing) {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.3f, 0.1f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.35f, 0.12f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                        if (ImGui::Button("Stop Share", ImVec2(130, actionBtnH))) {
+                            if (onStopScreenShare) onStopScreenShare();
+                        }
+                        ImGui::PopStyleColor(3);
+                    } else {
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.65f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.42f, 0.75f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                        if (ImGui::Button("Screen Share", ImVec2(130, actionBtnH))) {
+                            ImGui::OpenPopup("ScreenShareSetup");
+                        }
+                        ImGui::PopStyleColor(3);
+                    }
+
+                    // Button 3: Games (green)
+                    ImGui::SameLine(0, 12);
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.55f, 0.25f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                    if (ImGui::Button("Games", ImVec2(100, actionBtnH))) {
+                        ImGui::OpenPopup("GamesPicker");
                     }
                     ImGui::PopStyleColor(3);
                 }
-
-                // Button 3: Games (green)
-                ImGui::SameLine(0, 12);
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.55f, 0.25f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.65f, 0.3f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
-                if (ImGui::Button("Games", ImVec2(100, actionBtnH))) {
-                    ImGui::OpenPopup("GamesPicker");
-                }
-                ImGui::PopStyleColor(3);
 
                 ImGui::PopStyleVar();
 
@@ -796,7 +828,33 @@ namespace TalkMe::UI::Views {
 
                 ImGui::SetCursorPosX(32);
                 ImGui::BeginChild("Messages", ImVec2(areaW - 64, msgH), false, ImGuiWindowFlags_None);
-                for (const auto& msg : messages) {
+                {
+                    static float s_lastScrollY = 0.0f;
+                    float scrollY = ImGui::GetScrollY();
+                    if (requestOlderMessages && s_lastScrollY >= 100.0f && scrollY < 100.0f)
+                        requestOlderMessages();
+                    s_lastScrollY = scrollY;
+                }
+
+                // Read-anchor: highest message id that is fully visible in the viewport.
+                const ImVec2 winPos = ImGui::GetWindowPos();
+                const ImVec2 crMin = ImGui::GetWindowContentRegionMin();
+                const ImVec2 crMax = ImGui::GetWindowContentRegionMax();
+                const float visMinY = winPos.y + crMin.y;
+                const float visMaxY = winPos.y + crMax.y;
+                int maxFullyVisibleMid = 0;
+                if (loadingOlder && *loadingOlder) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                    ImGui::Text("Loading older messages...");
+                    ImGui::PopStyleColor();
+                    ImGui::Dummy(ImVec2(0, 8));
+                }
+
+                // Virtualized rendering: build a filtered index list, then clip.
+                std::vector<int> renderIdx;
+                renderIdx.reserve(messages.size());
+                for (int i = 0; i < (int)messages.size(); i++) {
+                    const auto& msg = messages[i];
                     if (msg.channelId != selectedChannelId) continue;
                     if (!searchStr.empty()) {
                         std::string lower = msg.content;
@@ -806,7 +864,13 @@ namespace TalkMe::UI::Views {
                         if (lower.find(searchStr) == std::string::npos && lowerSender.find(searchStr) == std::string::npos)
                             continue;
                     }
-                    bool isMe = (msg.sender == currentUser.username);
+                    renderIdx.push_back(i);
+                }
+
+                for (int ri = 0; ri < (int)renderIdx.size(); ri++) {
+                        const auto& msg = messages[renderIdx[ri]];
+                        const float msgStartY = ImGui::GetCursorScreenPos().y;
+                        bool isMe = (msg.sender == currentUser.username);
 
                     ImGui::BeginGroup();
 
@@ -846,6 +910,79 @@ namespace TalkMe::UI::Views {
                     if (msg.pinned) {
                         ImGui::SameLine();
                         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "[pinned]");
+                    }
+
+                    // Inline attachment (TCP Media_Request path first; HTTP fallback if no TCP handlers)
+                    if (!msg.attachmentId.empty()) {
+                        std::string mediaUrl = (mediaBaseUrl && !mediaBaseUrl->empty())
+                            ? (*mediaBaseUrl + "/media/" + msg.attachmentId) : std::string();
+                        bool drawn = false;
+                        if (requestAttachment && getAttachmentDisplay) {
+                            (*requestAttachment)(msg.attachmentId);
+                            const TalkMe::AttachmentDisplay* att = (*getAttachmentDisplay)(msg.attachmentId);
+                            if (att && att->ready && !att->textureId.empty()) {
+                                auto& tm = TalkMe::TextureManager::Get();
+                                auto* srv = tm.GetTexture(att->textureId);
+                                if (srv && att->width > 0 && att->height > 0) {
+                                    float maxW = areaW * 0.5f;
+                                    float maxH = 300.0f;
+                                    float imgW = (float)att->width;
+                                    float imgH = (float)att->height;
+                                    if (imgW > maxW) { imgH *= maxW / imgW; imgW = maxW; }
+                                    if (imgH > maxH) { imgW *= maxH / imgH; imgH = maxH; }
+                                    ImGui::Image((ImTextureID)srv, ImVec2(imgW, imgH));
+                                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click to view");
+                                    if (ImGui::IsItemClicked() && onAttachmentClick)
+                                        (*onAttachmentClick)(msg.attachmentId);
+                                    drawn = true;
+                                }
+                            } else if (att && att->failed) {
+                                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                                ImGui::Text("[Attachment failed to load]");
+                                ImGui::PopStyleColor();
+                                drawn = true;
+                            } else {
+                                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                                ImGui::Text("[Loading attachment...]");
+                                ImGui::PopStyleColor();
+                                drawn = true;
+                            }
+                        }
+                        if (!drawn && !mediaUrl.empty()) {
+                            auto& imgCache = TalkMe::ImageCache::Get();
+                            auto* cached = imgCache.GetImage(mediaUrl);
+                            if (!cached && !imgCache.IsLoading(mediaUrl))
+                                imgCache.RequestImage(mediaUrl);
+                            if (cached && cached->ready && cached->width > 0) {
+                                auto& tm = TalkMe::TextureManager::Get();
+                                std::string texId = "att_" + msg.attachmentId;
+                                auto* srv = tm.GetTexture(texId);
+                                if (!srv)
+                                    srv = tm.LoadFromRGBA(texId, cached->data.data(), cached->width, cached->height);
+                                if (srv) {
+                                    float maxW = areaW * 0.5f;
+                                    float maxH = 300.0f;
+                                    float imgW = (float)cached->width;
+                                    float imgH = (float)cached->height;
+                                    if (imgW > maxW) { imgH *= maxW / imgW; imgW = maxW; }
+                                    if (imgH > maxH) { imgW *= maxH / imgH; imgH = maxH; }
+                                    ImGui::Image((ImTextureID)srv, ImVec2(imgW, imgH));
+                                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click to view");
+                                    if (ImGui::IsItemClicked() && onAttachmentClick)
+                                        (*onAttachmentClick)(msg.attachmentId);
+                                    drawn = true;
+                                }
+                            } else if (cached && cached->failed) {
+                                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                                ImGui::Text("[Attachment failed to load]");
+                                ImGui::PopStyleColor();
+                                drawn = true;
+                            } else if (!drawn) {
+                                ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                                ImGui::Text("[Loading attachment...]");
+                                ImGui::PopStyleColor();
+                            }
+                        }
                     }
 
                     {
@@ -1105,8 +1242,23 @@ namespace TalkMe::UI::Views {
                         }
                     }
                     ImGui::Dummy(ImVec2(0, 8));
+
+                    const float msgEndY = ImGui::GetCursorScreenPos().y;
+                    if (msg.id > 0 && msgStartY >= visMinY && msgEndY <= visMaxY) {
+                        if (msg.id > maxFullyVisibleMid) maxFullyVisibleMid = msg.id;
+                    }
+                    }
+                if (onReadAnchorAdvanced && maxFullyVisibleMid > 0) {
+                    static std::map<int, int> s_lastReportedByCid;
+                    static double s_lastReportTime = 0.0;
+                    const double now = ImGui::GetTime();
+                    const int last = s_lastReportedByCid[selectedChannelId];
+                    if (maxFullyVisibleMid > last && (now - s_lastReportTime) > 0.25) {
+                        s_lastReportedByCid[selectedChannelId] = maxFullyVisibleMid;
+                        s_lastReportTime = now;
+                        onReadAnchorAdvanced(selectedChannelId, maxFullyVisibleMid);
+                    }
                 }
-                if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
                 ImGui::EndChild();
 
                 // Typing indicator
@@ -1138,6 +1290,41 @@ namespace TalkMe::UI::Views {
                     ImGui::Unindent(32);
                 }
 
+                // GIF/Emotions panel: 30% of content area, right-aligned; close when clicking outside
+                if (showGifPicker && renderGifPanel) {
+                    ImVec2 vpPos = ImGui::GetMainViewport()->Pos;
+                    ImVec2 vpSize = ImGui::GetMainViewport()->Size;
+                    float contentWidth = vpSize.x - Styles::MainContentLeftOffset;
+                    float panelW = contentWidth * 0.30f;
+                    if (panelW < 200.0f) panelW = 200.0f;
+                    ImVec2 panelMin = ImVec2(vpPos.x + vpSize.x - panelW, vpPos.y);
+                    ImVec2 panelSize = ImVec2(panelW, vpSize.y);
+
+                    // Click outside panel (e.g. in chat area or sidebar) closes it
+                    if (*showGifPicker && ImGui::IsMouseClicked(0)) {
+                        ImVec2 m = ImGui::GetMousePos();
+                        bool insidePanel = (m.x >= panelMin.x && m.x < panelMin.x + panelSize.x &&
+                                            m.y >= panelMin.y && m.y < panelMin.y + panelSize.y);
+                        if (!insidePanel) {
+                            *showGifPicker = false;
+                            if (ImGui::IsPopupOpen("GifPickerPopup"))
+                                ImGui::CloseCurrentPopup();
+                        }
+                    }
+
+                    if (*showGifPicker && !ImGui::IsPopupOpen("GifPickerPopup")) {
+                        ImGui::SetNextWindowPos(panelMin, ImGuiCond_Always, ImVec2(0.0f, 0.0f));
+                        ImGui::SetNextWindowSize(panelSize, ImGuiCond_Always);
+                        ImGui::OpenPopup("GifPickerPopup");
+                    }
+                    if (!ImGui::IsPopupOpen("GifPickerPopup"))
+                        *showGifPicker = false;
+                    else if (ImGui::BeginPopup("GifPickerPopup", ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar)) {
+                        renderGifPanel(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y);
+                        ImGui::EndPopup();
+                    }
+                }
+
                 // Reply bar (if replying)
                 if (replyingToMessageId && *replyingToMessageId > 0) {
                     ImGui::Indent(32);
@@ -1163,10 +1350,47 @@ namespace TalkMe::UI::Views {
                 ImGui::Indent(32);
                 ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
                 ImGui::PushStyleColor(ImGuiCol_FrameBg, Styles::ButtonSubtle());
-                float inputW = areaW - 220;
+                float inputW = areaW - 268;
                 ImGui::PushItemWidth(inputW);
                 bool enter = ImGui::InputText("##chat_in", chatInputBuf, 1024, ImGuiInputTextFlags_EnterReturnsTrue);
                 ImGui::PopItemWidth();
+
+                // Ctrl+V paste image from clipboard
+                if (ImGui::IsItemActive() && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V) &&
+                    onImageUpload && selectedChannelId != -1 && OpenClipboard(nullptr)) {
+                    bool clipboardClosed = false;
+                    HANDLE hDib = GetClipboardData(CF_DIB);
+                    if (hDib) {
+                        void* pDib = GlobalLock(hDib);
+                        if (pDib) {
+                            const BITMAPINFOHEADER* bi = static_cast<const BITMAPINFOHEADER*>(pDib);
+                            SIZE_T dibLen = GlobalSize(hDib);
+                            DWORD headerSize = bi->biSize;
+                            DWORD colorTableSize = 0;
+                            if (bi->biBitCount <= 8)
+                                colorTableSize = (bi->biClrUsed ? bi->biClrUsed : (1u << bi->biBitCount)) * 4u;
+                            DWORD offBits = 14u + headerSize + colorTableSize;
+                            if (offBits <= dibLen && dibLen <= 10u * 1024u * 1024u) {
+                                std::vector<uint8_t> bmp;
+                                bmp.reserve(14 + dibLen);
+                                BITMAPFILEHEADER bf = {};
+                                bf.bfType = 0x4D42;
+                                bf.bfSize = 14u + static_cast<DWORD>(dibLen);
+                                bf.bfOffBits = offBits;
+                                bmp.insert(bmp.end(), reinterpret_cast<uint8_t*>(&bf), reinterpret_cast<uint8_t*>(&bf) + sizeof(bf));
+                                bmp.insert(bmp.end(), static_cast<const uint8_t*>(pDib), static_cast<const uint8_t*>(pDib) + dibLen);
+                                GlobalUnlock(hDib);
+                                CloseClipboard();
+                                clipboardClosed = true;
+                                (*onImageUpload)(std::move(bmp), "paste.bmp");
+                                memset(chatInputBuf, 0, 1024);
+                            } else {
+                                GlobalUnlock(hDib);
+                            }
+                        }
+                    }
+                    if (!clipboardClosed) CloseClipboard();
+                }
 
                 if (ImGui::IsItemActive() && strlen(chatInputBuf) > 0 && onUserTyping)
                     onUserTyping();
@@ -1192,19 +1416,26 @@ namespace TalkMe::UI::Views {
                                 fseek(fp, 0, SEEK_END);
                                 long sz = ftell(fp);
                                 fseek(fp, 0, SEEK_SET);
-                                if (sz > 0 && sz < 500 * 1024) {
+                                const long kMaxUploadBytes = 10 * 1024 * 1024;
+                                if (sz > 0 && sz <= kMaxUploadBytes && onImageUpload) {
+                                    std::vector<uint8_t> data(static_cast<size_t>(sz));
+                                    if (fread(data.data(), 1, sz, fp) == (size_t)sz) {
+                                        std::string fname(filePath);
+                                        size_t slash = fname.find_last_of("/\\");
+                                        std::string basename = (slash != std::string::npos) ? fname.substr(slash + 1) : fname;
+                                        (*onImageUpload)(std::move(data), std::move(basename));
+                                    }
+                                } else if (sz > kMaxUploadBytes && onImageUpload) {
+                                    (void)0; // TODO: could show "file too large" tooltip
+                                } else if (sz > 0 && sz < 500 * 1024 && !onImageUpload) {
                                     std::vector<uint8_t> data(sz);
                                     fread(data.data(), 1, sz, fp);
-
-                                    // Detect MIME type from extension
                                     std::string fname(filePath);
                                     std::string mime = "image/png";
                                     if (fname.find(".jpg") != std::string::npos || fname.find(".jpeg") != std::string::npos) mime = "image/jpeg";
                                     else if (fname.find(".gif") != std::string::npos) mime = "image/gif";
                                     else if (fname.find(".webp") != std::string::npos) mime = "image/webp";
                                     else if (fname.find(".bmp") != std::string::npos) mime = "image/bmp";
-
-                                    // Base64 encode
                                     static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
                                     std::string encoded;
                                     encoded.reserve((sz + 2) / 3 * 4);
@@ -1215,26 +1446,25 @@ namespace TalkMe::UI::Views {
                                         encoded += (i + 1 < sz) ? b64[(n >> 6) & 63] : '=';
                                         encoded += (i + 2 < sz) ? b64[n & 63] : '=';
                                     }
-
-                                    // Send as data URL message
                                     std::string dataUrl = "data:" + mime + ";base64," + encoded;
                                     nlohmann::json msgJ;
                                     msgJ["cid"] = selectedChannelId;
                                     msgJ["u"] = currentUser.username;
                                     msgJ["msg"] = dataUrl;
                                     netClient.Send(PacketType::Message_Text, msgJ.dump());
-                                } else if (sz >= 500 * 1024) {
-                                    // Too large — inform user
                                 }
                                 fclose(fp);
                             }
                         }
                     }
-                    if (ImGui::Selectable("GIF") && showGifPicker)
-                        *showGifPicker = true;
                     ImGui::EndPopup();
                 }
 
+                ImGui::SameLine();
+                if (ImGui::Button("Emoji", ImVec2(48, 32))) {
+                    *showGifPicker = true;
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Emotions (GIF & Emoji)");
                 ImGui::SameLine();
                 if (UI::AccentButton("Send", ImVec2(60, 32)) || enter) {
                     if (strlen(chatInputBuf) > 0) {

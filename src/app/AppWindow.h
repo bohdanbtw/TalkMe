@@ -8,6 +8,7 @@ namespace TalkMe {
 
 /// Win32 window and taskbar/title bar icons. Owns window creation, WndProc, and icon loading.
 /// Call SetOnDestroy/SetOnResize before Create(). On WM_DESTROY the window handle is cleared and onDestroy is invoked.
+/// Close button minimizes to system tray; right-click tray icon -> Exit to quit.
 class AppWindow {
 public:
     AppWindow() = default;
@@ -36,6 +37,9 @@ public:
 private:
     static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
     LRESULT HandleMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+    void AddOrUpdateTrayIcon(HWND hWnd);
+    void RemoveTrayIcon();
+    void ShowTrayContextMenu(HWND hWnd);
 
     HWND m_Hwnd = nullptr;
     HICON m_HiconSmall = nullptr;
@@ -44,6 +48,8 @@ private:
     std::function<void(UINT, UINT)> m_OnResize;
     std::function<void()> m_OnRenderFrame;
     bool m_IsResizing = false;
+    bool m_TrayIconAdded = false;
+    bool m_ReallyClose = false;
 };
 
 } // namespace TalkMe

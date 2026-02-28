@@ -3,6 +3,7 @@
 #include "../core/ConfigManager.h"
 #include <imgui.h>
 #include <imgui_impl_win32.h>
+#include <shellapi.h>
 #include <tchar.h>
 #include <cstring>
 
@@ -46,6 +47,12 @@ static const struct { int id; const char* name; } kPackedIcons[] = {
 #endif
 };
 static const int kPackedIconsCount = sizeof(kPackedIcons) / sizeof(kPackedIcons[0]);
+
+static constexpr UINT WM_TRAYICON = WM_APP + 1;
+static constexpr UINT WM_TALKME_RESTORE = WM_APP + 10;  // bring window to front (single-instance)
+static constexpr UINT_PTR ID_TRAY_SHOW = 1000;
+static constexpr UINT_PTR ID_TRAY_EXIT = 1001;
+static constexpr UINT_PTR TRAY_ICON_ID = 1;
 
 // Ensure %LOCALAPPDATA%\TalkMe\assets has window/taskbar icons. Unpack from resources or copy from exe-relative assets.
 static void EnsureIconsInAppData() {
@@ -119,16 +126,93 @@ LRESULT CALLBACK AppWindow::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
     return ::DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
+void AppWindow::AddOrUpdateTrayIcon(HWND hWnd) {
+    NOTIFYICONDATAW nid = {};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = hWnd;
+    nid.uID = (UINT)TRAY_ICON_ID;
+    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    nid.uCallbackMessage = WM_TRAYICON;
+    nid.hIcon = m_HiconSmall ? m_HiconSmall : m_HiconBig;
+    wcscpy_s(nid.szTip, L"TalkMe");
+    if (m_TrayIconAdded)
+        ::Shell_NotifyIconW(NIM_MODIFY, &nid);
+    else if (::Shell_NotifyIconW(NIM_ADD, &nid))
+        m_TrayIconAdded = true;
+}
+
+void AppWindow::RemoveTrayIcon() {
+    if (!m_TrayIconAdded || !m_Hwnd) return;
+    NOTIFYICONDATAW nid = {};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = m_Hwnd;
+    nid.uID = (UINT)TRAY_ICON_ID;
+    ::Shell_NotifyIconW(NIM_DELETE, &nid);
+    m_TrayIconAdded = false;
+}
+
+void AppWindow::ShowTrayContextMenu(HWND hWnd) {
+    HMENU menu = ::CreatePopupMenu();
+    if (!menu) return;
+    ::AppendMenuW(menu, MF_STRING, ID_TRAY_SHOW, L"Show");
+    ::AppendMenuW(menu, MF_STRING, ID_TRAY_EXIT, L"Exit");
+    ::SetForegroundWindow(hWnd);
+    POINT pt;
+    ::GetCursorPos(&pt);
+    ::TrackPopupMenu(menu, TPM_RIGHTALIGN | TPM_BOTTOMALIGN, pt.x, pt.y, 0, hWnd, nullptr);
+    ::DestroyMenu(menu);
+}
+
 LRESULT AppWindow::HandleMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_TALKME_RESTORE) {
+        ::ShowWindow(hWnd, SW_RESTORE);
+        ::ShowWindow(hWnd, SW_SHOW);
+        ::SetForegroundWindow(hWnd);
+        return 0;
+    }
     if (msg == WM_DESTROY) {
+        RemoveTrayIcon();
         m_Hwnd = nullptr;
         if (m_OnDestroy) m_OnDestroy();
         ::PostQuitMessage(0);
         return 0;
     }
+    if (msg == WM_CLOSE) {
+        if (!m_ReallyClose) {
+            ::ShowWindow(hWnd, SW_HIDE);
+            AddOrUpdateTrayIcon(hWnd);
+            return 0;
+        }
+        RemoveTrayIcon();
+        return ::DefWindowProcW(hWnd, msg, wParam, lParam);
+    }
+    if (msg == WM_TRAYICON) {
+        if (LOWORD(lParam) == WM_RBUTTONUP)
+            ShowTrayContextMenu(hWnd);
+        else if (LOWORD(lParam) == WM_LBUTTONDBLCLK) {
+            ::ShowWindow(hWnd, SW_SHOW);
+            ::SetForegroundWindow(hWnd);
+        }
+        return 0;
+    }
+    if (msg == WM_COMMAND) {
+        UINT_PTR id = LOWORD(wParam);
+        if (id == ID_TRAY_EXIT) {
+            m_ReallyClose = true;
+            RemoveTrayIcon();
+            ::PostMessageW(hWnd, WM_CLOSE, 0, 0);
+            return 0;
+        }
+        if (id == ID_TRAY_SHOW) {
+            ::ShowWindow(hWnd, SW_SHOW);
+            ::SetForegroundWindow(hWnd);
+            return 0;
+        }
+    }
     if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) return 0;
     switch (msg) {
     case WM_SIZE:
+        // Only handle live resizes here; minimizing should just minimize
         if (wParam != SIZE_MINIMIZED && m_OnResize)
             m_OnResize((UINT)LOWORD(lParam), (UINT)HIWORD(lParam));
         return 0;
@@ -192,8 +276,10 @@ bool AppWindow::Create(int width, int height, const std::string& title) {
     // GWLP_USERDATA set in WndProc WM_CREATE
     if (m_HiconBig) ::SendMessageW(m_Hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(m_HiconBig));
     if (m_HiconSmall) ::SendMessageW(m_Hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(m_HiconSmall));
+    // Create hidden; app shows window after splash. Add tray icon immediately so it's always present (Discord-style).
     ::ShowWindow(m_Hwnd, SW_HIDE);
     ::UpdateWindow(m_Hwnd);
+    AddOrUpdateTrayIcon(m_Hwnd);
     return true;
 }
 
