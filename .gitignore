@@ -412,7 +412,8 @@ secret/
 # Cursor IDE
 .cursor/
 
-# Cursor rules and lessons (local workflow, do not commit)
+# Cursor / agent instructions (local workflow, do not commit)
+AGENTS.md
 CURSOR/
 
 # OS junk

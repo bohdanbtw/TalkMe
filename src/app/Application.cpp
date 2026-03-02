@@ -1,4 +1,5 @@
 #include "Application.h"
+#include "ResourceLimits.h"
 #include <tchar.h>
 #include <cctype>
 #include <cstdio>
@@ -760,15 +761,16 @@ namespace TalkMe {
 
                 if (done || !m_Window.GetHwnd()) break;
 
-                // STEP 2: Wait for quit, network wake, or any input (mouse, keyboard, paint).
-                // OPTIMIZATION: Use INFINITE (0% CPU) when idle, but cap when we need continuous redraws:
-                // - In a voice channel: 250ms so keepalives don't starve.
-                // - GIF panel open: ~60 fps so the panel and animated GIFs render without mouse movement.
+                // STEP 2: Wait for quit, network wake, or any input.
+                // Adaptive: INFINITE on login/register; 250ms in voice; MainApp uses 60 fps only when GIFs active, else ~20 fps.
                 DWORD waitMs = INFINITE;
-                if (m_ShowGifPicker) {
-                    waitMs = 16;
+                if (m_CurrentState == AppState::Login || m_CurrentState == AppState::Login2FA || m_CurrentState == AppState::Register) {
+                    waitMs = INFINITE;
                 } else if (m_ActiveVoiceChannelId != -1 && m_NetClient.IsConnected()) {
                     waitMs = 250;
+                } else {
+                    const bool hasActiveGifs = TalkMe::TextureManager::Get().HasActiveGifSets() || m_ShowGifPicker;
+                    waitMs = hasActiveGifs ? (DWORD)TalkMe::Limits::kAnimWaitMs : (DWORD)TalkMe::Limits::kIdleWaitMs;
                 }
 
                 if (quitHandle) {
@@ -1044,7 +1046,11 @@ namespace TalkMe {
                             m_Graphics.OnResize(cw, ch);
                     }
 
-                    // STEP 8: Render ImGui
+                    // STEP 8: Decode queued GIFs on main thread (WIC)
+                    TalkMe::ImageCache::Get().ProcessPendingGifDecodes();
+
+                    // STEP 9: Render ImGui
+                    TalkMe::TextureManager::Get().TickFrame();
                     try {
                         m_Graphics.ImGuiNewFrame();
                         ImGui::NewFrame();
@@ -1105,6 +1111,9 @@ namespace TalkMe {
             m_ShowShortcuts = !m_ShowShortcuts;
         if (ImGui::IsKeyPressed(ImGuiKey_F2))
             m_ShowFriendList = !m_ShowFriendList;
+        if (ImGui::IsKeyPressed(ImGuiKey_F6))
+            m_ShowGifDebug = !m_ShowGifDebug;
+        const bool wasGifPickerOpen = m_ShowGifPicker;
         if (ImGui::IsKeyPressed(ImGuiKey_F4))
             m_ShowGifPicker = !m_ShowGifPicker;
         if (ImGui::IsKeyPressed(ImGuiKey_F5))
@@ -1114,6 +1123,11 @@ namespace TalkMe {
         else if (m_CurrentState == AppState::Login2FA) RenderLogin2FA();
         else if (m_CurrentState == AppState::Register) RenderRegister();
         else if (m_CurrentState == AppState::MainApp) RenderMainApp();
+
+        // When panel is closed (by F4, click outside, or popup close), nuke picker RAM so reopen shows skeletons.
+        if (wasGifPickerOpen && !m_ShowGifPicker && m_GifPickerPanel)
+            m_GifPickerPanel->OnClosed();
+
         ImGui::End(); ImGui::PopStyleVar(3);
 
         // Friends panel removed — now rendered as a full tab (like Settings)
@@ -1675,6 +1689,7 @@ namespace TalkMe {
             if (ImGui::Begin("Keyboard Shortcuts", &m_ShowShortcuts)) {
                 ImGui::Text("F1  - This help panel");
                 ImGui::Text("F2  - Friends / Direct Messages");
+                ImGui::Text("F6  - GIF memory debug overlay");
                 ImGui::Separator();
                 ImGui::Text("Ctrl+Shift+M  - Toggle Mute");
                 ImGui::Text("Ctrl+Shift+D  - Toggle Deafen");
@@ -1685,6 +1700,18 @@ namespace TalkMe {
                 ImGui::Text("Right-click server   - Copy invite / Leave");
                 ImGui::Separator();
                 ImGui::TextDisabled("v%s", "1.4.0");
+            }
+            ImGui::End();
+        }
+
+        if (m_ShowGifDebug) {
+            auto stats = TalkMe::TextureManager::Get().GetGifDebugStats();
+            ImGui::SetNextWindowSize(ImVec2(280, 140), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin("GIF Memory (F6)", &m_ShowGifDebug)) {
+                ImGui::Text("Chat GIF sets:   %d", stats.chatSets);
+                ImGui::Text("Picker GIF sets: %d", stats.pickerSets);
+                ImGui::Text("Total frames:    %d", stats.totalFrames);
+                ImGui::Text("Approx VRAM:    %.1f MB", stats.approxVramBytes / (1024.0 * 1024.0));
             }
             ImGui::End();
         }

@@ -1,9 +1,12 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <map>
+#include <unordered_map>
 #include <functional>
 #include <atomic>
 #include <memory>
+#include <cstdint>
 #include "../network/KlipyGifProvider.h"
 
 namespace TalkMe::UI {
@@ -51,6 +54,18 @@ private:
     bool   m_InitialLoad     = false;
     double m_SearchDebounce  = 0.0;
 
+    struct GifAnimState {
+        std::vector<int> delaysMs;
+        int totalMs        = 0;
+        bool uploaded      = false;
+        uint32_t uploadedAtGen = 0;
+    };
+    std::unordered_map<std::string, GifAnimState> m_GifStates;
+    // Maintains a sliding window of at most kMaxActivePickerGifs textures kept in VRAM.
+    // Oldest entries are released from TextureManager as new ones are uploaded.
+    std::vector<std::string> m_RenderedOrder;
+    std::unordered_map<std::string, std::string> m_TexToUrl; // texId -> source URL
+
     std::vector<TalkMe::GifResult> m_DisplayedResults;
     std::vector<TalkMe::GifResult> m_PendingAppend;
     std::atomic<bool>              m_PendingReady{ false };
@@ -62,6 +77,9 @@ private:
     static constexpr float kRowGap   = 12.0f;
     static constexpr int   kPerPage  = 50;
     static constexpr int   kColumns  = 2;
+    static constexpr int   kMaxActivePickerGifs = 30;
+
+    void RegisterRenderedTexture(const std::string& texId, const std::string& url);
 };
 
 } // namespace TalkMe::UI
