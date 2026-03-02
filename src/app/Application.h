@@ -181,6 +181,7 @@ namespace TalkMe {
         char m_SearchBuf[256] = "";
         bool m_ShowSearch = false;
         bool m_ShowShortcuts = false;
+        bool m_ShowGifDebug = false;
         bool m_ShowGifPicker = false;
         std::unique_ptr<UI::GifPickerPanel> m_GifPickerPanel;
         std::function<void(float, float)> m_GifPanelRender;

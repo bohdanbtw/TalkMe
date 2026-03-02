@@ -136,10 +136,11 @@
 - **Proper UTF-8** — MultiByteToWideChar conversion for non-ASCII names
 
 ### GIF Integration
-- **Tenor GIF search** — powered by Google's Tenor API v2
+- **Klipy GIF search** — Klipy.com API (API key in `secret/secrets`)
 - **Search & Trending** — search by keyword or browse trending GIFs
-- **Click to send** — GIF URL sent as a chat message, renders as clickable link
+- **Click to send** — GIF URL sent as a chat message, renders inline
 - **F4 shortcut** or [+] → GIF button in chat
+- **Memory-conscious** — viewport eviction (only visible GIFs in VRAM), full clear on panel close
 
 ### Notification Settings
 - **Volume control** — adjustable notification volume (0-100%)
@@ -169,7 +170,7 @@
 | Overlay | Win32 + GDI+ layered window |
 | Image Loading | stb_image |
 | JSON | [nlohmann/json](https://github.com/nlohmann/json) |
-| GIF API | Tenor API v2 (WinHTTP) |
+| GIF API | Klipy.com API (WinHTTP) |
 | Noise Suppression | RNNoise / Speex DSP / WebRTC APM |
 | Build | MSBuild (Visual Studio 2022+) + vcpkg |
 
@@ -258,6 +259,137 @@ The server is a standalone C++ application using Asio + SQLite. It handles:
 | Right-click channel | Delete channel |
 | Right-click server | Copy invite, Rename, Delete, Leave |
 | Right-click voice user | Admin: mute, deafen, disconnect, move, sanction |
+
+---
+
+## GIF panel code (for Claude / context sharing)
+
+Below is the GIF picker implementation so you can paste it into Claude (or another assistant) for edits or debugging.
+
+### Types and panel API (`src/network/KlipyGifProvider.h` + `src/ui/GifPickerPanel.h`)
+
+```cpp
+// GifResult from KlipyGifProvider.h
+struct GifResult {
+    std::string id;
+    std::string title;
+    std::string gifUrl;
+    std::string previewUrl;
+    int width = 0;
+    int height = 0;
+};
+
+// GifPickerPanel public API
+class GifPickerPanel {
+public:
+    using OnGifSelected = std::function<void(const std::string& gifUrl, const std::string& title)>;
+    explicit GifPickerPanel(const std::string& apiKey);
+    std::function<void(float w, float h)> MakeRenderCallback(OnGifSelected onSelected);
+    void OnClosed();   // Clear all textures, ImageCache entries, displayed results; reset pending & m_InitialLoad
+    bool HasApiKey() const;
+    // ... private: KlipyGifProvider m_Provider, m_GifStates, m_DisplayedResults, m_PendingAppend, etc.
+};
+```
+
+### OnClosed — clear everything when panel is closed
+
+```cpp
+void GifPickerPanel::OnClosed() {
+    m_SearchDebounce = 0.0;
+    m_InitialLoad = false;
+    m_PendingReady.store(false, std::memory_order_release);
+    { std::lock_guard<std::mutex> lk(m_PendingMutex); m_PendingAppend.clear(); }
+    auto& tm = TalkMe::TextureManager::Get();
+    auto& imgCache = TalkMe::ImageCache::Get();
+    for (auto& [texId, _] : m_GifStates)
+        tm.RemoveTexture(texId);
+    m_GifStates.clear();
+    for (const auto& g : m_DisplayedResults) {
+        if (!g.previewUrl.empty()) imgCache.RemoveEntry(g.previewUrl);
+        if (!g.gifUrl.empty() && g.gifUrl != g.previewUrl) imgCache.RemoveEntry(g.gifUrl);
+    }
+    m_DisplayedResults.clear();
+}
+```
+
+### Selection callback — pass copies (avoid use-after-free)
+
+The callback is invoked when the user clicks a GIF. It must receive **copies** of URL and title, because the app may call `OnClosed()` inside the callback (clearing `m_DisplayedResults`). Passing references would be use-after-free.
+
+```cpp
+// In GifPickerPanel::Render(), when a cell is clicked:
+if (clicked && m_OnSelected) {
+    std::string sendUrl = gif->gifUrl.empty() ? gif->previewUrl : gif->gifUrl;
+    std::string title = gif->title;
+    if (!sendUrl.empty())
+        m_OnSelected(sendUrl, title);
+}
+```
+
+### Application wiring — F4 and selection
+
+```cpp
+// Init: make panel and set selection callback
+m_GifPickerPanel = std::make_unique<UI::GifPickerPanel>(TalkMe::Secrets::GetKlipyApiKey());
+m_GifPanelRender = m_GifPickerPanel->MakeRenderCallback([this](const std::string& url, const std::string&) {
+    if (m_SelectedChannelId != -1) {
+        nlohmann::json msgJ;
+        msgJ["cid"] = m_SelectedChannelId;
+        msgJ["u"] = m_CurrentUser.username;
+        msgJ["msg"] = url;
+        m_NetClient.Send(PacketType::Message_Text, msgJ.dump());
+    }
+    m_ShowGifPicker = false;
+    ImGui::CloseCurrentPopup();
+    m_GifPickerPanel->OnClosed();
+});
+
+// F4: when closing the panel, clear its memory
+if (ImGui::IsKeyPressed(ImGuiKey_F4)) {
+    if (m_ShowGifPicker && m_GifPickerPanel)
+        m_GifPickerPanel->OnClosed();
+    m_ShowGifPicker = !m_ShowGifPicker;
+}
+```
+
+### Render guards — avoid crash on small/empty data
+
+- **Minimum size:** If `panelW` or `panelH` &lt; 80, return early (no grid layout) to avoid negative `colW` and invalid draw rects when the popup is first opening.
+- **Invalid items:** If `gif->id.empty()` or both `previewUrl` and `gifUrl` are empty, draw a skeleton placeholder and `continue`; do not add to `m_GifStates` or `visiblePickerTexIds` (avoids empty-key collisions and invalid cache lookups).
+
+```cpp
+const float minPanelSize = 80.0f;
+if (panelW < minPanelSize || panelH < minPanelSize)
+    return;
+
+// For each result cell (non-skeleton):
+const std::string& url = gif->previewUrl.empty() ? gif->gifUrl : gif->previewUrl;
+const bool canLoad = !gif->id.empty() && !url.empty();
+if (!canLoad) {
+    // draw skeleton, InvisibleButton, colY update, continue
+}
+```
+
+### Viewport eviction (only visible GIFs in VRAM)
+
+During the cell loop, add each visible cell’s texture id to `visiblePickerTexIds` (e.g. `"gif_" + gif->id`). After the loop, evict any `m_GifStates` entry whose id is not in that set:
+
+```cpp
+for (auto it = m_GifStates.begin(); it != m_GifStates.end(); ) {
+    if (visiblePickerTexIds.count(it->first) == 0) {
+        tm.RemoveTexture(it->first);
+        it = m_GifStates.erase(it);
+    } else {
+        ++it;
+    }
+}
+```
+
+### TextureManager / ImageCache
+
+- `TextureManager::RemoveTexture(id)` — release static and GIF entries for that id.
+- `TextureManager::EvictTexturesWithPrefixExcept(prefix, keepIds)` — drop all texture ids with that prefix not in `keepIds` (used in ChatView for `att_` / `img_`).
+- `ImageCache::RemoveEntry(url)` — remove from cache and LRU so decoded pixels are freed (used in `OnClosed` for picker GIF URLs).
 
 ---
 

@@ -1,11 +1,13 @@
 #include "Application.h"
 #include <Windows.h>
+#include <objbase.h>
 #include <cstdio>
 #include <iostream>
 #include <exception>
 
 // Link with Shcore.lib for DPI awareness
 #pragma comment(lib, "Shcore.lib")
+#pragma comment(lib, "ole32.lib")
 #include <ShellScalingApi.h>
 
 namespace {
@@ -61,7 +63,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     // 2. Set DPI awareness for high-resolution screens
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    // 3. Single instance: only one TalkMe in tray. Second launch brings existing window to front.
+    // 3. Initialize COM STA on main thread so WIC (GIF decode) works in ProcessPendingGifDecodes
+    (void)CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
+    // 4. Single instance: only one TalkMe in tray. Second launch brings existing window to front.
     static const char kSingleInstanceMutex[] = "TalkMe_SingleInstance_Mutex";
     HANDLE hSingleMutex = ::CreateMutexA(nullptr, TRUE, kSingleInstanceMutex);
     if (hSingleMutex != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -80,7 +85,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     }
     // First instance: keep mutex (do not close) so it stays owned until process exits
 
-    // 4. Start the application
+    // 5. Start the application
     TalkMe::Application app("TalkMe", 1920, 1080);
     if (app.Initialize()) {
         app.Run();
