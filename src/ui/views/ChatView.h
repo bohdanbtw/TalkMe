@@ -51,6 +51,7 @@ namespace TalkMe::UI::Views {
         std::function<void(const std::string&)>* onAttachmentClick = nullptr,
         std::function<void()> requestOlderMessages = nullptr,
         const bool* loadingOlder = nullptr,
-        std::function<void(int channelId, int fullyVisibleMid)> onReadAnchorAdvanced = nullptr
+        std::function<void(int channelId, int fullyVisibleMid)> onReadAnchorAdvanced = nullptr,
+        const bool* gameMode = nullptr
     );
 }

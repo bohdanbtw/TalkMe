@@ -283,6 +283,11 @@ bool AppWindow::Create(int width, int height, const std::string& title) {
     return true;
 }
 
+void AppWindow::SetPosition(int x, int y) {
+    if (m_Hwnd && x >= 0 && y >= 0)
+        ::SetWindowPos(m_Hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+}
+
 void AppWindow::Destroy() {
     if (m_Hwnd) {
         ::DestroyWindow(m_Hwnd);

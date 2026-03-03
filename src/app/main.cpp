@@ -1,14 +1,23 @@
 #include "Application.h"
+#include "../core/ConfigManager.h"
 #include <Windows.h>
 #include <objbase.h>
 #include <cstdio>
 #include <iostream>
 #include <exception>
+#include <fstream>
+#include <string>
 
 // Link with Shcore.lib for DPI awareness
 #pragma comment(lib, "Shcore.lib")
 #pragma comment(lib, "ole32.lib")
 #include <ShellScalingApi.h>
+
+namespace {
+    const char kRelaunchArg[] = "--relaunch-instead";
+    const char kSingleInstanceMutex[] = "TalkMe_SingleInstance_Mutex";
+    const wchar_t kTalkMeClass[] = L"TalkMeClass";
+}
 
 namespace {
     std::terminate_handler g_prevTerminate = nullptr;
@@ -66,27 +75,53 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     // 3. Initialize COM STA on main thread so WIC (GIF decode) works in ProcessPendingGifDecodes
     (void)CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
+    bool relaunchInstead = (lpCmdLine && std::strstr(lpCmdLine, kRelaunchArg) != nullptr);
+
     // 4. Single instance: only one TalkMe in tray. Second launch brings existing window to front.
-    static const char kSingleInstanceMutex[] = "TalkMe_SingleInstance_Mutex";
+    //    If launched with --relaunch-instead, wait for the old process to exit then take the mutex.
     HANDLE hSingleMutex = ::CreateMutexA(nullptr, TRUE, kSingleInstanceMutex);
     if (hSingleMutex != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
         ::CloseHandle(hSingleMutex);
-        // Find existing TalkMe window (class name from AppWindow) and ask it to show
-        const wchar_t kTalkMeClass[] = L"TalkMeClass";
-        for (int retry = 0; retry < 50; ++retry) {
-            HWND existing = ::FindWindowW(kTalkMeClass, nullptr);
-            if (existing != nullptr) {
-                ::PostMessageW(existing, WM_APP + 10, 0, 0);  // WM_TALKME_RESTORE
+        if (relaunchInstead) {
+            for (int i = 0; i < 100; ++i) {
+                ::Sleep(200);
+                hSingleMutex = ::CreateMutexA(nullptr, TRUE, kSingleInstanceMutex);
+                if (hSingleMutex != nullptr && ::GetLastError() != ERROR_ALREADY_EXISTS)
+                    break;
+                if (hSingleMutex) ::CloseHandle(hSingleMutex);
+            }
+            if (hSingleMutex == nullptr || ::GetLastError() == ERROR_ALREADY_EXISTS) {
+                if (hSingleMutex) ::CloseHandle(hSingleMutex);
                 return 0;
             }
-            ::Sleep(100);
+        } else {
+            for (int retry = 0; retry < 50; ++retry) {
+                HWND existing = ::FindWindowW(kTalkMeClass, nullptr);
+                if (existing != nullptr) {
+                    ::PostMessageW(existing, WM_APP + 10, 0, 0);  // WM_TALKME_RESTORE
+                    return 0;
+                }
+                ::Sleep(100);
+            }
+            return 0;
         }
-        return 0;  // existing instance not ready, exit without starting another
     }
-    // First instance: keep mutex (do not close) so it stays owned until process exits
+
+    int winW = 1920, winH = 1080, restoreX = -1, restoreY = -1;
+    if (relaunchInstead) {
+        std::string path = TalkMe::ConfigManager::GetConfigDirectory() + "\\relaunch_rect.txt";
+        std::ifstream f(path);
+        if (f && (f >> restoreX >> restoreY >> winW >> winH)) {
+            if (winW < 320) winW = 320;
+            if (winH < 240) winH = 240;
+        } else {
+            restoreX = restoreY = -1;
+        }
+        (void)DeleteFileA(path.c_str());
+    }
 
     // 5. Start the application
-    TalkMe::Application app("TalkMe", 1920, 1080);
+    TalkMe::Application app("TalkMe", winW, winH, restoreX, restoreY);
     if (app.Initialize()) {
         app.Run();
     }

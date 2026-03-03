@@ -93,7 +93,8 @@ namespace TalkMe {
 
     class Application {
     public:
-        Application(const std::string& title, int width, int height);
+        /// restoreX/restoreY >= 0: move window to that position after Create (used after invisible relaunch).
+        Application(const std::string& title, int width, int height, int restoreX = -1, int restoreY = -1);
         ~Application();
         bool Initialize();
         void Run();
@@ -116,6 +117,7 @@ namespace TalkMe {
         std::string m_MediaBaseUrl;   // e.g. http://<server_ip>:5557 for GET /media/<id>
         std::string m_Title;
         int m_Width, m_Height;
+        int m_RestoreX = -1, m_RestoreY = -1;
         AppWindow m_Window;
         AppGraphics m_Graphics;
         void* m_NetworkWakeEvent = nullptr;  // HANDLE for MsgWaitForMultipleObjects / SetEvent
@@ -187,6 +189,8 @@ namespace TalkMe {
         std::function<void(float, float)> m_GifPanelRender;
         int m_EmotionsPanelTab = 2;       // 0=Emoji, 1=Stickers, 2=GIFs
         char m_StatusBuf[128] = "";
+        bool m_GameMode = false;          // When true: chat-only, no images/GIFs/screen share, max performance
+        bool m_PendingRelaunch = false;   // When true: next frame write rect, spawn --relaunch-instead, exit
 
         struct NotificationSettings {
             float volume = 0.8f;
@@ -229,6 +233,7 @@ namespace TalkMe {
         std::string GetMessageCacheDbPath() const;
         void LoadStateCache();
         void SaveStateCache();
+        void RequestRelaunch();  // Write window rect, spawn exe with --relaunch-instead, ExitProcess
 
         struct PollOption { std::string text; int votes = 0; bool iVoted = false; };
         struct Poll { int id = 0; int channelId = 0; std::string question; std::string creator; std::vector<PollOption> options; };

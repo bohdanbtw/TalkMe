@@ -140,7 +140,7 @@
 - **Search & Trending** — search by keyword or browse trending GIFs
 - **Click to send** — GIF URL sent as a chat message, renders inline
 - **F4 shortcut** or [+] → GIF button in chat
-- **Memory-conscious** — viewport eviction (only visible GIFs in VRAM), full clear on panel close
+- **Memory-conscious** — viewport eviction (only visible GIFs in VRAM), full clear on panel close; chat GIFs requested and protected in a first pass so they render without being pre-warmed in the picker
 
 ### Notification Settings
 - **Volume control** — adjustable notification volume (0-100%)
@@ -155,6 +155,7 @@
 - **Audio devices** — select mic and speaker at runtime
 - **Config persistence** — all settings saved to `%LocalAppData%\TalkMe`
 - **Session encryption** — DPAPI-encrypted session tokens
+- **Game Mode** (Settings → Performance) — When on: chat-only (no images, GIFs, or screen sharing), 1 FPS for minimal CPU. App restarts once to apply; window reopens in the same position.
 
 ---
 

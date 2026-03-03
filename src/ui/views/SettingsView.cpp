@@ -440,6 +440,28 @@ namespace TalkMe::UI::Views {
             ctx.onOverlayChanged();
     }
 
+    static void RenderPerformanceTab(SettingsContext& ctx) {
+        ImGui::Text("Game Mode");
+        ImGui::TextDisabled("Minimize resources for chat-only use while gaming");
+        ImGui::Dummy(ImVec2(0, 16));
+
+        if (ctx.gameMode) {
+            bool enabled = *ctx.gameMode;
+            if (ImGui::Checkbox("Turn On Game Mode", &enabled)) {
+                *ctx.gameMode = enabled;
+                if (ctx.onGameModeChange) ctx.onGameModeChange(enabled);
+            }
+            ImGui::Dummy(ImVec2(0, 8));
+            ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+            ImGui::TextWrapped(
+                "When On: chat shows raw text only (no images, GIFs, or screen sharing). "
+                "Uses minimal CPU/GPU and RAM for maximum in-game performance.");
+            ImGui::Dummy(ImVec2(0, 4));
+            ImGui::TextWrapped("The app will restart once to apply this setting.");
+            ImGui::PopStyleColor();
+        }
+    }
+
     static void RenderNotificationsTab(SettingsContext& ctx) {
         if (!ctx.notifVolume) return;
         ImGui::Text("Notification Volume");
@@ -631,8 +653,8 @@ namespace TalkMe::UI::Views {
         ImGui::Unindent(16);
         ImGui::Dummy(ImVec2(0, 12));
 
-        const char* tabs[] = { "Appearance", "Voice", "Keybinds", "Overlay", "Notifications", "Account" };
-        for (int i = 0; i < 5; i++) {
+        const char* tabs[] = { "Appearance", "Voice", "Keybinds", "Overlay", "Notifications", "Performance", "Account" };
+        for (int i = 0; i < 7; i++) {
             bool active = (ctx.settingsTab == i);
 
             if (active) {
@@ -692,7 +714,8 @@ namespace TalkMe::UI::Views {
             case 2: RenderKeybindsTab(ctx.keyMuteMic, ctx.keyDeafen); break;
             case 3: RenderOverlayTab(ctx); break;
             case 4: RenderNotificationsTab(ctx); break;
-            case 5: RenderAccountTab(ctx); break;
+            case 5: RenderPerformanceTab(ctx); break;
+            case 6: RenderAccountTab(ctx); break;
         }
 
         ImGui::EndGroup();
