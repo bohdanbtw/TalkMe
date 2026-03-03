@@ -52,6 +52,8 @@ namespace TalkMe::UI::Views {
         bool* notifMuteMentions = nullptr;
         bool* notifMuteMessages = nullptr;
         bool* notifMuteJoinLeave = nullptr;
+        bool* gameMode = nullptr;
+        std::function<void(bool)> onGameModeChange;
     };
 
     void RenderSettings(SettingsContext& ctx);

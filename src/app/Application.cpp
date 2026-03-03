@@ -189,7 +189,8 @@ namespace TalkMe {
         m_Overlay.UpdateMembers(members);
     }
 
-    Application::Application(const std::string& title, int width, int height) : m_Title(title), m_Width(width), m_Height(height) { }
+    Application::Application(const std::string& title, int width, int height, int restoreX, int restoreY)
+        : m_Title(title), m_Width(width), m_Height(height), m_RestoreX(restoreX), m_RestoreY(restoreY) {}
     Application::~Application() { if (!m_CleanedUp) Cleanup(); }
 
     bool Application::Initialize() {
@@ -236,6 +237,8 @@ namespace TalkMe {
             m_Graphics.ClearAndPresent(clear, ImGui::GetDrawData());
         });
         if (!m_Window.Create(m_Width, m_Height, m_Title) || !m_Graphics.Init(m_Window.GetHwnd()) || !m_Graphics.InitImGui()) return false;
+        if (m_RestoreX >= 0 && m_RestoreY >= 0)
+            m_Window.SetPosition(m_RestoreX, m_RestoreY);
         TalkMe::Secrets::Load();
         if (!TalkMe::Secrets::GetServerIp().empty())
             m_ServerIP = TalkMe::Secrets::GetServerIp();
@@ -365,6 +368,7 @@ namespace TalkMe {
     }
     ConfigManager::Get().LoadKeybinds(m_KeyMuteMic, m_KeyDeafen);
     ConfigManager::Get().LoadOverlay(m_OverlayEnabled, m_OverlayCorner, m_OverlayOpacity);
+    m_GameMode = ConfigManager::Get().LoadGameMode(false);
     m_NoiseMode = ConfigManager::Get().LoadNoiseSuppressionMode(1);
     {
         int noiseModeClamped = (std::max)(0, (std::min)(3, m_NoiseMode));
@@ -748,6 +752,10 @@ namespace TalkMe {
             HANDLE quitHandle = static_cast<HANDLE>(m_QuitEvent);
 
             while (!done) {
+                if (m_PendingRelaunch) {
+                    RequestRelaunch();
+                    break;
+                }
                 // STEP 1: Pump window messages
                 MSG msg;
                 while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
@@ -769,8 +777,13 @@ namespace TalkMe {
                 } else if (m_ActiveVoiceChannelId != -1 && m_NetClient.IsConnected()) {
                     waitMs = 250;
                 } else {
-                    const bool hasActiveGifs = TalkMe::TextureManager::Get().HasActiveGifSets() || m_ShowGifPicker;
-                    waitMs = hasActiveGifs ? (DWORD)TalkMe::Limits::kAnimWaitMs : (DWORD)TalkMe::Limits::kIdleWaitMs;
+                    // Game mode: 1 FPS for max efficiency (chat-only, minimal CPU).
+                    if (m_GameMode)
+                        waitMs = 1000;
+                    else {
+                        const bool hasActiveGifs = TalkMe::TextureManager::Get().HasActiveGifSets() || m_ShowGifPicker;
+                        waitMs = hasActiveGifs ? (DWORD)TalkMe::Limits::kAnimWaitMs : (DWORD)TalkMe::Limits::kIdleWaitMs;
+                    }
                 }
 
                 if (quitHandle) {
@@ -1935,6 +1948,8 @@ namespace TalkMe {
                     ConfigManager::Get().SaveKeybinds(m_KeyMuteMic, m_KeyDeafen);
                     ConfigManager::Get().SaveOverlay(m_OverlayEnabled, m_OverlayCorner, m_OverlayOpacity);
                     ConfigManager::Get().SaveNoiseSuppressionMode(m_NoiseMode);
+                    m_GameMode = false;
+                    ConfigManager::Get().SaveGameMode(false);
                     m_Overlay.SetEnabled(m_OverlayEnabled);
                     m_Overlay.SetCorner(m_OverlayCorner);
                     m_Overlay.SetOpacity(m_OverlayOpacity);
@@ -1967,6 +1982,11 @@ namespace TalkMe {
             sctx.notifMuteMentions = &m_NotifSettings.muteMentions;
             sctx.notifMuteMessages = &m_NotifSettings.muteMessages;
             sctx.notifMuteJoinLeave = &m_NotifSettings.muteJoinLeave;
+            sctx.gameMode = &m_GameMode;
+            sctx.onGameModeChange = [this](bool enabled) {
+                ConfigManager::Get().SaveGameMode(enabled);
+                m_PendingRelaunch = true;  // Invisible relaunch so new process runs with the new setting
+            };
             UI::Views::RenderSettings(sctx);
         }
         else if (m_ShowFriendList) {
@@ -2478,10 +2498,40 @@ namespace TalkMe {
                             SaveStateCache();
                             m_LastReadAnchorPersistTime = now;
                         }
-                    });
+                    },
+                    &m_GameMode);
             }
         }
         RenderAttachmentViewer();
+    }
+
+    void Application::RequestRelaunch() {
+        HWND hwnd = m_Window.GetHwnd();
+        if (!hwnd) return;
+        RECT r = {};
+        if (!::GetWindowRect(hwnd, &r)) return;
+        std::string path = ConfigManager::GetConfigDirectory() + "\\relaunch_rect.txt";
+        std::ofstream f(path);
+        if (!f) return;
+        int w = r.right - r.left;
+        int h = r.bottom - r.top;
+        if (w < 320) w = 320;
+        if (h < 240) h = 240;
+        f << r.left << " " << r.top << " " << w << " " << h;
+        f.close();
+        char exePath[MAX_PATH] = {};
+        if (::GetModuleFileNameA(nullptr, exePath, MAX_PATH) == 0) return;
+        std::vector<char> cmdBuf(MAX_PATH + 32, 0);
+        int n = std::snprintf(cmdBuf.data(), cmdBuf.size(), "\"%s\" --relaunch-instead", exePath);
+        if (n <= 0 || n >= (int)cmdBuf.size()) return;
+        STARTUPINFOA si = {};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi = {};
+        if (::CreateProcessA(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+            if (pi.hThread) ::CloseHandle(pi.hThread);
+            if (pi.hProcess) ::CloseHandle(pi.hProcess);
+            ::ExitProcess(0);
+        }
     }
 
     void Application::Cleanup() {

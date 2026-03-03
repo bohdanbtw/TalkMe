@@ -4,6 +4,30 @@ All notable changes to the **TalkMe client** are documented here. The format is 
 
 ---
 
+## [1.4.1] — 2026-03-03
+
+### Added
+
+- **Game Mode** (Settings → Performance) — When turned on, the app runs in a chat-only, maximum-efficiency mode: no images, GIFs, or screen sharing in the UI; window runs at 1 FPS to minimize CPU. Toggling the setting triggers an invisible relaunch (window reopens in the same position/size) so the new mode applies cleanly without extra code paths.
+- **Invisible relaunch** — Toggling Game Mode saves the setting, writes the current window rect to config, spawns the executable with `--relaunch-instead`, and exits. The new process waits for the old one to release the single-instance mutex, then starts with the updated config and restores the window position.
+
+### Changed
+
+- **GIF picker on close** — Closing the GIF panel (F4, click outside, or popup close) now always runs `OnClosed()`: all picker textures and ImageCache entries are cleared so RAM is freed. Reopening the panel shows the same grid as skeletons, then GIFs re-load from disk/network.
+- **Chat GIF rendering** — Visible chat image URLs are collected and requested in a first pass before rendering, and protected from cache eviction, so inline GIFs in messages render even when they were not previously opened in the GIF picker.
+- **Game mode: 1 FPS** — When Game Mode is on and the user is in the main app (not in a voice channel), the main loop uses a 1000 ms wait between frames for maximum efficiency.
+
+### Fixed
+
+- **Chat GIFs after turning Game Mode off** — Chat GIF state is now reset whenever the texture is missing (e.g. evicted during Game Mode), so GIFs in messages render again after disabling Game Mode instead of staying blank.
+- **GIF memory** — Picker uses `GetImage` instead of `GetImageCopy` when uploading to the GPU to avoid doubling decoded frame memory; chat static image path calls `ReleaseGifPixels` after upload.
+
+### Technical
+
+- **Relaunch flow** — `main.cpp` parses `--relaunch-instead`; if the single-instance mutex is already held, the new process waits in a loop for it, then reads `relaunch_rect.txt` (x, y, w, h), creates `Application` with that size and restore position, and deletes the file. `Application::RequestRelaunch()` writes the rect, spawns the process with the flag, and calls `ExitProcess(0)`. `AppWindow::SetPosition(x, y)` restores the window position after Create.
+
+---
+
 ## [1.4.0] — 2026-02-28
 
 ### Added
@@ -90,6 +114,7 @@ All notable changes to the **TalkMe client** are documented here. The format is 
 - **Minor (1.X.0)** — New features, medium refactors, notable improvements.
 - **Major (X.0.0)** — Large updates, breaking changes, major redesign.
 
+[1.4.1]: https://github.com/bohdanbtw/TalkMe/releases/tag/v1.4.1
 [1.4.0]: https://github.com/bohdanbtw/TalkMe/releases/tag/v1.4.0
 [1.3.0]: https://github.com/bohdanbtw/TalkMe/releases/tag/v1.3.0
 [1.0.0]: https://github.com/bohdanbtw/TalkMe/releases/tag/v1.0.0

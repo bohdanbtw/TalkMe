@@ -26,6 +26,9 @@ public:
     /// Create window and load icons. Ensures assets dir exists and has icons. Returns false on failure.
     bool Create(int width, int height, const std::string& title);
 
+    /// Move window to (x, y). Call after Create for relaunch restore. No-op if not created.
+    void SetPosition(int x, int y);
+
     /// Destroy window, unregister class, destroy icons. Safe to call multiple times.
     void Destroy();
 

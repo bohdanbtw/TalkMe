@@ -68,7 +68,8 @@ namespace TalkMe::UI::Views {
             auto& tm        = TalkMe::TextureManager::Get();
             auto& state     = s_ChatGifStates[texId];
 
-            if (state.uploaded && tm.EvictionGeneration() != state.uploadedAtGen) {
+            // If we think we're uploaded but the texture is gone (e.g. evicted during game mode), reset so we re-upload.
+            if (state.uploaded) {
                 bool gifGone    = !state.delaysMs.empty() && tm.GetGifFrameCount(texId) == 0;
                 bool staticGone = state.delaysMs.empty()  && tm.GetTexture(texId) == nullptr;
                 if (gifGone || staticGone) state = {};
@@ -176,15 +177,18 @@ namespace TalkMe::UI::Views {
         std::function<void(const std::string&)>* onAttachmentClick,
         std::function<void()> requestOlderMessages,
         const bool* loadingOlder,
-        std::function<void(int channelId, int fullyVisibleMid)> onReadAnchorAdvanced)
+        std::function<void(int channelId, int fullyVisibleMid)> onReadAnchorAdvanced,
+        const bool* gameMode)
     {
+        const bool gameModeOn = (gameMode && *gameMode);
+
         float winH = ImGui::GetWindowHeight();
         float winW = ImGui::GetWindowWidth();
         float left = Styles::MainContentLeftOffset;
         float contentW = winW - left;
         // When GIF panel is open, it takes 30% of content area on the right; chat uses the rest
         float gifPanelW = 0.0f;
-        if (showGifPicker && *showGifPicker) {
+        if (!gameModeOn && showGifPicker && *showGifPicker) {
             gifPanelW = contentW * 0.30f;
             if (gifPanelW < 200.0f) gifPanelW = 200.0f;
         }
@@ -228,8 +232,8 @@ namespace TalkMe::UI::Views {
                 float gridH = winH - gridTop - leaveBarH;
                 if (gridH < 100.0f) gridH = 100.0f;
 
-                // When screen sharing: split into screen viewport (top) + user strip (bottom)
-                bool showingScreenShare = (someoneIsSharing || isScreenSharing);
+                // When screen sharing: split into screen viewport (top) + user strip (bottom) (disabled in game mode)
+                bool showingScreenShare = !gameModeOn && (someoneIsSharing || isScreenSharing);
                 float screenViewH = showingScreenShare ? (gridH * 0.7f) : 0.0f;
                 float userStripH = showingScreenShare ? (gridH - screenViewH) : gridH;
 
@@ -599,24 +603,26 @@ namespace TalkMe::UI::Views {
                     }
                     ImGui::PopStyleColor(3);
 
-                    // Button 2: Screen Share (blue) or Stop (if sharing)
-                    ImGui::SameLine(0, 12);
-                    if (isScreenSharing) {
-                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.3f, 0.1f, 1.0f));
-                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.35f, 0.12f, 1.0f));
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
-                        if (ImGui::Button("Stop Share", ImVec2(130, actionBtnH))) {
-                            if (onStopScreenShare) onStopScreenShare();
+                    // Button 2: Screen Share (blue) or Stop (if sharing) — hidden in game mode
+                    if (!gameModeOn) {
+                        ImGui::SameLine(0, 12);
+                        if (isScreenSharing) {
+                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.3f, 0.1f, 1.0f));
+                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.35f, 0.12f, 1.0f));
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                            if (ImGui::Button("Stop Share", ImVec2(130, actionBtnH))) {
+                                if (onStopScreenShare) onStopScreenShare();
+                            }
+                            ImGui::PopStyleColor(3);
+                        } else {
+                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.65f, 1.0f));
+                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.42f, 0.75f, 1.0f));
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
+                            if (ImGui::Button("Screen Share", ImVec2(130, actionBtnH))) {
+                                ImGui::OpenPopup("ScreenShareSetup");
+                            }
+                            ImGui::PopStyleColor(3);
                         }
-                        ImGui::PopStyleColor(3);
-                    } else {
-                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.35f, 0.65f, 1.0f));
-                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.42f, 0.75f, 1.0f));
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
-                        if (ImGui::Button("Screen Share", ImVec2(130, actionBtnH))) {
-                            ImGui::OpenPopup("ScreenShareSetup");
-                        }
-                        ImGui::PopStyleColor(3);
                     }
 
                     // Button 3: Games (green)
@@ -1013,12 +1019,55 @@ namespace TalkMe::UI::Views {
                 if (cursorY > 0.f)
                     ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, cursorY));
 
-                std::unordered_set<std::string> visibleTexIds;
+                // First pass: collect all visible image URLs and request them immediately so they
+                // load in parallel and are protected from eviction (chat GIFs then render even when
+                // not pre-warmed by the picker).
                 std::unordered_set<std::string> visibleChatImageUrls;
+                if (!gameModeOn) {
+                    for (int ri = firstVis; ri < (int)renderIdx.size(); ri++) {
+                        const auto& msg = messages[renderIdx[ri]];
+                        if (!msg.attachmentId.empty() && mediaBaseUrl && !mediaBaseUrl->empty()) {
+                            std::string mediaUrl = *mediaBaseUrl + "/media/" + msg.attachmentId;
+                            visibleChatImageUrls.insert(mediaUrl);
+                        }
+                        const std::string& text = msg.content;
+                        size_t pos = 0;
+                        while (pos < text.size()) {
+                            size_t urlStart = std::string::npos;
+                            for (const char* prefix : {"https://", "http://", "data:image/"}) {
+                                size_t f = text.find(prefix, pos);
+                                if (f != std::string::npos && (urlStart == std::string::npos || f < urlStart))
+                                    urlStart = f;
+                            }
+                            if (urlStart == std::string::npos) break;
+                            size_t urlEnd = text.find_first_of(" \t\n\r", urlStart);
+                            if (urlEnd == std::string::npos) urlEnd = text.size();
+                            std::string url = text.substr(urlStart, urlEnd - urlStart);
+                            std::string lower = url;
+                            for (auto& c : lower) c = (char)std::tolower((unsigned char)c);
+                            bool isImage = (lower.find("data:image/") == 0);
+                            for (const char* ext : {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
+                                if (lower.find(ext) != std::string::npos) isImage = true;
+                            if (lower.find("tenor.com") != std::string::npos || lower.find("giphy.com") != std::string::npos ||
+                                lower.find("imgur.com") != std::string::npos || lower.find("i.redd.it") != std::string::npos)
+                                isImage = true;
+                            if (isImage) visibleChatImageUrls.insert(url);
+                            pos = urlEnd;
+                        }
+                    }
+                    auto& imgCache = TalkMe::ImageCache::Get();
+                    for (const std::string& url : visibleChatImageUrls) {
+                        if (!imgCache.GetImage(url) && !imgCache.IsLoading(url))
+                            imgCache.RequestImage(url);
+                    }
+                    TalkMe::ImageCache::Get().SetProtectedUrls(visibleChatImageUrls);
+                }
+
+                std::unordered_set<std::string> visibleTexIds;
 
                 for (int ri = firstVis; ri < (int)renderIdx.size(); ri++) {
                         const auto& msg = messages[renderIdx[ri]];
-                        if (!msg.attachmentId.empty()) {
+                        if (!gameModeOn && !msg.attachmentId.empty()) {
                             visibleTexIds.insert("att_" + msg.attachmentId);
                             if (mediaBaseUrl && !mediaBaseUrl->empty()) {
                                 std::string mediaUrl = *mediaBaseUrl + "/media/" + msg.attachmentId;
@@ -1069,8 +1118,13 @@ namespace TalkMe::UI::Views {
                         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "[pinned]");
                     }
 
-                    // Inline attachment (TCP Media_Request path first; HTTP fallback if no TCP handlers)
+                    // Inline attachment (TCP Media_Request path first; HTTP fallback if no TCP handlers) — skipped in game mode
                     if (!msg.attachmentId.empty()) {
+                        if (gameModeOn) {
+                            ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                            ImGui::Text("[Image]");
+                            ImGui::PopStyleColor();
+                        } else {
                         std::string mediaUrl = (mediaBaseUrl && !mediaBaseUrl->empty())
                             ? (*mediaBaseUrl + "/media/" + msg.attachmentId) : std::string();
                         bool drawn = false;
@@ -1138,6 +1192,7 @@ namespace TalkMe::UI::Views {
                                     ImGui::PopStyleColor();
                                 }
                             }
+                        }
                         }
                     }
 
@@ -1220,8 +1275,8 @@ namespace TalkMe::UI::Views {
                             if (ImGui::IsItemClicked())
                                 ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 
-                            // Inline image rendering for image URLs (including GIFs)
-                            if (isImage) {
+                            // Inline image rendering for image URLs (including GIFs) — skipped in game mode
+                            if (isImage && !gameModeOn) {
                                 visibleTexIds.insert("img_" + url);
                                 visibleChatImageUrls.insert(url);
                                 auto& imgCache = TalkMe::ImageCache::Get();
@@ -1256,8 +1311,8 @@ namespace TalkMe::UI::Views {
                                 }
                             }
 
-                            // YouTube link preview
-                            bool isYouTube = (lower.find("youtube.com/watch") != std::string::npos ||
+                            // YouTube link preview — skipped in game mode
+                            bool isYouTube = !gameModeOn && (lower.find("youtube.com/watch") != std::string::npos ||
                                               lower.find("youtu.be/") != std::string::npos);
                             if (isYouTube && !isImage) {
                                 // Extract video ID and show thumbnail
@@ -1462,8 +1517,8 @@ namespace TalkMe::UI::Views {
                     ImGui::Unindent(32);
                 }
 
-                // GIF/Emotions panel: 30% of content area, right-aligned; close when clicking outside
-                if (showGifPicker && renderGifPanel) {
+                // GIF/Emotions panel: 30% of content area, right-aligned; close when clicking outside (disabled in game mode)
+                if (!gameModeOn && showGifPicker && renderGifPanel) {
                     ImVec2 vpPos = ImGui::GetMainViewport()->Pos;
                     ImVec2 vpSize = ImGui::GetMainViewport()->Size;
                     float contentWidth = vpSize.x - Styles::MainContentLeftOffset;
@@ -1632,11 +1687,13 @@ namespace TalkMe::UI::Views {
                     ImGui::EndPopup();
                 }
 
-                ImGui::SameLine();
-                if (ImGui::Button("Emoji", ImVec2(48, 32))) {
-                    *showGifPicker = true;
+                if (!gameModeOn) {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Emoji", ImVec2(48, 32))) {
+                        *showGifPicker = true;
+                    }
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Emotions (GIF & Emoji)");
                 }
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Emotions (GIF & Emoji)");
                 ImGui::SameLine();
                 if (UI::AccentButton("Send", ImVec2(60, 32)) || enter) {
                     if (strlen(chatInputBuf) > 0) {

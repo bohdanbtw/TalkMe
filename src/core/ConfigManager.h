@@ -160,6 +160,24 @@ namespace TalkMe {
             return mode;
         }
 
+        void SaveGameMode(bool enabled) {
+            std::string dir = GetConfigDir();
+            CreateDirectoryA(dir.c_str(), NULL);
+            std::ofstream f(dir + "\\game_mode.cfg", std::ios::trunc);
+            if (f.is_open()) f << (enabled ? 1 : 0);
+        }
+
+        bool LoadGameMode(bool defaultEnabled = false) {
+            std::ifstream f(GetConfigDir() + "\\game_mode.cfg");
+            bool enabled = defaultEnabled;
+            if (f.is_open()) {
+                int v = 0;
+                f >> v;
+                enabled = (v != 0);
+            }
+            return enabled;
+        }
+
         /// Returns persistent device ID (16-char hex). Generates and saves to config if missing.
         std::string GetDeviceId() {
             std::string path = GetConfigDirectory() + "\\device_id.cfg";
