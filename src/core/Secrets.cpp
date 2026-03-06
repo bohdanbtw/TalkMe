@@ -5,6 +5,10 @@
 #include <algorithm>
 #include <cctype>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace TalkMe {
 
 namespace Secrets {
@@ -35,33 +39,63 @@ namespace {
         if (!key.empty())
             s_Secrets[key] = value;
     }
+
+    void CopySecretsToLocalAppData(const std::string& content) {
+        std::string configDir = ConfigManager::GetConfigDirectory();
+        std::string secretDir = configDir + "\\secret";
+        std::string destPath = secretDir + "\\secrets";
+#ifdef _WIN32
+        CreateDirectoryA(configDir.c_str(), NULL);
+        CreateDirectoryA(secretDir.c_str(), NULL);
+#endif
+        std::ofstream out(destPath, std::ios::binary | std::ios::trunc);
+        if (out.is_open())
+            out.write(content.data(), static_cast<std::streamsize>(content.size()));
+    }
 } // namespace
 
 bool Load() {
     if (s_Loaded) return !s_Secrets.empty();
     s_Loaded = true;
-    std::string path = ConfigManager::GetConfigDirectory() + "\\secret\\secrets";
+    const std::string localAppDataPath = ConfigManager::GetConfigDirectory() + "\\secret\\secrets";
+    std::string path = localAppDataPath;
     std::ifstream f(path);
     if (!f.is_open()) {
         std::string exeDir = GetExeDirectory();
         if (!exeDir.empty()) {
-            f.open(exeDir + "\\secret\\secrets");
-            if (!f.is_open())
-                f.open(exeDir + "\\..\\secret\\secrets");
-            if (!f.is_open())
-                f.open(exeDir + "\\..\\..\\secret\\secrets");  // project root when exe is in x64/Release
+            path = exeDir + "\\secret\\secrets";
+            f.open(path);
+            if (!f.is_open()) {
+                path = exeDir + "\\..\\secret\\secrets";
+                f.open(path);
+            }
+            if (!f.is_open()) {
+                path = exeDir + "\\..\\..\\secret\\secrets";
+                f.open(path);
+            }
         }
     }
     if (!f.is_open()) return false;
+    std::stringstream raw;
+    raw << f.rdbuf();
+    std::string content = raw.str();
+    f.close();
+
     std::string line;
-    while (std::getline(f, line)) {
-        // Trim leading
+    std::istringstream iss(content);
+    while (std::getline(iss, line)) {
         size_t start = 0;
         while (start < line.size() && (std::isspace(static_cast<unsigned char>(line[start])) || line[start] == '\r')) ++start;
         if (start >= line.size() || line[start] == '#') continue;
         ParseLine(line.substr(start));
     }
-    return !s_Secrets.empty();
+
+    if (s_Secrets.empty()) return false;
+
+    if (path != localAppDataPath)
+        CopySecretsToLocalAppData(content);
+
+    return true;
 }
 
 std::string Get(const std::string& key) {
