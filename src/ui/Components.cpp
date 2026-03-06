@@ -8,9 +8,11 @@ namespace TalkMe::UI {
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::AccentHover());
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, Styles::AccentDim());
         ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextOnAccent());
+        ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.5f));
 
         bool pressed = ImGui::Button(label, size);
 
+        ImGui::PopStyleVar();
         ImGui::PopStyleColor(4);
         return pressed;
     }
@@ -19,10 +21,13 @@ namespace TalkMe::UI {
         ImGui::PushStyleColor(ImGuiCol_Button, Styles::ButtonSubtle());
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Styles::ButtonSubtleHover());
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, Styles::ButtonSubtleHover());
+        ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextPrimary());
+        ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.5f));
 
         bool pressed = ImGui::Button(label, size);
 
-        ImGui::PopStyleColor(3);
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(4);
         return pressed;
     }
 

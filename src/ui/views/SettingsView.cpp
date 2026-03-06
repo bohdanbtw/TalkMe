@@ -76,9 +76,9 @@ namespace TalkMe::UI::Views {
         ImGui::TextDisabled("Choose a color theme");
         ImGui::Dummy(ImVec2(0, 16));
 
-        float cardW = 145.0f;
-        float cardH = 105.0f;
-        float cardGap = 14.0f;
+        float cardW = 180.0f;
+        float cardH = 120.0f;
+        float cardGap = 20.0f;
         float swatchSz = 12.0f;
         int themeCount = (int)ThemeId::Count;
 

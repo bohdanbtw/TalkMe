@@ -485,12 +485,17 @@ void Application::ProcessNetworkMessages() {
                         s.channels = it->channels;
                     m_ServerList.push_back(std::move(s));
                 }
-                if (!m_ServerList.empty() && m_SelectedServerId == -1) {
+                if (!m_ServerList.empty() && m_SelectedServerId == -1)
                     m_SelectedServerId = m_ServerList[0].id;
+                // Always request channel list (with member counts) for the selected server when we get the server list,
+                // so member counts show on startup (e.g. after LoadStateCache) and when list is refreshed.
+                if (m_SelectedServerId != -1 && std::find_if(m_ServerList.begin(), m_ServerList.end(),
+                        [this](const Server& s) { return s.id == m_SelectedServerId; }) != m_ServerList.end()) {
                     m_NetClient.Send(PacketType::Get_Server_Content_Request,
                                      PacketHandler::GetServerContentPayload(m_SelectedServerId));
-                    { nlohmann::json mj; mj["sid"] = m_SelectedServerId;
-                      m_NetClient.Send(PacketType::Member_List_Request, mj.dump()); }
+                    nlohmann::json mj;
+                    mj["sid"] = m_SelectedServerId;
+                    m_NetClient.Send(PacketType::Member_List_Request, mj.dump());
                 }
                 SaveStateCache();
                 continue;
@@ -513,6 +518,10 @@ void Application::ProcessNetworkMessages() {
                             else ch.type = ChannelType::Text;
                             ch.description = item.value("desc", "");
                             ch.userLimit = item.value("limit", 0);
+                            if (item.contains("user_count") && item["user_count"].is_number_integer())
+                                ch.memberCount = item["user_count"].get<int>();
+                            else if (item.contains("members") && item["members"].is_array())
+                                ch.memberCount = static_cast<int>(item["members"].size());
                             it->channels.push_back(ch);
                         }
                     }
@@ -535,12 +544,17 @@ void Application::ProcessNetworkMessages() {
                     json msgJ;
                     msgJ["cid"] = m_PendingUploadChannelId;
                     msgJ["u"] = m_CurrentUser.username;
-                    msgJ["msg"] = "";
+                    msgJ["msg"] = m_PendingMessageText;
                     msgJ["attachment_id"] = id;
+                    if (m_PendingReplyToId > 0) {
+                        msgJ["reply_to"] = m_PendingReplyToId;
+                        m_PendingReplyToId = 0;
+                    }
                     m_NetClient.Send(PacketType::Message_Text, msgJ.dump());
                     m_PendingUploadData.clear();
                     m_PendingUploadFilename.clear();
                     m_PendingUploadChannelId = -1;
+                    m_PendingMessageText.clear();
                 }
                 continue;
             }
@@ -566,17 +580,13 @@ void Application::ProcessNetworkMessages() {
                 unsigned char* pixels = stbi_load_from_memory(
                     reinterpret_cast<const unsigned char*>(raw.data()), (int)raw.size(), &w, &h, &ch, 4);
                 if (pixels && w > 0 && h > 0) {
-                    auto& tm = TextureManager::Get();
-                    std::string texId = "att_" + id;
-                    tm.LoadFromRGBA(texId, pixels, w, h);
+                    const size_t size = (size_t)w * (size_t)h * 4;
+                    std::vector<uint8_t> rgba(pixels, pixels + size);
                     stbi_image_free(pixels);
-                    AttachmentDisplay disp;
-                    disp.ready = true;
-                    disp.failed = false;
-                    disp.textureId = texId;
-                    disp.width = w;
-                    disp.height = h;
-                    m_AttachmentCache[id] = std::move(disp);
+                    {
+                        std::lock_guard<std::mutex> lock(m_PendingAttachmentUploadsMutex);
+                        m_PendingAttachmentUploads.push_back({ id, std::move(rgba), w, h });
+                    }
                 } else {
                     if (pixels) stbi_image_free(pixels);
                     AttachmentDisplay disp;
@@ -805,7 +815,7 @@ void Application::ProcessNetworkMessages() {
                 int newMid = j.value("mid", 0);
                 ChatMessage cm{ newMid, incomingCid, j.value("u", "??"), msgContent,
                                 GetCurrentTimeStr(), j.value("reply_to", 0), false };
-                cm.attachmentId = j.value("attachment_id", "");
+                cm.attachmentId = j.value("attachment_id", j.value("attachment", ""));
                 auto& state = m_ChannelStates[incomingCid];
                 state.messages.push_back(std::move(cm));
                 if (!state.messages.empty())

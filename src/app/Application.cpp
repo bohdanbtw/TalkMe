@@ -77,7 +77,7 @@ namespace {
             rgba[i * 4 + 2] = bgra[i * 4 + 0];
             rgba[i * 4 + 3] = bgra[i * 4 + 3];
         }
-        TalkMe::TextureManager::Get().LoadFromRGBA("friends_icon", rgba.data(), 48, 48, false);
+        TalkMe::TextureManager::Get().LoadFromRGBA("friends_icon", rgba.data(), 48, 48, false, 48u * 48u * 4u);
         ::DeleteObject(hBmp);
         ::DeleteDC(hdc);
         ::DestroyIcon(hIcon);
@@ -237,6 +237,10 @@ namespace TalkMe {
             m_Graphics.ClearAndPresent(clear, ImGui::GetDrawData());
         });
         if (!m_Window.Create(m_Width, m_Height, m_Title) || !m_Graphics.Init(m_Window.GetHwnd()) || !m_Graphics.InitImGui()) return false;
+        m_Window.SetOnFilesDropped([this](std::vector<std::string> paths) {
+            for (auto& p : paths) m_PendingDroppedFiles.push_back(std::move(p));
+            m_ForceRenderNextFrame = true;
+        });
         if (m_RestoreX >= 0 && m_RestoreY >= 0)
             m_Window.SetPosition(m_RestoreX, m_RestoreY);
         TalkMe::Secrets::Load();
@@ -244,12 +248,9 @@ namespace TalkMe {
             m_ServerIP = TalkMe::Secrets::GetServerIp();
         m_GifPickerPanel = std::make_unique<UI::GifPickerPanel>(TalkMe::Secrets::GetKlipyApiKey());
         m_GifPanelRender = m_GifPickerPanel->MakeRenderCallback([this](const std::string& url, const std::string&) {
-            if (m_SelectedChannelId != -1) {
-                nlohmann::json msgJ;
-                msgJ["cid"] = m_SelectedChannelId;
-                msgJ["u"] = m_CurrentUser.username;
-                msgJ["msg"] = url;
-                m_NetClient.Send(PacketType::Message_Text, msgJ.dump());
+            // Attach GIF to message bar instead of sending immediately
+            if (!url.empty()) {
+                m_AttachedGifUrl = url;
             }
             m_ShowGifPicker = false;
             ImGui::CloseCurrentPopup();
@@ -837,7 +838,7 @@ namespace TalkMe {
                     }
                 }
 
-                // Clear stale state when disconnected
+                // When disconnected in MainApp, return to login so user can reconnect (Send() no-ops when disconnected)
                 if (!m_NetClient.IsConnected() && m_CurrentState == AppState::MainApp) {
                     if (!m_VoiceMembers.empty()) m_VoiceMembers.clear();
                     if (m_ActiveVoiceChannelId != -1) m_ActiveVoiceChannelId = -1;
@@ -845,6 +846,8 @@ namespace TalkMe {
                     if (m_ScreenShare.iAmSharing) { m_DXGICapture.Stop(); m_AudioLoopback.Stop(); m_ScreenShare.iAmSharing = false; }
                     m_ScreenShare.activeStreams.clear();
                     m_ScreenShare.viewingStream.clear();
+                    m_CurrentState = AppState::Login;
+                    strcpy_s(m_StatusMessage, sizeof(m_StatusMessage), "Disconnected. Please sign in again.");
                 }
 
                 // Remove self from voice members when leaving
@@ -1015,7 +1018,7 @@ namespace TalkMe {
                             std::vector<uint8_t> rgba;
                             int fw = 0, fh = 0;
                             if (m_H264Decoder.Decode(payload, payloadSize, rgba, fw, fh) && !rgba.empty()) {
-                                tm.LoadFromRGBA(texId, rgba.data(), fw, fh);
+                                tm.LoadFromRGBA(texId, rgba.data(), fw, fh, false, rgba.size());
                                 si.frameWidth = fw; si.frameHeight = fh;
                             }
                         }
@@ -1031,16 +1034,52 @@ namespace TalkMe {
                 }
                 if (done || !m_Window.GetHwnd()) break;
 
-                // STEP 7: Only render when we are the foreground window (or during splash so we can show the window).
-                const bool isForeground = (m_Window.GetHwnd() && ::GetForegroundWindow() == m_Window.GetHwnd());
+                // STEP 6b: Always run image pipeline (device, attachment uploads, GIF decodes, texture eviction)
+                // so chat images are ready when we render. Must run every frame even when window is hidden
+                // (e.g. in tray or during drag), otherwise images never get textures after "render when not opened" / overlay.
+                if (m_Graphics.IsValid() && SUCCEEDED(m_Graphics.GetDeviceRemovedReason())) {
+                    auto& tm = TalkMe::TextureManager::Get();
+                    tm.SetDevice(m_Graphics.GetDevice());
+                    std::vector<PendingAttachmentUpload> toUpload;
+                    {
+                        std::lock_guard<std::mutex> lock(m_PendingAttachmentUploadsMutex);
+                        toUpload.swap(m_PendingAttachmentUploads);
+                    }
+                    for (PendingAttachmentUpload& up : toUpload) {
+                        if (up.rgba.empty() || up.w <= 0 || up.h <= 0) continue;
+                        std::string texId = "att_" + up.id;
+                        auto* srv = tm.LoadFromRGBA(texId, up.rgba.data(), up.w, up.h, false, up.rgba.size());
+                        if (srv) {
+                            AttachmentDisplay disp;
+                            disp.ready = true;
+                            disp.failed = false;
+                            disp.textureId = texId;
+                            disp.width = up.w;
+                            disp.height = up.h;
+                            m_AttachmentCache[up.id] = std::move(disp);
+                        } else {
+                            AttachmentDisplay disp;
+                            disp.ready = false;
+                            disp.failed = true;
+                            m_AttachmentCache[up.id] = std::move(disp);
+                        }
+                    }
+                    TalkMe::ImageCache::Get().ProcessPendingGifDecodes();
+                    TalkMe::TextureManager::Get().TickFrame();
+                }
+
+                // STEP 7: Render whenever the window is visible (so drag-over overlay and images update even when not focused).
+                // Only skip drawing and Present when the window was sent to tray (hidden).
+                const bool windowVisible = (m_Window.GetHwnd() && ::IsWindowVisible(m_Window.GetHwnd()) != 0);
                 const bool duringSplash = (m_SplashFrames < 3);
 
-                if (!isForeground && !duringSplash && m_Graphics.IsValid() && FAILED(m_Graphics.GetDeviceRemovedReason())) {
-                    LOG_ERROR("Device lost while in background");
+                if (!windowVisible && !duringSplash && !m_ForceRenderNextFrame && m_Graphics.IsValid() && FAILED(m_Graphics.GetDeviceRemovedReason())) {
+                    LOG_ERROR("Device lost while in tray");
                     done = true;
                     break;
                 }
-                if (isForeground || duringSplash) {
+                if (windowVisible || duringSplash || m_ForceRenderNextFrame) {
+                    if (m_ForceRenderNextFrame) m_ForceRenderNextFrame = false;
                     if (!m_Graphics.IsValid()) {
                         done = true;
                         break;
@@ -1050,7 +1089,6 @@ namespace TalkMe {
                         done = true;
                         break;
                     }
-
                     RECT cr = {};
                     if (::GetClientRect(m_Window.GetHwnd(), &cr)) {
                         const UINT cw = static_cast<UINT>(cr.right - cr.left);
@@ -1058,12 +1096,6 @@ namespace TalkMe {
                         if (cw > 0 && ch > 0)
                             m_Graphics.OnResize(cw, ch);
                     }
-
-                    // STEP 8: Decode queued GIFs on main thread (WIC)
-                    TalkMe::ImageCache::Get().ProcessPendingGifDecodes();
-
-                    // STEP 9: Render ImGui
-                    TalkMe::TextureManager::Get().TickFrame();
                     try {
                         m_Graphics.ImGuiNewFrame();
                         ImGui::NewFrame();
@@ -1943,7 +1975,7 @@ namespace TalkMe {
                     m_AudioEngine.SetNoiseSuppressionMode(TalkMe::NoiseSuppressionMode::RNNoise);
                     m_AudioEngine.SetMicTestEnabled(false);
                     m_AudioEngine.ReinitDevice(-1, -1);
-                    TalkMe::UI::Styles::SetTheme(TalkMe::UI::ThemeId::Midnight);
+                    TalkMe::UI::Styles::SetTheme(TalkMe::UI::ThemeId::Dark);
                     ConfigManager::Get().SaveTheme(0);
                     ConfigManager::Get().SaveKeybinds(m_KeyMuteMic, m_KeyDeafen);
                     ConfigManager::Get().SaveOverlay(m_OverlayEnabled, m_OverlayCorner, m_OverlayOpacity);
@@ -2260,6 +2292,40 @@ namespace TalkMe {
                 }
 
                 if (m_SelectedChannelId != -1) {
+                    // Process one dropped file per frame — attach to compose bar (don't send until user clicks Send)
+                    static const char* kImageExts[] = { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp" };
+                    if (!m_PendingDroppedFiles.empty()) {
+                        std::string path = std::move(m_PendingDroppedFiles.back());
+                        m_PendingDroppedFiles.pop_back();
+                        std::string lower = path;
+                        for (auto& c : lower) c = (char)std::tolower((unsigned char)c);
+                        bool isImage = false;
+                        for (const char* ext : kImageExts)
+                            if (lower.size() >= strlen(ext) && lower.compare(lower.size() - strlen(ext), strlen(ext), ext) == 0) {
+                                isImage = true;
+                                break;
+                            }
+                        if (isImage) {
+                            FILE* fp = nullptr;
+                            if (fopen_s(&fp, path.c_str(), "rb") == 0 && fp) {
+                                fseek(fp, 0, SEEK_END);
+                                long sz = ftell(fp);
+                                fseek(fp, 0, SEEK_SET);
+                                if (sz > 0 && static_cast<size_t>(sz) <= TalkMe::Limits::kMaxUploadBytes) {
+                                    std::vector<uint8_t> data(static_cast<size_t>(sz));
+                                    if (fread(data.data(), 1, data.size(), fp) == data.size()) {
+                                        size_t slash = path.find_last_of("/\\");
+                                        std::string basename = (slash != std::string::npos) ? path.substr(slash + 1) : path;
+                                        m_PendingAttachedImage = std::move(data);
+                                        m_PendingAttachedImageFilename = std::move(basename);
+                                        TalkMe::TextureManager::Get().LoadFromMemory("compose_attached", m_PendingAttachedImage.data(), (int)m_PendingAttachedImage.size(), nullptr, nullptr);
+                                    }
+                                }
+                                fclose(fp);
+                            }
+                        }
+                    }
+
                     if (m_SelectedChannelId != m_PrevSelectedChannelId) {
                         m_PrevSelectedChannelId = m_SelectedChannelId;
                     }
@@ -2283,14 +2349,38 @@ namespace TalkMe {
                 m_OnImageUpload = [this](std::vector<uint8_t> data, std::string filename) {
                     StartImageUpload(std::move(data), std::move(filename), m_SelectedChannelId);
                 };
+                m_OnAttachImage = [this](std::vector<uint8_t> data, std::string filename) {
+                    m_PendingAttachedImage = std::move(data);
+                    m_PendingAttachedImageFilename = std::move(filename);
+                    if (!m_PendingAttachedImage.empty())
+                        TalkMe::TextureManager::Get().LoadFromMemory("compose_attached", m_PendingAttachedImage.data(), (int)m_PendingAttachedImage.size(), nullptr, nullptr);
+                };
+                m_OnSendWithAttachedImage = [this](const std::string& text, int replyToId) {
+                    if (m_PendingAttachedImage.empty() || m_SelectedChannelId < 0) return;
+                    m_PendingMessageText = text;
+                    m_PendingReplyToId = replyToId;
+                    StartImageUpload(std::move(m_PendingAttachedImage), std::move(m_PendingAttachedImageFilename), m_SelectedChannelId);
+                    m_PendingAttachedImage.clear();
+                    m_PendingAttachedImageFilename.clear();
+                    TalkMe::TextureManager::Get().RemoveTexture("compose_attached");
+                };
                 m_RequestAttachmentFn = [this](const std::string& id) { RequestAttachment(id); };
                 m_GetAttachmentDisplayFn = [this](const std::string& id) { return GetAttachmentDisplay(id); };
+                m_OnAttachmentTextureEvictedFn = [this](const std::string& id) {
+                    m_AttachmentCache.erase(id);
+                    m_AttachmentRequested.erase(id);
+                    if (!m_MediaBaseUrl.empty()) {
+                        std::string url = m_MediaBaseUrl + "/media/" + id;
+                        TalkMe::ImageCache::Get().RemoveEntry(url);
+                    }
+                };
                 m_OnAttachmentClickFn = [this](const std::string& id) {
                     m_ViewingAttachmentId = id;
                     m_AttachmentViewerZoom = 1.0f;
                     m_AttachmentViewerOpen = true;
                     m_AttachmentViewerOpenTime = ImGui::GetTime();
                 };
+                bool isDraggingFilesOver = m_Window.IsDragOver();
                 UI::Views::RenderChannelView(m_NetClient, m_CurrentUser, *it, GetChannelMessages(m_SelectedChannelId), m_SelectedChannelId, m_ActiveVoiceChannelId, m_VoiceMembers, m_SpeakingTimers, m_UserVolumes,
                     [this](const std::string& uid, float g) {
                         m_UserVolumes[uid] = g;
@@ -2471,6 +2561,7 @@ namespace TalkMe {
                     &m_RequestAttachmentFn,
                     &m_GetAttachmentDisplayFn,
                     &m_OnAttachmentClickFn,
+                    &m_OnAttachmentTextureEvictedFn,
                     [this]() {
                         if (m_SelectedChannelId == -1) return;
                         auto& state = m_ChannelStates[m_SelectedChannelId];
@@ -2499,7 +2590,17 @@ namespace TalkMe {
                             m_LastReadAnchorPersistTime = now;
                         }
                     },
-                    &m_GameMode);
+                    &m_AttachedGifUrl,
+                    &m_PendingAttachedImageFilename,
+                    [this]() {
+                        m_PendingAttachedImage.clear();
+                        m_PendingAttachedImageFilename.clear();
+                        TalkMe::TextureManager::Get().RemoveTexture("compose_attached");
+                    },
+                    &m_OnAttachImage,
+                    &m_OnSendWithAttachedImage,
+                    &m_GameMode,
+                    &isDraggingFilesOver);
             }
         }
         RenderAttachmentViewer();

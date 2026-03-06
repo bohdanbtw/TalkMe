@@ -549,14 +549,21 @@ void ImageCache::RequestImage(const std::string& url) {
 }
 
 void ImageCache::ProcessPendingGifDecodes() {
+    using namespace TalkMe::Limits;
     std::vector<std::string> fromDisk;
     std::vector<std::pair<std::string, std::string>> pending;
     {
         std::lock_guard lock(m_Mutex);
-        fromDisk = std::move(m_PendingGifDecodesFromDisk);
-        m_PendingGifDecodesFromDisk.clear();
-        pending = std::move(m_PendingGifDecodes);
-        m_PendingGifDecodes.clear();
+        const size_t takeDisk = (std::min)(m_PendingGifDecodesFromDisk.size(), (size_t)kMaxGifDecodesPerFrameFromDisk);
+        fromDisk.reserve(takeDisk);
+        for (size_t i = 0; i < takeDisk; i++)
+            fromDisk.push_back(std::move(m_PendingGifDecodesFromDisk[i]));
+        m_PendingGifDecodesFromDisk.erase(m_PendingGifDecodesFromDisk.begin(), m_PendingGifDecodesFromDisk.begin() + (std::ptrdiff_t)takeDisk);
+        const size_t takeMem = (std::min)(m_PendingGifDecodes.size(), (size_t)kMaxGifDecodesPerFrameFromMemory);
+        pending.reserve(takeMem);
+        for (size_t i = 0; i < takeMem; i++)
+            pending.push_back(std::move(m_PendingGifDecodes[i]));
+        m_PendingGifDecodes.erase(m_PendingGifDecodes.begin(), m_PendingGifDecodes.begin() + (std::ptrdiff_t)takeMem);
     }
 
     // Decode GIFs from disk (no long-lived raw bytes in RAM)
@@ -708,6 +715,17 @@ void ImageCache::RemoveEntry(const std::string& url) {
     }
     m_Cache.erase(url);
     // Disk cache is left in place so re-requesting this URL loads from disk instead of re-downloading
+}
+
+bool ImageCache::ScheduleRedecodeFromDisk(const std::string& url) {
+    std::string path = GetDiskCachePath(url);
+    if (path.empty()) return false;
+    if (GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES) return false;
+    std::lock_guard lock(m_Mutex);
+    if (std::find(m_PendingGifDecodesFromDisk.begin(), m_PendingGifDecodesFromDisk.end(), url) != m_PendingGifDecodesFromDisk.end())
+        return true;
+    m_PendingGifDecodesFromDisk.push_back(url);
+    return true;
 }
 
 void ImageCache::SetProtectedUrls(std::unordered_set<std::string> urls) {

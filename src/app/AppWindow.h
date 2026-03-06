@@ -1,8 +1,10 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <functional>
 #include <windows.h>
+#include <objidl.h>
 
 namespace TalkMe {
 
@@ -21,6 +23,10 @@ public:
     void SetOnDestroy(std::function<void()> fn) { m_OnDestroy = std::move(fn); }
     void SetOnResize(std::function<void(UINT, UINT)> fn) { m_OnResize = std::move(fn); }
     void SetOnRenderFrame(std::function<void()> fn) { m_OnRenderFrame = std::move(fn); }
+    /// Called when user drops files on the window (e.g. for chat image upload). Paths are UTF-8.
+    void SetOnFilesDropped(std::function<void(std::vector<std::string>)> fn) { m_OnFilesDropped = std::move(fn); }
+    /// True while the user is dragging files over the window (OLE IDropTarget DragEnter/DragLeave).
+    bool IsDragOver() const { return m_DragOver; }
     bool IsResizing() const { return m_IsResizing; }
 
     /// Create window and load icons. Ensures assets dir exists and has icons. Returns false on failure.
@@ -44,12 +50,18 @@ private:
     void RemoveTrayIcon();
     void ShowTrayContextMenu(HWND hWnd);
 
+    class DropTargetImpl;
+    DropTargetImpl* m_DropTarget = nullptr;
+    mutable bool m_DragOver = false;
+    friend class DropTargetImpl;
+
     HWND m_Hwnd = nullptr;
     HICON m_HiconSmall = nullptr;
     HICON m_HiconBig = nullptr;
     std::function<void()> m_OnDestroy;
     std::function<void(UINT, UINT)> m_OnResize;
     std::function<void()> m_OnRenderFrame;
+    std::function<void(std::vector<std::string>)> m_OnFilesDropped;
     bool m_IsResizing = false;
     bool m_TrayIconAdded = false;
     bool m_ReallyClose = false;

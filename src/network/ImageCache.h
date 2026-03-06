@@ -58,6 +58,9 @@ public:
     /// Remove one URL from the cache and LRU (e.g. when picker closes to free RAM).
     void RemoveEntry(const std::string& url);
 
+    /// If URL has a GIF file on disk, queue it for re-decode (e.g. after texture eviction). Call from main thread. Returns true if queued.
+    bool ScheduleRedecodeFromDisk(const std::string& url);
+
     /// Set URLs that must not be evicted (e.g. visible chat images). Call from main thread each frame.
     /// Eviction will only remove entries not in this set, so chat GIFs keep rendering when the picker is open.
     void SetProtectedUrls(std::unordered_set<std::string> urls);
