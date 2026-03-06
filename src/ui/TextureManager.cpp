@@ -64,11 +64,26 @@ void TextureManager::ReleaseGifEntry(const std::string& id) {
     }
 }
 
+static bool IsChatStaticId(const std::string& id) {
+    if (id.size() >= 4 && id.compare(0, 4, "att_") == 0) return true;
+    if (id.size() >= 4 && id.compare(0, 4, "img_") == 0) return true;
+    return false;
+}
+
 void TextureManager::EvictStaticIfNeeded() {
-    while ((int)m_Textures.size() > kMaxStaticTextures && !m_StaticLru.empty()) {
+    const size_t maxAttempts = m_StaticLru.size();
+    size_t attempts = 0;
+    while ((int)m_Textures.size() > kMaxStaticTextures && !m_StaticLru.empty() && attempts < maxAttempts) {
+        ++attempts;
         const std::string victim = m_StaticLru.front();
+        // Chat images (att_/img_) are evicted only by EvictTexturesWithPrefixExcept when off-screen.
+        if (IsChatStaticId(victim)) {
+            m_StaticLru.splice(m_StaticLru.end(), m_StaticLru, m_StaticLru.begin());
+            continue;
+        }
         ReleaseStaticEntry(victim);
         m_EvictionGen.fetch_add(1, std::memory_order_relaxed);
+        attempts = 0;
     }
 }
 
@@ -218,7 +233,7 @@ ID3D11ShaderResourceView* TextureManager::LoadFromRGBA(const std::string& id, co
     if (width <= 0 || height <= 0 || width > kMaxTextureDimension || height > kMaxTextureDimension || !rgba)
         return nullptr;
     const size_t requiredBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
-    if (dataSizeBytes != 0 && dataSizeBytes < requiredBytes) return nullptr;
+    if (dataSizeBytes < requiredBytes) return nullptr;  // must have at least width*height*4 bytes to avoid reading past buffer
 
     ReleaseStaticEntry(id);
 
@@ -236,6 +251,7 @@ ID3D11ShaderResourceView* TextureManager::LoadFromRGBA(const std::string& id, co
     }
 
     auto entry = CreateTexture(src, width, height);
+    if (!entry.srv) return nullptr;  // Do not store failed entries so we can retry when device is valid
     m_Textures[id] = entry;
     TouchStatic(id);
     return entry.srv;
@@ -284,7 +300,7 @@ ID3D11ShaderResourceView* TextureManager::LoadFromBMP(const std::string& id, con
         return nullptr;
     }
 
-    return LoadFromRGBA(id, rgba.data(), width, height);
+    return LoadFromRGBA(id, rgba.data(), width, height, false, static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
 }
 
 ID3D11ShaderResourceView* TextureManager::GetTexture(const std::string& id) const {
@@ -392,7 +408,7 @@ ID3D11ShaderResourceView* TextureManager::LoadFromMemory(const std::string& id, 
     if (!rgba) return nullptr;
     if (outW) *outW = w;
     if (outH) *outH = h;
-    auto* srv = LoadFromRGBA(id, rgba, w, h);
+    auto* srv = LoadFromRGBA(id, rgba, w, h, false, static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
     stbi_image_free(rgba);
     return srv;
 }

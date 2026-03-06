@@ -4,6 +4,7 @@
 #include <imgui.h>
 #include <imgui_impl_win32.h>
 #include <shellapi.h>
+#include <ole2.h>
 #include <tchar.h>
 #include <cstring>
 
@@ -114,6 +115,91 @@ static void EnsureIconsInAppData() {
 
 } // namespace
 
+// OLE IDropTarget implementation (defined in TalkMe namespace so AppWindow::DropTargetImpl is complete).
+class AppWindow::DropTargetImpl : public IDropTarget {
+public:
+    explicit DropTargetImpl(AppWindow* w) : m_Window(w), m_RefCount(1) {}
+    ~DropTargetImpl() = default;
+
+    // IUnknown
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        *ppv = nullptr;
+        if (riid == IID_IUnknown || riid == IID_IDropTarget) {
+            *ppv = static_cast<IDropTarget*>(this);
+            AddRef();
+            return S_OK;
+        }
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++m_RefCount; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG n = --m_RefCount;
+        if (n == 0) delete this;
+        return n;
+    }
+
+    // IDropTarget
+    HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* pDataObject, DWORD grfKeyState, POINTL pt, DWORD* pdwEffect) override {
+        (void)grfKeyState;
+        (void)pt;
+        if (!pdwEffect || !m_Window) return E_INVALIDARG;
+        *pdwEffect = DROPEFFECT_NONE;
+        if (!pDataObject) return S_OK;
+        FORMATETC fe = { CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+        if (SUCCEEDED(pDataObject->QueryGetData(&fe))) {
+            *pdwEffect = DROPEFFECT_COPY;
+            m_Window->m_DragOver = true;
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE DragOver(DWORD grfKeyState, POINTL pt, DWORD* pdwEffect) override {
+        (void)grfKeyState;
+        (void)pt;
+        if (pdwEffect) *pdwEffect = m_Window && m_Window->m_DragOver ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE DragLeave() override {
+        if (m_Window) m_Window->m_DragOver = false;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE Drop(IDataObject* pDataObject, DWORD grfKeyState, POINTL pt, DWORD* pdwEffect) override {
+        (void)grfKeyState;
+        (void)pt;
+        if (m_Window) m_Window->m_DragOver = false;
+        if (!pdwEffect || !pDataObject || !m_Window || !m_Window->m_OnFilesDropped) return E_INVALIDARG;
+        *pdwEffect = DROPEFFECT_NONE;
+        FORMATETC fe = { CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+        STGMEDIUM stg = {};
+        if (FAILED(pDataObject->GetData(&fe, &stg)) || !stg.hGlobal) return S_OK;
+        HDROP hDrop = static_cast<HDROP>(stg.hGlobal);
+        UINT n = ::DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
+        std::vector<std::string> paths;
+        paths.reserve(n);
+        wchar_t buf[MAX_PATH];
+        for (UINT i = 0; i < n; i++) {
+            if (::DragQueryFileW(hDrop, i, buf, MAX_PATH) > 0) {
+                int len = ::WideCharToMultiByte(CP_UTF8, 0, buf, -1, nullptr, 0, nullptr, nullptr);
+                if (len > 0) {
+                    std::string narrow(static_cast<size_t>(len), '\0');
+                    if (::WideCharToMultiByte(CP_UTF8, 0, buf, -1, &narrow[0], len, nullptr, nullptr) > 0) {
+                        if (!narrow.empty() && narrow.back() == '\0') narrow.pop_back();
+                        paths.push_back(std::move(narrow));
+                    }
+                }
+            }
+        }
+        ReleaseStgMedium(&stg);
+        if (!paths.empty()) m_Window->m_OnFilesDropped(std::move(paths));
+        *pdwEffect = DROPEFFECT_COPY;
+        return S_OK;
+    }
+
+private:
+    AppWindow* m_Window;
+    ULONG m_RefCount;
+};
+
 LRESULT CALLBACK AppWindow::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     AppWindow* w = reinterpret_cast<AppWindow*>(::GetWindowLongPtrW(hWnd, GWLP_USERDATA));
     if (msg == WM_CREATE) {
@@ -210,6 +296,28 @@ LRESULT AppWindow::HandleMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
         }
     }
     if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) return 0;
+    if (msg == WM_DROPFILES && m_OnFilesDropped) {
+        HDROP hDrop = reinterpret_cast<HDROP>(wParam);
+        UINT n = ::DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
+        std::vector<std::string> paths;
+        paths.reserve(n);
+        wchar_t buf[MAX_PATH];
+        for (UINT i = 0; i < n; i++) {
+            if (::DragQueryFileW(hDrop, i, buf, MAX_PATH) > 0) {
+                int len = ::WideCharToMultiByte(CP_UTF8, 0, buf, -1, nullptr, 0, nullptr, nullptr);
+                if (len > 0) {
+                    std::string narrow(static_cast<size_t>(len), '\0');
+                    if (::WideCharToMultiByte(CP_UTF8, 0, buf, -1, &narrow[0], len, nullptr, nullptr) > 0) {
+                        if (!narrow.empty() && narrow.back() == '\0') narrow.pop_back();
+                        paths.push_back(std::move(narrow));
+                    }
+                }
+            }
+        }
+        ::DragFinish(hDrop);
+        if (!paths.empty()) m_OnFilesDropped(std::move(paths));
+        return 0;
+    }
     switch (msg) {
     case WM_SIZE:
         // Only handle live resizes here; minimizing should just minimize
@@ -276,6 +384,14 @@ bool AppWindow::Create(int width, int height, const std::string& title) {
     // GWLP_USERDATA set in WndProc WM_CREATE
     if (m_HiconBig) ::SendMessageW(m_Hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(m_HiconBig));
     if (m_HiconSmall) ::SendMessageW(m_Hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(m_HiconSmall));
+    ::DragAcceptFiles(m_Hwnd, TRUE);
+    // OLE drop target for DragEnter/DragOver/DragLeave (show "dragging files" overlay) and Drop.
+    OleInitialize(nullptr);
+    m_DropTarget = new DropTargetImpl(this);
+    if (FAILED(::RegisterDragDrop(m_Hwnd, static_cast<IDropTarget*>(m_DropTarget)))) {
+        m_DropTarget->Release();
+        m_DropTarget = nullptr;
+    }
     // Create hidden; app shows window after splash. Add tray icon immediately so it's always present (Discord-style).
     ::ShowWindow(m_Hwnd, SW_HIDE);
     ::UpdateWindow(m_Hwnd);
@@ -290,6 +406,11 @@ void AppWindow::SetPosition(int x, int y) {
 
 void AppWindow::Destroy() {
     if (m_Hwnd) {
+        ::RevokeDragDrop(m_Hwnd);
+        if (m_DropTarget) {
+            m_DropTarget->Release();
+            m_DropTarget = nullptr;
+        }
         ::DestroyWindow(m_Hwnd);
         m_Hwnd = nullptr;
     }

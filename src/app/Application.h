@@ -46,6 +46,7 @@ namespace TalkMe {
         ChannelType type;
         std::string description;
         int userLimit = 0;
+        int memberCount = -1;  // -1 = unknown; server may send in Server_Content_Response
     };
 
     struct Server {
@@ -206,16 +207,35 @@ namespace TalkMe {
         std::vector<uint8_t> m_PendingUploadData;
         std::string m_PendingUploadFilename;
         int m_PendingUploadChannelId = -1;
+        /// When sending an attached image, optional message text and reply_to to include when upload completes.
+        std::string m_PendingMessageText;
+        int m_PendingReplyToId = 0;
+
+        /// Image attached to compose bar (not sent until user clicks Send). Cleared when sent or removed.
+        std::vector<uint8_t> m_PendingAttachedImage;
+        std::string m_PendingAttachedImageFilename;
+
+        /// File paths dropped on the window; processed when channel view is shown.
+        std::vector<std::string> m_PendingDroppedFiles;
+        /// When true, next frame will render even if window is in background (e.g. after file drop).
+        bool m_ForceRenderNextFrame = false;
 
         std::function<void(std::vector<uint8_t>, std::string)> m_OnImageUpload;
+        std::function<void(std::vector<uint8_t>, std::string)> m_OnAttachImage;
+        std::function<void(const std::string&, int)> m_OnSendWithAttachedImage;
         std::function<void(const std::string&)> m_RequestAttachmentFn;
         std::function<const AttachmentDisplay*(const std::string&)> m_GetAttachmentDisplayFn;
         std::function<void(const std::string&)> m_OnAttachmentClickFn;
+        std::function<void(const std::string&)> m_OnAttachmentTextureEvictedFn;
 
         // TCP attachment fetch (Media_Request/Media_Response) so attachments work without port 5557
         std::unordered_map<std::string, AttachmentDisplay> m_AttachmentCache;
         std::unordered_set<std::string> m_AttachmentRequested;
         std::unordered_map<std::string, std::vector<uint8_t>> m_AttachmentFileData;  // raw file bytes for Save
+        /// Decoded RGBA uploads queued from Media_Response; processed on main thread in render block after SetDevice.
+        struct PendingAttachmentUpload { std::string id; std::vector<uint8_t> rgba; int w = 0; int h = 0; };
+        std::vector<PendingAttachmentUpload> m_PendingAttachmentUploads;
+        std::mutex m_PendingAttachmentUploadsMutex;
 
         // In-app image viewer (Discord-style popup)
         std::string m_ViewingAttachmentId;
@@ -340,6 +360,7 @@ namespace TalkMe {
         char m_PasswordBuf[128] = "";
         char m_PasswordRepeatBuf[128] = "";
         char m_ChatInputBuf[1024] = "";
+        std::string m_AttachedGifUrl;  // GIF/media attached to message bar (sent with next Send)
         char m_StatusMessage[256] = "";
         char m_NewServerNameBuf[64] = "";
         char m_NewChannelNameBuf[64] = "";

@@ -41,4 +41,15 @@ constexpr unsigned kIdleWaitMs = 48;
 /// waitMs used when at least one GIF is animating. Keep at 16 (≈60 fps).
 constexpr unsigned kAnimWaitMs = 16;
 
+/// Run texture eviction every Nth frame to reduce churn at scroll boundary.
+constexpr int kEvictionIntervalFrames = 2;
+
+/// Max GIFs decoded from disk per frame (spreads decode cost, avoids single-frame spike).
+constexpr int kMaxGifDecodesPerFrameFromDisk = 2;
+/// Max GIFs decoded from memory per frame (e.g. data: URLs, legacy path).
+constexpr int kMaxGifDecodesPerFrameFromMemory = 1;
+
+/// Max file size (bytes) for image upload (paste or drag-and-drop). 10 MB.
+constexpr size_t kMaxUploadBytes = 10u * 1024u * 1024u;
+
 } // namespace TalkMe::Limits

@@ -558,6 +558,13 @@ namespace TalkMe {
 
     std::string Database::GetServerContentJSON(int serverId) {
         std::shared_lock<std::shared_mutex> lock(m_RwMutex);
+        int serverMemberCount = 0;
+        sqlite3_stmt* countStmt = nullptr;
+        if (sqlite3_prepare_v2(m_Db, "SELECT COUNT(*) FROM server_members WHERE server_id = ?;", -1, &countStmt, 0) == SQLITE_OK) {
+            sqlite3_bind_int(countStmt, 1, serverId);
+            if (sqlite3_step(countStmt) == SQLITE_ROW) serverMemberCount = sqlite3_column_int(countStmt, 0);
+            sqlite3_finalize(countStmt);
+        }
         json j = json::array();
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(m_Db, "SELECT id, name, type, IFNULL(description, ''), IFNULL(user_limit, 0) FROM channels WHERE server_id = ?;", -1, &stmt, 0) == SQLITE_OK) {
@@ -570,6 +577,7 @@ namespace TalkMe {
                 json entry = { {"id", sqlite3_column_int(stmt, 0)}, {"name", n ? n : ""}, {"type", t ? t : ""} };
                 if (d && d[0] != '\0') entry["desc"] = d;
                 if (limit > 0) entry["limit"] = limit;
+                entry["user_count"] = serverMemberCount;
                 j.push_back(entry);
             }
             sqlite3_finalize(stmt);

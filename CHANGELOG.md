@@ -4,6 +4,26 @@ All notable changes to the **TalkMe client** are documented here. The format is 
 
 ---
 
+## [1.4.2] — 2026-03-06
+
+### Added
+
+- **Media/GIF preview when attached** — When you attach an image (paste or drag-and-drop) or a GIF to the compose bar, a thumbnail preview (up to 96×96 px) is shown next to the "Image attached" / "GIF attached" label. GIFs animate in the preview; images show the pasted or dropped file. Preview is cleared when you remove the attachment or send the message.
+
+### Changed
+
+- **Drag-and-drop overlay** — The "Drop images here" overlay is back: when you drag files over the chat window, the overlay appears so you know where to drop. Dropping still attaches one image per drop to the compose bar (unchanged). Overlay is only shown while dragging (`IsDragOver()`), so it no longer blocks Send or reactions.
+
+### Fixed
+
+- **Ctrl+V paste image** — Pasting an image from the clipboard (Ctrl+V) then sending no longer showed "attachment failed to load". The BMP built from the clipboard DIB now uses the correct pixel data offset for 16-bit and 32-bit bitmaps with BI_BITFIELDS (three DWORD masks after the header), so the uploaded file is valid and decodes correctly when the message is displayed.
+
+### Technical
+
+- **Compose preview texture** — Application uploads the pending attached image to TextureManager as `compose_attached` when set (paste or drop); ChatView draws it as a thumbnail. Texture is removed on clear or send. GIF preview uses the same GetAnimatedSrv + ImageCache path as inline chat GIFs with texture id `compose_gif`.
+
+---
+
 ## [1.4.1] — 2026-03-03
 
 ### Added
@@ -114,6 +134,7 @@ All notable changes to the **TalkMe client** are documented here. The format is 
 - **Minor (1.X.0)** — New features, medium refactors, notable improvements.
 - **Major (X.0.0)** — Large updates, breaking changes, major redesign.
 
+[1.4.2]: https://github.com/bohdanbtw/TalkMe/releases/tag/v1.4.2
 [1.4.1]: https://github.com/bohdanbtw/TalkMe/releases/tag/v1.4.1
 [1.4.0]: https://github.com/bohdanbtw/TalkMe/releases/tag/v1.4.0
 [1.3.0]: https://github.com/bohdanbtw/TalkMe/releases/tag/v1.3.0

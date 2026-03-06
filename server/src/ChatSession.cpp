@@ -82,7 +82,9 @@ namespace TalkMe {
                     ReadBody();
                 }
                 else {
-                    std::fprintf(stderr, "[TalkMe Server] ReadHeader error: %s (%d), disconnecting\n", ec.message().c_str(), ec.value());
+                    // EOF (2) and connection_reset (104) are normal when client disconnects; avoid flooding logs
+                    if (ec.value() != 2 && ec.value() != 104)
+                        std::fprintf(stderr, "[TalkMe Server] ReadHeader error: %s (%d), disconnecting\n", ec.message().c_str(), ec.value());
                     Disconnect();
                 }
                 }));
@@ -93,7 +95,8 @@ namespace TalkMe {
             asio::bind_executor(m_Strand, [this, self = shared_from_this()](std::error_code ec, std::size_t) {
                 if (!ec) { ProcessPacket(); ReadHeader(); }
                 else {
-                    std::fprintf(stderr, "[TalkMe Server] ReadBody error: %s (%d), disconnecting\n", ec.message().c_str(), ec.value());
+                    if (ec.value() != 2 && ec.value() != 104)
+                        std::fprintf(stderr, "[TalkMe Server] ReadBody error: %s (%d), disconnecting\n", ec.message().c_str(), ec.value());
                     Disconnect();
                 }
                 }));

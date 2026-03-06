@@ -49,9 +49,16 @@ namespace TalkMe::UI::Views {
         std::function<void(const std::string&)>* requestAttachment = nullptr,
         std::function<const TalkMe::AttachmentDisplay*(const std::string&)>* getAttachmentDisplay = nullptr,
         std::function<void(const std::string&)>* onAttachmentClick = nullptr,
+        std::function<void(const std::string&)>* onAttachmentTextureEvicted = nullptr,
         std::function<void()> requestOlderMessages = nullptr,
         const bool* loadingOlder = nullptr,
         std::function<void(int channelId, int fullyVisibleMid)> onReadAnchorAdvanced = nullptr,
-        const bool* gameMode = nullptr
+        std::string* attachedGifUrl = nullptr,
+        std::string* attachedImageFilename = nullptr,
+        std::function<void()> onClearAttachedImage = nullptr,
+        std::function<void(std::vector<uint8_t>, std::string)>* onAttachImage = nullptr,
+        std::function<void(const std::string&, int)>* onSendWithAttachedImage = nullptr,
+        const bool* gameMode = nullptr,
+        const bool* isDraggingFilesOver = nullptr
     );
 }

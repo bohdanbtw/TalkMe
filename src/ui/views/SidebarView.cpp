@@ -215,6 +215,18 @@ namespace TalkMe::UI::Views {
                 if (s.id == selectedServerId) { cur = &s; break; }
 
             if (cur) {
+                // Server member count (between server name and channel list)
+                int serverMemberCount = -1;
+                for (const auto& ch : cur->channels)
+                    if (ch.memberCount >= 0) { serverMemberCount = ch.memberCount; break; }
+                if (serverMemberCount >= 0) {
+                    ImGui::Indent(18);
+                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
+                    ImGui::Text("%d members", serverMemberCount);
+                    ImGui::PopStyleColor();
+                    ImGui::Unindent(18);
+                    ImGui::Dummy(ImVec2(0, 6));
+                }
                 // Text channels (no + button)
                 ImGui::Dummy(ImVec2(0, Styles::SectionPadding));
                 ImGui::Indent(16);
@@ -274,6 +286,9 @@ namespace TalkMe::UI::Views {
                     bool active = (activeVoiceChannelId == ch.id);
                     std::string label = (active ? "  > " : "  ~  ") + ch.name;
                     if (ch.userLimit > 0) label += " [" + std::to_string(ch.userLimit) + "]";
+                    // Only show active users: live in-call count when you're in this voice channel
+                    if (active && !voiceMembers.empty())
+                        label += "  (" + std::to_string(voiceMembers.size()) + ")";
 
                     if (active) ImGui::PushStyleColor(ImGuiCol_Text, Styles::Accent());
                     ImGui::Indent(10);
@@ -289,14 +304,6 @@ namespace TalkMe::UI::Views {
                     }
                     ImGui::Unindent(10);
                     if (active) ImGui::PopStyleColor();
-                }
-
-                if (activeVoiceChannelId != -1 && !voiceMembers.empty()) {
-                    ImGui::Indent(26);
-                    ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
-                    ImGui::Text("%d in call", (int)voiceMembers.size());
-                    ImGui::PopStyleColor();
-                    ImGui::Unindent(26);
                 }
 
                 // Cinema channels
