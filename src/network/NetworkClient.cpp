@@ -83,8 +83,10 @@ namespace TalkMe {
             if (onResult) onResult(true);
             return;
         }
+        // If a connection is already in progress, do not report failure — the in-flight
+        // attempt will complete and invoke its callback. Reporting false here would
+        // incorrectly show "Server offline" (e.g. on double-click Sign In / Register).
         if (m_Impl->m_Connecting.exchange(true)) {
-            if (onResult) onResult(false);
             return;
         }
 

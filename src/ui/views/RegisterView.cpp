@@ -7,7 +7,8 @@ namespace TalkMe::UI::Views {
 
     void RenderRegister(NetworkClient& netClient, AppState& currentState,
         char* emailBuf, char* usernameBuf, char* passwordBuf, char* passwordRepeatBuf,
-        char* statusMessage, const std::string& serverIP, int serverPort)
+        char* statusMessage, const std::string& serverIP, int serverPort,
+        std::atomic<bool>* registerConnectInProgress)
     {
         float winW = ImGui::GetWindowWidth();
         float winH = ImGui::GetWindowHeight();
@@ -93,16 +94,19 @@ namespace TalkMe::UI::Views {
         ImGui::Dummy(ImVec2(0, 22));
 
         ImGui::SetCursorPosX(cx + pad);
-        if (UI::AccentButton("Register", ImVec2(fieldW, 42)) || enterPressed) {
+        bool connecting = registerConnectInProgress && registerConnectInProgress->load();
+        if ((UI::AccentButton(connecting ? "Connecting..." : "Register", ImVec2(fieldW, 42)) || enterPressed) && !connecting) {
             if (strlen(emailBuf) > 0 && strlen(usernameBuf) > 0 && strlen(passwordBuf) > 0) {
                 if (strcmp(passwordBuf, passwordRepeatBuf) == 0) {
                     std::string emailStr(emailBuf);
                     std::string userStr(usernameBuf);
                     std::string passStr(passwordBuf);
                     if (!netClient.IsConnected()) {
+                        if (registerConnectInProgress) registerConnectInProgress->store(true);
                         strcpy_s(statusMessage, 256, "Connecting...");
                         netClient.ConnectAsync(serverIP, serverPort,
-                            [&netClient, statusMessage, emailStr, userStr, passStr](bool success) {
+                            [&netClient, statusMessage, emailStr, userStr, passStr, registerConnectInProgress](bool success) {
+                                if (registerConnectInProgress) registerConnectInProgress->store(false);
                                 if (success) {
                                     strcpy_s(statusMessage, 256, "Registering...");
                                     netClient.Send(PacketType::Register_Request,
@@ -131,9 +135,10 @@ namespace TalkMe::UI::Views {
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0,0,0,0));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0,0,0,0));
         ImGui::PushStyleColor(ImGuiCol_Text, Styles::TextMuted());
-        if (ImGui::Button("Already have an account? Login", ImVec2(fieldW, 28))) {
+        if (ImGui::Button("Already have an account? Login", ImVec2(fieldW, 28)) && !connecting) {
             currentState = AppState::Login;
             memset(statusMessage, 0, 256);
+            if (registerConnectInProgress) registerConnectInProgress->store(false);
         }
         ImGui::PopStyleColor(4);
 

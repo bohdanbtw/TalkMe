@@ -1762,7 +1762,7 @@ namespace TalkMe {
         }
     }
 
-    void Application::RenderLogin() { UI::Views::RenderLogin(m_NetClient, m_CurrentState, m_EmailBuf, m_PasswordBuf, m_StatusMessage, m_ServerIP, m_ServerPort, m_DeviceId, m_ValidatingSession); }
+    void Application::RenderLogin() { UI::Views::RenderLogin(m_NetClient, m_CurrentState, m_EmailBuf, m_PasswordBuf, m_StatusMessage, m_ServerIP, m_ServerPort, m_DeviceId, m_ValidatingSession, &m_LoginConnectInProgress); }
 
     void Application::RenderLogin2FA() {
         float winW = ImGui::GetWindowWidth();
@@ -1839,7 +1839,7 @@ namespace TalkMe {
         ImGui::EndGroup();
     }
 
-    void Application::RenderRegister() { UI::Views::RenderRegister(m_NetClient, m_CurrentState, m_EmailBuf, m_UsernameBuf, m_PasswordBuf, m_PasswordRepeatBuf, m_StatusMessage, m_ServerIP, m_ServerPort); }
+    void Application::RenderRegister() { UI::Views::RenderRegister(m_NetClient, m_CurrentState, m_EmailBuf, m_UsernameBuf, m_PasswordBuf, m_PasswordRepeatBuf, m_StatusMessage, m_ServerIP, m_ServerPort, &m_LoginConnectInProgress); }
 
     void Application::RenderMainApp() {
         UI::Views::VoiceInfoData vi;

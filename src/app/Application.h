@@ -127,6 +127,7 @@ namespace TalkMe {
 
         AppState m_CurrentState = AppState::Login;
         bool m_ValidatingSession = false;  // true while auto-login from session.dat is in flight
+        std::atomic<bool> m_LoginConnectInProgress{ false };  // true while manual Sign In/Register connection is in progress
         int m_SplashFrames = 0;  // 0..2: draw splash (window hidden), then show window
         NetworkClient m_NetClient;
         AudioEngine m_AudioEngine;
