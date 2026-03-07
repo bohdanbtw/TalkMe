@@ -141,6 +141,9 @@
     <ClCompile Include="src\app\ScreenShareFunctions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\screen\WebcamCapture.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="vendor\qrcodegen.hpp">
@@ -281,6 +284,9 @@
     <ClInclude Include="src\ui\MarkdownRenderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\screen\WebcamCapture.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="resource.h">
@@ -302,6 +308,16 @@
     <None Include="TECHNICAL_ANALYSIS.md" />
     <None Include="TESTING_CHECKLIST.md" />
     <None Include="secret\secrets" />
+    <None Include="BANDWIDTH_OPTIMIZATION.md" />
+    <None Include="FINAL_CONFIG.md" />
+    <None Include="GPU_CONVERSION_IMPLEMENTED.md" />
+    <None Include="ADAPTIVE_BITRATE_IMPLEMENTED.md" />
+    <None Include="SOLUTIONS_A_B_COMPLETE.md" />
+    <None Include="SOLUTIONS_A_B_C_D_COMPLETE.md" />
+    <None Include="TELEMETRY_MONITORING_GUIDE.md" />
+    <None Include="EXECUTIVE_SUMMARY.md" />
+    <None Include="ARCHITECTURE_DIAGRAM.md" />
+    <None Include="IMPLEMENTATION_CHECKLIST.md" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="TalkMe.rc">

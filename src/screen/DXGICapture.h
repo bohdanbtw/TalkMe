@@ -17,6 +17,9 @@ struct DXGICaptureSettings {
     int maxWidth = 1920;
     int maxHeight = 1080;
     void* targetWindow = nullptr;  // HWND; nullptr = entire screen
+    bool keyframeOnlyMode = false;  // NEW: Only send keyframes for low bandwidth
+    int keyframeIntervalFrames = 30;  // NEW: I-frame every N frames
+    std::atomic<int>* pAdaptiveQuality = nullptr;  // NEW: Pointer to adaptive quality from Application
 };
 
 class DXGICapture {

@@ -10,6 +10,9 @@
 #include <gdiplus.h>
 #include <shlwapi.h>
 #include <cstdio>
+#include <condition_variable>
+#include <mutex>
+#include <queue>
 
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "gdiplus.lib")

@@ -2815,6 +2815,12 @@ namespace TalkMe {
             }
             m_ScreenShare.activeStreams.clear();
             m_ScreenShare.viewingStream.clear();
+
+            // Stop screen share send thread
+            m_ScreenShareSendThreadRunning.store(false);
+            m_ScreenShareSendCV.notify_one();
+            if (m_ScreenShareSendThread.joinable())
+                m_ScreenShareSendThread.join();
         }
         catch (const std::exception& e) {
             LOG_ERROR(std::string("Screen share cleanup exception: ") + e.what());

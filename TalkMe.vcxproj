@@ -242,18 +242,28 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="00_START_HERE.md" />
+    <None Include="ADAPTIVE_BITRATE_IMPLEMENTED.md" />
+    <None Include="ARCHITECTURE_DIAGRAM.md" />
+    <None Include="BANDWIDTH_OPTIMIZATION.md" />
     <None Include="BUGFIX_SUMMARY.md" />
     <None Include="DEPLOYMENT_SUMMARY.md" />
     <None Include="DOCUMENTATION_INDEX.md" />
+    <None Include="EXECUTIVE_SUMMARY.md" />
     <None Include="FILES_CREATED.md" />
+    <None Include="FINAL_CONFIG.md" />
     <None Include="FINAL_VERIFICATION.md" />
     <None Include="FIX_COMPLETION_STATUS.md" />
+    <None Include="GPU_CONVERSION_IMPLEMENTED.md" />
+    <None Include="IMPLEMENTATION_CHECKLIST.md" />
     <None Include="QUICK_REFERENCE.md" />
     <None Include="README_FIX.md" />
     <None Include="resource.h" />
     <None Include="secret\secrets" />
+    <None Include="SOLUTIONS_A_B_COMPLETE.md" />
+    <None Include="SOLUTIONS_A_B_C_D_COMPLETE.md" />
     <None Include="SUMMARY.md" />
     <None Include="TECHNICAL_ANALYSIS.md" />
+    <None Include="TELEMETRY_MONITORING_GUIDE.md" />
     <None Include="TESTING_CHECKLIST.md" />
     <None Include="Version.h" />
   </ItemGroup>

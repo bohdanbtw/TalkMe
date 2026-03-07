@@ -346,6 +346,8 @@ namespace TalkMe {
             int fps = 30;
             int quality = 75;
             bool iAmSharing = false;
+            bool keyframeOnlyMode = false;  // NEW: Low bandwidth mode
+            int keyframeIntervalFrames = 30;  // NEW: Keyframe every N frames
             std::map<std::string, StreamInfo> activeStreams;
             std::string viewingStream;
             bool maximized = false;
@@ -456,6 +458,16 @@ namespace TalkMe {
         int m_OverlayCorner = 1;
         float m_OverlayOpacity = 0.85f;
         void UpdateOverlay();
+
+        // Screen share network thread pool to avoid blocking capture
+        std::mutex m_ScreenShareSendQueueMutex;
+        std::queue<std::vector<uint8_t>> m_ScreenShareSendQueue;
+        std::condition_variable m_ScreenShareSendCV;
+        std::thread m_ScreenShareSendThread;
+        std::atomic<bool> m_ScreenShareSendThreadRunning{ false };
+        std::atomic<int> m_ScreenShareQueueDepth{ 0 };  // NEW: Monitor queue depth
+        std::atomic<int> m_AdaptiveQualityLevel{ 100 };  // NEW: Current adaptive quality
+        void RunScreenShareSendThread();
 
         // FPS overlay member removed — use external profiling tools instead.
     };
