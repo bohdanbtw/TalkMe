@@ -320,9 +320,12 @@ LRESULT AppWindow::HandleMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
     }
     switch (msg) {
     case WM_SIZE:
-        // Only handle live resizes here; minimizing should just minimize
-        if (wParam != SIZE_MINIMIZED && m_OnResize)
+        m_Minimized = (wParam == SIZE_MINIMIZED);
+        if (!m_Minimized && m_OnResize)
             m_OnResize((UINT)LOWORD(lParam), (UINT)HIWORD(lParam));
+        return 0;
+    case WM_ACTIVATEAPP:
+        m_Foreground = (wParam != 0);
         return 0;
     case WM_ENTERSIZEMOVE:
         m_IsResizing = true;

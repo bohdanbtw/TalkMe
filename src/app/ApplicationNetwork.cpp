@@ -104,10 +104,9 @@ void Application::ProcessNetworkMessages() {
                     }
                     if (!streamUser.empty()) {
                         auto& si = m_ScreenShare.activeStreams[streamUser];
-                        auto now = std::chrono::steady_clock::now();
+                        const auto now = std::chrono::steady_clock::now();
                         UpdateFpsWindow(si.streamFpsWindowStart, si.streamFramesInWindow, si.streamFps, now);
-                        // Latest-frame semantics: always keep the newest encoded frame.
-                        si.lastFrameData.assign(msg.data.begin(), msg.data.end());
+                        si.lastFrameData = std::move(msg.data);
                         si.frameUpdated = true;
                     }
                 }
@@ -380,6 +379,16 @@ void Application::ProcessNetworkMessages() {
                 if (action == "force_mute") m_SelfMuted = j.value("state", true);
                 else if (action == "force_deafen") { m_SelfDeafened = j.value("state", true); if (m_SelfDeafened) m_SelfMuted = true; }
                 else if (action == "disconnect" && m_ActiveVoiceChannelId != -1) {
+                    if (m_ScreenShare.iAmSharing) {
+                        m_DXGICapture.Stop();
+                        m_AudioLoopback.Stop();
+                        m_ScreenShare.iAmSharing = false;
+                    }
+                    {
+                        std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                        m_ScreenShare.activeStreams.clear();
+                        m_ScreenShare.viewingStream.clear();
+                    }
                     m_ActiveVoiceChannelId = -1;
                     m_ActiveVoiceChannelIdForVoice.store(-1);
                     m_VoiceMembers.clear();

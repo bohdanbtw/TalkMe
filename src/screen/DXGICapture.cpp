@@ -272,12 +272,21 @@ bool DXGICapture::InitDXGI() {
 
 void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
     const int targetFps = (std::max)(1, m_Settings.fps);
-    const auto frameInterval = std::chrono::microseconds(1000000 / targetFps);
+    const auto frameInterval = std::chrono::microseconds(1'000'000 / targetFps);
     auto nextFrameDeadline = std::chrono::steady_clock::now();
     int frameCount = 0;
-    std::vector<uint8_t> lastPacket;
-    int lastPacketW = 0;
-    int lastPacketH = 0;
+
+    // Pre-allocated buffers to avoid per-frame heap churn
+    std::vector<uint8_t> bgraBuffer;
+    std::vector<uint8_t> packetBuffer;
+    int prevOutW = 0, prevOutH = 0;
+
+    auto advanceDeadline = [&]() {
+        nextFrameDeadline += frameInterval;
+        auto n = std::chrono::steady_clock::now();
+        if (nextFrameDeadline <= n)
+            do { nextFrameDeadline += frameInterval; } while (nextFrameDeadline <= n);
+    };
 
     while ((externalStop ? !externalStop->load() : m_Running.load())) {
         auto now = std::chrono::steady_clock::now();
@@ -285,31 +294,19 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
             auto remainMs = std::chrono::duration_cast<std::chrono::milliseconds>(nextFrameDeadline - now).count();
             if (remainMs > 0) Sleep((DWORD)remainMs);
         }
-        auto start = std::chrono::steady_clock::now();
 
-        UINT acquireTimeoutMs = (std::min)(20u, (UINT)(1000 / targetFps));
-        if (acquireTimeoutMs == 0) acquireTimeoutMs = 1;
+        const UINT acquireTimeoutMs = (std::max)(1u, (std::min)(20u, (UINT)(1000 / targetFps)));
         IDXGIResource* desktopResource = nullptr;
         DXGI_OUTDUPL_FRAME_INFO frameInfo;
         HRESULT hr = m_Duplication->AcquireNextFrame(acquireTimeoutMs, &frameInfo, &desktopResource);
 
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-            // Keep stream cadence stable even when desktop is static by resending
-            // the latest encoded frame packet.
-            if (!lastPacket.empty() && m_OnFrame && lastPacketW > 0 && lastPacketH > 0) {
-                m_OnFrame(lastPacket, lastPacketW, lastPacketH, false);
-                frameCount++;
-            }
-            nextFrameDeadline += frameInterval;
-            auto n = std::chrono::steady_clock::now();
-            if (nextFrameDeadline <= n) {
-                do { nextFrameDeadline += frameInterval; } while (nextFrameDeadline <= n);
-            }
+            // Desktop is static; skip sending to save bandwidth
+            advanceDeadline();
             continue;
         }
 
         if (hr == DXGI_ERROR_ACCESS_LOST) {
-            std::fprintf(stderr, "[DXGICapture] Access lost, reinitializing...\n");
             Cleanup();
             Sleep(500);
             if (!InitDXGI()) { m_Running.store(false); return; }
@@ -317,10 +314,6 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
         }
 
         if (FAILED(hr)) {
-            if (frameCount < 3) {
-                std::fprintf(stderr, "[DXGICapture] AcquireNextFrame failed: 0x%08lx\n", hr);
-                std::fflush(stderr);
-            }
             Sleep(50);
             continue;
         }
@@ -329,102 +322,76 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
         desktopResource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&desktopTexture);
         desktopResource->Release();
 
-        // Copy to staging texture
         m_Context->CopyResource(m_StagingTexture, desktopTexture);
         desktopTexture->Release();
         m_Duplication->ReleaseFrame();
 
-        // Map staging texture for CPU read
         D3D11_MAPPED_SUBRESOURCE mapped;
         hr = m_Context->Map(m_StagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
         if (SUCCEEDED(hr)) {
-            int fullW = m_CaptureWidth;
-            int fullH = m_CaptureHeight;
+            const int fullW = m_CaptureWidth;
+            const int fullH = m_CaptureHeight;
             float scale = 1.0f;
-            if (fullW > m_Settings.maxWidth || fullH > m_Settings.maxHeight) {
-                float sx = (float)m_Settings.maxWidth / fullW;
-                float sy = (float)m_Settings.maxHeight / fullH;
-                scale = (std::min)(sx, sy);
-            }
-            int outW = (int)(fullW * scale);
-            int outH = (int)(fullH * scale);
-            if (outW < 1) outW = 1;
-            if (outH < 1) outH = 1;
+            if (fullW > m_Settings.maxWidth || fullH > m_Settings.maxHeight)
+                scale = (std::min)((float)m_Settings.maxWidth / fullW, (float)m_Settings.maxHeight / fullH);
+            int outW = (std::max)(1, (int)(fullW * scale));
+            int outH = (std::max)(1, (int)(fullH * scale));
 
-            std::vector<uint8_t> bgraData((size_t)outW * outH * 4);
+            // Resize buffer only when dimensions change
+            const size_t bgraSize = (size_t)outW * outH * 4;
+            if (outW != prevOutW || outH != prevOutH) {
+                bgraBuffer.resize(bgraSize);
+                prevOutW = outW;
+                prevOutH = outH;
+            }
+
             if (outW == fullW && outH == fullH) {
-                for (int y = 0; y < outH; y++) {
-                    memcpy(bgraData.data() + (size_t)y * outW * 4,
-                        (uint8_t*)mapped.pData + (size_t)y * mapped.RowPitch,
-                        (size_t)outW * 4);
-                }
+                for (int y = 0; y < outH; y++)
+                    memcpy(bgraBuffer.data() + (size_t)y * outW * 4,
+                        (uint8_t*)mapped.pData + (size_t)y * mapped.RowPitch, (size_t)outW * 4);
             } else {
                 BoxDownscaleBgra((const uint8_t*)mapped.pData, fullW, fullH, (int)mapped.RowPitch,
-                    bgraData.data(), outW, outH);
+                    bgraBuffer.data(), outW, outH);
             }
             m_Context->Unmap(m_StagingTexture, 0);
 
             CURSORINFO ci = {};
             ci.cbSize = sizeof(ci);
-            if (GetCursorInfo(&ci) && ci.hCursor && ci.flags == CURSOR_SHOWING) {
-                int cx = (int)((float)ci.ptScreenPos.x * scale);
-                int cy = (int)((float)ci.ptScreenPos.y * scale);
-                DrawCursorOntoBgra(bgraData.data(), outW, outH, cx, cy);
+            if (GetCursorInfo(&ci) && ci.hCursor && ci.flags == CURSOR_SHOWING)
+                DrawCursorOntoBgra(bgraBuffer.data(), outW, outH,
+                    (int)(ci.ptScreenPos.x * scale), (int)(ci.ptScreenPos.y * scale));
+
+            if (!m_UseJpegFallback && !m_H264Encoder.IsInitialized()) {
+                int bitrate = (std::min)(2500, (std::max)(800, 600 + m_Settings.quality * 18));
+                if (!m_H264Encoder.Initialize(outW, outH, m_Settings.fps, bitrate))
+                    m_UseJpegFallback = true;
             }
 
             std::vector<uint8_t> encoded;
+            if (!m_UseJpegFallback && m_H264Encoder.IsInitialized())
+                encoded = m_H264Encoder.Encode(bgraBuffer.data(), outW, outH);
 
-            if (!m_UseJpegFallback && !m_H264Encoder.IsInitialized()) {
-                // Cap bitrate for screen share (~2.5 Mbps) so network usage is Discord-like, not 90+ Mbps.
-                int bitrate = (std::min)(2500, (std::max)(800, 600 + m_Settings.quality * 18));
-                if (!m_H264Encoder.Initialize(outW, outH, m_Settings.fps, bitrate)) {
-                    std::fprintf(stderr, "[DXGICapture] H.264 encoder init failed, using JPEG fallback\n");
-                    m_UseJpegFallback = true;
-                }
-            }
+            if (encoded.empty())
+                encoded = EncodeRGBAtoJPEG(bgraBuffer.data(), outW, outH, m_Settings.quality);
 
-            if (!m_UseJpegFallback && m_H264Encoder.IsInitialized()) {
-                encoded = m_H264Encoder.Encode(bgraData.data(), outW, outH);
-            }
-
-            if (encoded.empty()) {
-                encoded = EncodeRGBAtoJPEG(bgraData.data(), outW, outH, m_Settings.quality);
-                if (m_UseJpegFallback && frameCount < 3) {
-                    std::fprintf(stderr, "[DXGICapture] Frame %d (JPEG fallback): %dx%d, %zu bytes\n",
-                        frameCount, outW, outH, encoded.size());
-                }
-            } else if (frameCount < 3) {
-                std::fprintf(stderr, "[DXGICapture] Frame %d (H.264): %dx%d, %zu bytes\n",
-                    frameCount, outW, outH, encoded.size());
-            }
-
-            int keyFrameInterval = (std::max)(15, m_Settings.fps);
-            bool isKey = (frameCount % keyFrameInterval == 0);
             if (!encoded.empty() && m_OnFrame) {
-                std::vector<uint8_t> packet(1 + encoded.size());
-                packet[0] = (m_UseJpegFallback || !m_H264Encoder.IsInitialized()) ? 0 : 1;
-                memcpy(packet.data() + 1, encoded.data(), encoded.size());
-                m_OnFrame(packet, outW, outH, isKey);
-                lastPacket = packet;
-                lastPacketW = outW;
-                lastPacketH = outH;
+                const uint8_t codec = (m_UseJpegFallback || !m_H264Encoder.IsInitialized()) ? 0 : 1;
+                // Reuse packet buffer: [codec_byte | encoded_data]
+                packetBuffer.resize(1 + encoded.size());
+                packetBuffer[0] = codec;
+                memcpy(packetBuffer.data() + 1, encoded.data(), encoded.size());
+                m_OnFrame(packetBuffer, outW, outH, (frameCount % (std::max)(15, m_Settings.fps) == 0));
             }
-
             frameCount++;
         }
 
-        (void)start;
-        nextFrameDeadline += frameInterval;
-        auto n = std::chrono::steady_clock::now();
-        if (nextFrameDeadline <= n) {
-            do { nextFrameDeadline += frameInterval; } while (nextFrameDeadline <= n);
-        }
+        advanceDeadline();
     }
 }
 
 void DXGICapture::GDIFallbackLoop(std::atomic<bool>* externalStop) {
     const int targetFps = (std::max)(1, m_Settings.fps);
-    const auto frameInterval = std::chrono::microseconds(1000000 / targetFps);
+    const auto frameInterval = std::chrono::microseconds(1'000'000 / targetFps);
     auto nextFrameDeadline = std::chrono::steady_clock::now();
     int frameCount = 0;
 
@@ -439,13 +406,21 @@ void DXGICapture::GDIFallbackLoop(std::atomic<bool>* externalStop) {
     ULONG quality = (ULONG)m_Settings.quality;
     params.Parameter[0].Value = &quality;
 
+    std::vector<uint8_t> packetBuffer;
+
+    auto advanceDeadline = [&]() {
+        nextFrameDeadline += frameInterval;
+        auto n = std::chrono::steady_clock::now();
+        if (nextFrameDeadline <= n)
+            do { nextFrameDeadline += frameInterval; } while (nextFrameDeadline <= n);
+    };
+
     while ((externalStop ? !externalStop->load() : m_Running.load())) {
         auto now = std::chrono::steady_clock::now();
         if (now < nextFrameDeadline) {
             auto remainMs = std::chrono::duration_cast<std::chrono::milliseconds>(nextFrameDeadline - now).count();
             if (remainMs > 0) Sleep((DWORD)remainMs);
         }
-        auto start = std::chrono::steady_clock::now();
 
         HDC screenDC = GetDC(nullptr);
         if (!screenDC) { Sleep(100); continue; }
@@ -454,8 +429,8 @@ void DXGICapture::GDIFallbackLoop(std::atomic<bool>* externalStop) {
         float scale = 1.0f;
         if (screenW > m_Settings.maxWidth || screenH > m_Settings.maxHeight)
             scale = (std::min)((float)m_Settings.maxWidth / screenW, (float)m_Settings.maxHeight / screenH);
-        int outW = (int)(screenW * scale);
-        int outH = (int)(screenH * scale);
+        int outW = (std::max)(1, (int)(screenW * scale));
+        int outH = (std::max)(1, (int)(screenH * scale));
 
         HDC memDC = CreateCompatibleDC(screenDC);
         HBITMAP hBmp = CreateCompatibleBitmap(screenDC, outW, outH);
@@ -465,8 +440,8 @@ void DXGICapture::GDIFallbackLoop(std::atomic<bool>* externalStop) {
         CURSORINFO ci = {};
         ci.cbSize = sizeof(ci);
         if (GetCursorInfo(&ci) && ci.hCursor && ci.flags == CURSOR_SHOWING) {
-            int cx = (int)((float)ci.ptScreenPos.x * scale);
-            int cy = (int)((float)ci.ptScreenPos.y * scale);
+            int cx = (int)(ci.ptScreenPos.x * scale);
+            int cy = (int)(ci.ptScreenPos.y * scale);
             if (cx >= 0 && cy >= 0 && cx < outW && cy < outH)
                 DrawIconEx(memDC, cx, cy, ci.hCursor, 0, 0, 0, nullptr, DI_NORMAL);
         }
@@ -483,18 +458,13 @@ void DXGICapture::GDIFallbackLoop(std::atomic<bool>* externalStop) {
                 pStream->Stat(&stat, STATFLAG_NONAME);
                 ULONG sz = (ULONG)stat.cbSize.QuadPart;
                 if (sz > 0) {
-                    std::vector<uint8_t> jpeg(sz);
+                    packetBuffer.resize(1 + sz);
+                    packetBuffer[0] = 0;
                     ULONG read = 0;
-                    pStream->Read(jpeg.data(), sz, &read);
+                    pStream->Read(packetBuffer.data() + 1, sz, &read);
                     if (read > 0 && m_OnFrame) {
-                        std::vector<uint8_t> packet(1 + read);
-                        packet[0] = 0; // JPEG codec
-                        memcpy(packet.data() + 1, jpeg.data(), read);
-                        m_OnFrame(packet, outW, outH, (frameCount % 30 == 0));
-                        if (frameCount < 3) {
-                            std::fprintf(stderr, "[DXGICapture] GDI Frame %d: %dx%d, jpeg=%lu bytes\n", frameCount, outW, outH, read);
-                            std::fflush(stderr);
-                        }
+                        packetBuffer.resize(1 + read);
+                        m_OnFrame(packetBuffer, outW, outH, (frameCount % 30 == 0));
                     }
                 }
             }
@@ -505,13 +475,7 @@ void DXGICapture::GDIFallbackLoop(std::atomic<bool>* externalStop) {
         DeleteDC(memDC);
         ReleaseDC(nullptr, screenDC);
         frameCount++;
-
-        (void)start;
-        nextFrameDeadline += frameInterval;
-        auto n = std::chrono::steady_clock::now();
-        if (nextFrameDeadline <= n) {
-            do { nextFrameDeadline += frameInterval; } while (nextFrameDeadline <= n);
-        }
+        advanceDeadline();
     }
 }
 

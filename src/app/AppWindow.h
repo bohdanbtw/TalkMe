@@ -28,6 +28,8 @@ public:
     /// True while the user is dragging files over the window (OLE IDropTarget DragEnter/DragLeave).
     bool IsDragOver() const { return m_DragOver; }
     bool IsResizing() const { return m_IsResizing; }
+    bool IsMinimized() const { return m_Minimized; }
+    bool IsForeground() const { return m_Foreground; }
 
     /// Create window and load icons. Ensures assets dir exists and has icons. Returns false on failure.
     bool Create(int width, int height, const std::string& title);
@@ -63,6 +65,8 @@ private:
     std::function<void()> m_OnRenderFrame;
     std::function<void(std::vector<std::string>)> m_OnFilesDropped;
     bool m_IsResizing = false;
+    bool m_Minimized = false;
+    bool m_Foreground = true;
     bool m_TrayIconAdded = false;
     bool m_ReallyClose = false;
 };

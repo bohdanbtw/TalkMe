@@ -914,6 +914,18 @@ namespace TalkMe {
                 }
 
                 if (m_ActiveVoiceChannelId != m_PrevActiveVoiceChannelId) {
+                    // Stop screen share when leaving any voice channel
+                    if (m_ActiveVoiceChannelId == -1 && m_ScreenShare.iAmSharing) {
+                        m_DXGICapture.Stop();
+                        m_AudioLoopback.Stop();
+                        m_ScreenShare.iAmSharing = false;
+                        m_NetClient.Send(PacketType::Screen_Share_Stop, "{}");
+                    }
+                    if (m_ActiveVoiceChannelId == -1) {
+                        std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                        m_ScreenShare.activeStreams.clear();
+                        m_ScreenShare.viewingStream.clear();
+                    }
                     m_AudioEngine.ClearRemoteTracks();
                     m_JoinSoundPlayedFor.clear();
                     if (m_UseUdpVoice && m_NetClient.IsConnected() && !m_CurrentUser.username.empty()) {
@@ -986,6 +998,7 @@ namespace TalkMe {
                 UpdateOverlay();
 
                 // Update screen share textures from active streams
+                // Skip decode/upload when window is minimized or unfocused to save GPU/CPU
                 {
                     auto& tm = TalkMe::TextureManager::Get();
                     tm.SetDevice(m_Graphics.GetDevice());
@@ -993,8 +1006,10 @@ namespace TalkMe {
                     if (!s_friendsIconLoaded && tm.GetTexture("friends_icon") == nullptr) {
                         s_friendsIconLoaded = LoadFriendsIconOnce();
                     }
+                    const bool skipPreview = m_Window.IsMinimized() || !m_Window.IsForeground();
                     for (auto& [user, si] : m_ScreenShare.activeStreams) {
                         if (!si.frameUpdated || si.lastFrameData.size() <= 1) continue;
+                        if (skipPreview) continue;
 
                         // Dynamic FPS cap for viewers: render at min(source FPS, global FPS).
                         // Skip throttle until the stream FPS measurement stabilizes (first ~1 s).
@@ -2717,6 +2732,21 @@ namespace TalkMe {
 
         LOG_APP("Starting cleanup...");
         m_ShuttingDown.store(true);
+
+        // Stop screen share capture and audio loopback before anything else
+        try {
+            if (m_DXGICapture.IsRunning() || m_ScreenShare.iAmSharing) {
+                LOG_APP("Stopping screen share...");
+                m_DXGICapture.Stop();
+                m_AudioLoopback.Stop();
+                m_ScreenShare.iAmSharing = false;
+            }
+            m_ScreenShare.activeStreams.clear();
+            m_ScreenShare.viewingStream.clear();
+        }
+        catch (const std::exception& e) {
+            LOG_ERROR(std::string("Screen share cleanup exception: ") + e.what());
+        }
 
         try {
             LOG_APP("Shutting down audio engine...");

@@ -66,6 +66,8 @@ void Application::StartScreenShareProcess(int fps, int quality, int width, int h
 
 void Application::StopScreenShareProcess() {
     m_DXGICapture.Stop();
+    m_AudioLoopback.Stop();
+    m_ScreenShare.iAmSharing = false;
 }
 
 } // namespace TalkMe

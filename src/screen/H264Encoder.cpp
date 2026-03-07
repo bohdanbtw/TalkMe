@@ -10,48 +10,53 @@
 
 namespace TalkMe {
 
+static inline uint8_t Clamp255(int v) { return (uint8_t)((unsigned)v <= 255 ? v : (v < 0 ? 0 : 255)); }
+
 static IMFSample* CreateSampleFromBGRA(const uint8_t* bgra, int width, int height, int64_t timestamp, int fps) {
-    DWORD bufSize = width * height * 4;
-    IMFMediaBuffer* pBuffer = nullptr;
-    MFCreateMemoryBuffer(bufSize, &pBuffer);
-    BYTE* pData = nullptr;
-    pBuffer->Lock(&pData, nullptr, nullptr);
-    // Convert BGRA to NV12 (Y plane + interleaved UV)
-    // NV12: Y = 0.299R + 0.587G + 0.114B, U/V subsampled 2x2
-    DWORD nv12Size = width * height * 3 / 2;
+    const DWORD nv12Size = width * height * 3 / 2;
     IMFMediaBuffer* pNV12Buf = nullptr;
     MFCreateMemoryBuffer(nv12Size, &pNV12Buf);
+    if (!pNV12Buf) return nullptr;
     BYTE* nv12 = nullptr;
     pNV12Buf->Lock(&nv12, nullptr, nullptr);
 
     uint8_t* yPlane = nv12;
     uint8_t* uvPlane = nv12 + width * height;
+    const int stride = width * 4;
 
+    // BT.601 BGRA->NV12 with fixed-point integer arithmetic (8-bit precision shift)
     for (int y = 0; y < height; y++) {
+        const uint8_t* row = bgra + y * stride;
         for (int x = 0; x < width; x++) {
-            int idx = (y * width + x) * 4;
-            uint8_t B = bgra[idx + 0];
-            uint8_t G = bgra[idx + 1];
-            uint8_t R = bgra[idx + 2];
-            yPlane[y * width + x] = (uint8_t)((std::min)(255, (int)(0.257f * R + 0.504f * G + 0.098f * B + 16)));
-            if ((y % 2 == 0) && (x % 2 == 0)) {
-                int uvIdx = (y / 2) * width + (x / 2) * 2;
-                uvPlane[uvIdx + 0] = (uint8_t)((std::min)(255, (int)(-0.148f * R - 0.291f * G + 0.439f * B + 128)));
-                uvPlane[uvIdx + 1] = (uint8_t)((std::min)(255, (int)(0.439f * R - 0.368f * G - 0.071f * B + 128)));
-            }
+            const int B = row[x * 4 + 0];
+            const int G = row[x * 4 + 1];
+            const int R = row[x * 4 + 2];
+            yPlane[y * width + x] = Clamp255((66 * R + 129 * G + 25 * B + 128) >> 8) + 16;
+        }
+    }
+    // UV planes: subsample 2x2 with safe clamping for odd dimensions
+    for (int y = 0; y < height; y += 2) {
+        const uint8_t* row0 = bgra + y * stride;
+        const uint8_t* row1 = (y + 1 < height) ? bgra + (y + 1) * stride : row0;
+        uint8_t* uvRow = uvPlane + (y / 2) * width;
+        for (int x = 0; x < width; x += 2) {
+            const int x1 = (std::min)(x + 1, width - 1);
+            const int B = (row0[x*4] + row0[x1*4] + row1[x*4] + row1[x1*4] + 2) >> 2;
+            const int G = (row0[x*4+1] + row0[x1*4+1] + row1[x*4+1] + row1[x1*4+1] + 2) >> 2;
+            const int R = (row0[x*4+2] + row0[x1*4+2] + row1[x*4+2] + row1[x1*4+2] + 2) >> 2;
+            uvRow[x]     = Clamp255(((-38 * R - 74 * G + 112 * B + 128) >> 8) + 128);
+            uvRow[x + 1] = Clamp255(((112 * R - 94 * G - 18 * B + 128) >> 8) + 128);
         }
     }
     pNV12Buf->Unlock();
     pNV12Buf->SetCurrentLength(nv12Size);
-    pBuffer->Unlock();
-    pBuffer->Release();
 
     IMFSample* pSample = nullptr;
     MFCreateSample(&pSample);
     pSample->AddBuffer(pNV12Buf);
     pNV12Buf->Release();
 
-    LONGLONG duration = 10000000LL / fps;
+    const LONGLONG duration = 10'000'000LL / fps;
     pSample->SetSampleTime(timestamp * duration);
     pSample->SetSampleDuration(duration);
     return pSample;
