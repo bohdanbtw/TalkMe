@@ -6,6 +6,7 @@
 #include "../../app/ResourceLimits.h"
 #include "../../shared/PacketHandler.h"
 #include "../../network/ImageCache.h"
+#include "../../screen/WebcamCapture.h"
 #include <string>
 #include <map>
 #include <unordered_map>
@@ -815,222 +816,243 @@ namespace TalkMe::UI::Views {
 
                 ImGui::PopStyleVar();
 
-                // ====== Screen Share Setup — wide application picker with thumbnails ======
+                // ====== Screen Share — Discord-style modal with 3 tabs ======
                 {
                     struct WinEntry { HWND hwnd; std::string title; };
+                    struct CamEntry { std::string name; std::string symLink; };
                     static std::vector<WinEntry> s_windows;
-                    static int s_selectedIdx = -1;
+                    static std::vector<CamEntry> s_cameras;
+                    static int s_tab = 0;        // 0=Applications, 1=Screens, 2=Cameras
+                    static int s_selApp = -1;
+                    static int s_selCam = -1;
                     static int s_shareFps = 1;
                     static int s_shareQuality = 1;
-                    static int s_shareResolution = 1;
-                    static bool s_needsRefresh = true;
+                    static int s_shareRes = 1;
+                    static bool s_refresh = true;
 
-                    if (s_needsRefresh) {
+                    if (s_refresh) {
                         s_windows.clear();
-                        s_selectedIdx = -1;
-                        ::EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
-                            if (!::IsWindowVisible(hwnd)) return TRUE;
-                            if (::GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) return TRUE;
-                            if (::GetWindow(hwnd, GW_OWNER)) return TRUE;
+                        s_cameras.clear();
+                        s_selApp = -1;
+                        s_selCam = -1;
+                        ::EnumWindows([](HWND h, LPARAM lp) -> BOOL {
+                            if (!::IsWindowVisible(h)) return TRUE;
+                            if (::GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) return TRUE;
+                            if (::GetWindow(h, GW_OWNER)) return TRUE;
+                            DWORD pid = 0; ::GetWindowThreadProcessId(h, &pid);
                             wchar_t buf[256] = {};
-                            if (::GetWindowTextW(hwnd, buf, 256) <= 0) return TRUE;
-                            char utf8[512] = {};
-                            ::WideCharToMultiByte(CP_UTF8, 0, buf, -1, utf8, 512, nullptr, nullptr);
-                            std::string t(utf8);
+                            if (::GetWindowTextW(h, buf, 256) <= 0) return TRUE;
+                            char u8[512] = {};
+                            ::WideCharToMultiByte(CP_UTF8, 0, buf, -1, u8, 512, nullptr, nullptr);
+                            std::string t(u8);
                             if (t.empty() || t == "Program Manager") return TRUE;
-                            auto* v = reinterpret_cast<std::vector<WinEntry>*>(lParam);
-                            v->push_back({ hwnd, std::move(t) });
+                            reinterpret_cast<std::vector<WinEntry>*>(lp)->push_back({h, std::move(t)});
                             return TRUE;
-                        }, reinterpret_cast<LPARAM>(&s_windows));
-                        s_needsRefresh = false;
+                        }, (LPARAM)&s_windows);
+                        // Enumerate cameras
+                        auto devs = TalkMe::WebcamCapture::EnumerateDevices();
+                        for (auto& d : devs)
+                            s_cameras.push_back({std::move(d.name), std::move(d.symbolicLink)});
+                        s_refresh = false;
                     }
 
-                    const float popW = 700.0f;
-                    ImGui::SetNextWindowSize(ImVec2(popW, 520.0f), ImGuiCond_Always);
+                    const float popW = 740.0f, popH = 530.0f;
+                    ImGui::SetNextWindowSize(ImVec2(popW, popH), ImGuiCond_Always);
                     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-                    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(28, 24));
-                    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 14.0f);
-                    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-                    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.09f, 0.09f, 0.12f, 0.99f));
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f);
+                    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.11f, 0.11f, 0.13f, 1.0f));
 
                     if (ImGui::BeginPopup("ScreenShareSetup")) {
-                        const float cW = popW - 56.0f;
-                        const ImVec4 accent(0.35f, 0.55f, 0.95f, 1.0f);
-                        const ImVec4 accentHov(0.42f, 0.62f, 1.0f, 1.0f);
-                        const ImVec4 selCol(0.22f, 0.36f, 0.62f, 1.0f);
-                        const ImVec4 unsel(0.14f, 0.14f, 0.18f, 1.0f);
-                        const ImVec4 hover(0.17f, 0.17f, 0.22f, 1.0f);
+                        const float pad = 24.0f;
+                        const float cW = popW - pad * 2;
+                        const ImVec4 accent(0.40f, 0.52f, 0.96f, 1.0f);
+                        const ImVec4 accentH(0.48f, 0.60f, 1.0f, 1.0f);
+                        const ImVec4 tabSel(0.18f, 0.18f, 0.22f, 1.0f);
+                        const ImVec4 tabDef(0.13f, 0.13f, 0.16f, 1.0f);
+                        const ImVec4 cardBg(0.14f, 0.14f, 0.17f, 1.0f);
+                        const ImVec4 cardHov(0.17f, 0.17f, 0.21f, 1.0f);
+                        const ImVec4 cardSel(0.20f, 0.26f, 0.48f, 1.0f);
+                        const ImVec4 border(0.40f, 0.52f, 0.96f, 0.7f);
                         const ImVec4 dim(0.50f, 0.50f, 0.55f, 1.0f);
-                        const ImVec4 selBorder(0.35f, 0.55f, 0.95f, 0.8f);
+                        const ImVec4 pill(0.16f, 0.16f, 0.20f, 1.0f);
+                        const ImVec4 pillH(0.20f, 0.20f, 0.25f, 1.0f);
+                        const ImVec4 pillA(0.22f, 0.32f, 0.56f, 1.0f);
 
-                        // Header
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
-                        ImGui::SetWindowFontScale(1.25f);
-                        ImGui::Text("Screen Share");
-                        ImGui::SetWindowFontScale(1.0f);
-                        ImGui::PopStyleColor();
-                        ImGui::SameLine(cW - 55);
-                        ImGui::PushStyleColor(ImGuiCol_Text, dim);
-                        ImGui::SetWindowFontScale(0.85f);
-                        ImGui::Text("%d sources", (int)s_windows.size() + 1);
-                        ImGui::SetWindowFontScale(1.0f);
-                        ImGui::PopStyleColor();
-
-                        ImGui::Dummy(ImVec2(0, 6));
-                        ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.2f, 0.2f, 0.25f, 0.6f));
-                        ImGui::Separator();
-                        ImGui::PopStyleColor();
-                        ImGui::Dummy(ImVec2(0, 10));
-
-                        // Source grid — 2 columns with preview cards
-                        const float cardW = (cW - 14.0f) * 0.5f;
-                        const float cardH = 90.0f;
-                        const float thumbH = 50.0f;
-                        float gridH = 280.0f;
-                        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.07f, 0.07f, 0.09f, 1.0f));
-                        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 8.0f);
-                        ImGui::BeginChild("##srcgrid", ImVec2(cW, gridH), true);
-
-                        int totalItems = 1 + (int)s_windows.size();
-                        for (int idx = 0; idx < totalItems; idx++) {
-                            bool isScreen = (idx == 0);
-                            int winIdx = idx - 1;
-                            bool sel = isScreen ? (s_selectedIdx == -1) : (s_selectedIdx == winIdx);
-
-                            if (idx % 2 != 0) ImGui::SameLine(0, 14);
-
-                            ImGui::PushID(idx);
-                            ImVec2 pos = ImGui::GetCursorScreenPos();
-
-                            // Card background
-                            ImGui::PushStyleColor(ImGuiCol_Button, sel ? selCol : unsel);
-                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, sel ? selCol : hover);
-                            if (ImGui::Button("##card", ImVec2(cardW, cardH))) {
-                                s_selectedIdx = isScreen ? -1 : winIdx;
-                            }
-                            ImGui::PopStyleColor(2);
-
-                            // Selection border
-                            if (sel) {
-                                ImDrawList* dl = ImGui::GetWindowDrawList();
-                                dl->AddRect(pos, ImVec2(pos.x + cardW, pos.y + cardH),
-                                    ImGui::ColorConvertFloat4ToU32(selBorder), 8.0f, 0, 2.0f);
-                            }
-
-                            // Thumbnail placeholder
-                            ImGui::SetCursorScreenPos(ImVec2(pos.x + 10, pos.y + 8));
-                            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.05f, 0.05f, 0.07f, 1.0f));
-                            ImGui::BeginChild(isScreen ? "##tscreen" : ("##t" + std::to_string(winIdx)).c_str(),
-                                ImVec2(cardW - 20, thumbH), true);
-                            ImGui::PushStyleColor(ImGuiCol_Text, dim);
-                            if (isScreen) {
-                                ImGui::SetCursorPos(ImVec2((cardW - 20) * 0.3f, thumbH * 0.3f));
-                                ImGui::Text("Desktop");
-                            } else {
-                                ImGui::SetCursorPos(ImVec2(6, thumbH * 0.3f));
-                                RECT wr = {};
-                                if (::GetWindowRect(s_windows[winIdx].hwnd, &wr)) {
-                                    ImGui::Text("%dx%d", wr.right - wr.left, wr.bottom - wr.top);
-                                } else {
-                                    ImGui::Text("Window");
+                        // ── Tab bar (full width, dark background) ──
+                        ImGui::PushStyleColor(ImGuiCol_ChildBg, tabDef);
+                        ImGui::BeginChild("##tabbar", ImVec2(popW, 48), false);
+                        {
+                            const char* tabs[] = {"Applications", "Screens", "Cameras"};
+                            float tabW = popW / 3.0f;
+                            for (int i = 0; i < 3; i++) {
+                                bool sel = (s_tab == i);
+                                ImGui::PushStyleColor(ImGuiCol_Button, sel ? tabSel : tabDef);
+                                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, tabSel);
+                                ImGui::PushStyleColor(ImGuiCol_Text, sel ? ImVec4(1,1,1,1) : dim);
+                                ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0);
+                                if (ImGui::Button(tabs[i], ImVec2(tabW, 48))) s_tab = i;
+                                ImGui::PopStyleVar();
+                                ImGui::PopStyleColor(3);
+                                // Accent underline for active tab
+                                if (sel) {
+                                    ImVec2 p = ImGui::GetItemRectMin();
+                                    ImVec2 sz = ImGui::GetItemRectSize();
+                                    ImGui::GetWindowDrawList()->AddRectFilled(
+                                        ImVec2(p.x, p.y + sz.y - 3), ImVec2(p.x + sz.x, p.y + sz.y),
+                                        ImGui::ColorConvertFloat4ToU32(accent));
                                 }
+                                if (i < 2) ImGui::SameLine(0, 0);
                             }
-                            ImGui::PopStyleColor();
-                            ImGui::EndChild();
-                            ImGui::PopStyleColor();
-
-                            // Title
-                            ImGui::SetCursorScreenPos(ImVec2(pos.x + 10, pos.y + thumbH + 14));
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.88f, 0.88f, 0.92f, 1));
-                            if (isScreen) {
-                                ImGui::Text("Entire Screen");
-                            } else {
-                                const std::string& t = s_windows[winIdx].title;
-                                std::string disp = (t.length() > 32) ? t.substr(0, 29) + "..." : t;
-                                ImGui::Text("%s", disp.c_str());
-                            }
-                            ImGui::PopStyleColor();
-
-                            // Reset cursor for next card
-                            ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + cardH + 8));
-                            if (idx % 2 != 0 || idx == totalItems - 1)
-                                ImGui::SetCursorScreenPos(ImVec2(pos.x - (idx % 2 != 0 ? cardW + 14 : 0), pos.y + cardH + 8));
-
-                            ImGui::PopID();
                         }
-
                         ImGui::EndChild();
-                        ImGui::PopStyleVar();
                         ImGui::PopStyleColor();
 
-                        ImGui::Dummy(ImVec2(0, 12));
+                        // ── Content area ──
+                        ImGui::SetCursorPos(ImVec2(pad, 48 + 12));
+                        float contentH = popH - 48 - 12 - 90;
 
-                        // Settings row
-                        auto pill = [&](const char* lbl, bool active, float w) {
-                            ImGui::PushStyleColor(ImGuiCol_Button, active ? selCol : unsel);
-                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, active ? selCol : hover);
-                            bool r = ImGui::Button(lbl, ImVec2(w, 30));
+                        auto renderCard = [&](const char* label, const char* sub, bool selected, float w, float h) -> bool {
+                            ImGui::PushStyleColor(ImGuiCol_Button, selected ? cardSel : cardBg);
+                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, selected ? cardSel : cardHov);
+                            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+                            ImVec2 pos = ImGui::GetCursorScreenPos();
+                            bool clicked = ImGui::Button(label, ImVec2(w, h));
+                            ImGui::PopStyleVar();
                             ImGui::PopStyleColor(2);
-                            return r;
+                            if (selected) {
+                                ImGui::GetWindowDrawList()->AddRect(pos, ImVec2(pos.x+w, pos.y+h),
+                                    ImGui::ColorConvertFloat4ToU32(border), 8.0f, 0, 2.0f);
+                            }
+                            if (sub && sub[0]) {
+                                ImGui::SetCursorScreenPos(ImVec2(pos.x + 8, pos.y + h - 22));
+                                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.82f, 0.82f, 0.86f, 1));
+                                ImGui::Text("%s", sub);
+                                ImGui::PopStyleColor();
+                                ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + h + 4));
+                            }
+                            return clicked;
                         };
 
-                        ImGui::PushStyleColor(ImGuiCol_Text, dim);
-                        ImGui::Text("Resolution");
-                        ImGui::SameLine(cW * 0.37f); ImGui::Text("Frame Rate");
-                        ImGui::SameLine(cW * 0.67f); ImGui::Text("Quality");
+                        if (s_tab == 0) {
+                            // ── Applications tab ──
+                            ImGui::BeginChild("##apps", ImVec2(cW, contentH), false);
+                            const float cardW = (cW - 16) * 0.5f;
+                            const float cardH = 100.0f;
+                            for (int i = 0; i < (int)s_windows.size(); i++) {
+                                if (i % 2 != 0) ImGui::SameLine(0, 16);
+                                ImGui::PushID(i);
+                                const auto& w = s_windows[i];
+                                std::string disp = (w.title.length() > 38) ? w.title.substr(0, 35) + "..." : w.title;
+                                std::string id = "##app" + std::to_string(i);
+                                if (renderCard(id.c_str(), disp.c_str(), s_selApp == i, cardW, cardH))
+                                    s_selApp = i;
+                                ImGui::PopID();
+                            }
+                            if (s_windows.empty()) {
+                                ImGui::PushStyleColor(ImGuiCol_Text, dim);
+                                ImGui::SetCursorPos(ImVec2(cW * 0.3f, contentH * 0.4f));
+                                ImGui::Text("No applications found");
+                                ImGui::PopStyleColor();
+                            }
+                            ImGui::EndChild();
+                        }
+                        else if (s_tab == 1) {
+                            // ── Screens tab ──
+                            ImGui::BeginChild("##screens", ImVec2(cW, contentH), false);
+                            const float cardW = cW - 4;
+                            std::string id = "##screen0";
+                            int sw = ::GetSystemMetrics(SM_CXSCREEN);
+                            int sh = ::GetSystemMetrics(SM_CYSCREEN);
+                            char sub[64]; std::snprintf(sub, 64, "Entire Screen  %dx%d", sw, sh);
+                            if (renderCard(id.c_str(), sub, true, cardW, 110.0f)) {}
+                            ImGui::EndChild();
+                        }
+                        else {
+                            // ── Cameras tab ──
+                            ImGui::BeginChild("##cams", ImVec2(cW, contentH), false);
+                            const float cardW = (cW - 16) * 0.5f;
+                            for (int i = 0; i < (int)s_cameras.size(); i++) {
+                                if (i % 2 != 0) ImGui::SameLine(0, 16);
+                                ImGui::PushID(1000 + i);
+                                std::string id = "##cam" + std::to_string(i);
+                                if (renderCard(id.c_str(), s_cameras[i].name.c_str(), s_selCam == i, cardW, 80.0f))
+                                    s_selCam = i;
+                                ImGui::PopID();
+                            }
+                            if (s_cameras.empty()) {
+                                ImGui::PushStyleColor(ImGuiCol_Text, dim);
+                                ImGui::SetCursorPos(ImVec2(cW * 0.3f, contentH * 0.4f));
+                                ImGui::Text("No cameras detected");
+                                ImGui::PopStyleColor();
+                            }
+                            ImGui::EndChild();
+                        }
+
+                        // ── Bottom bar: settings + actions ──
+                        ImGui::SetCursorPos(ImVec2(pad, popH - 78));
+                        ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.2f, 0.2f, 0.24f, 0.5f));
+                        ImGui::Separator();
                         ImGui::PopStyleColor();
-                        ImGui::Dummy(ImVec2(0, 4));
+                        ImGui::Dummy(ImVec2(0, 8));
+                        ImGui::SetCursorPosX(pad);
 
-                        if (pill("720p##r", s_shareResolution==0, 54)) s_shareResolution=0; ImGui::SameLine(0,5);
-                        if (pill("1080p##r", s_shareResolution==1, 58)) s_shareResolution=1; ImGui::SameLine(0,5);
-                        if (pill("1440p##r", s_shareResolution==2, 58)) s_shareResolution=2;
+                        auto pbtn = [&](const char* l, bool a, float w) {
+                            ImGui::PushStyleColor(ImGuiCol_Button, a ? pillA : pill);
+                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a ? pillA : pillH);
+                            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+                            bool c = ImGui::Button(l, ImVec2(w, 28));
+                            ImGui::PopStyleVar();
+                            ImGui::PopStyleColor(2);
+                            return c;
+                        };
 
-                        ImGui::SameLine(cW * 0.37f);
-                        if (pill("30##f", s_shareFps==0, 38)) s_shareFps=0; ImGui::SameLine(0,5);
-                        if (pill("60##f", s_shareFps==1, 38)) s_shareFps=1; ImGui::SameLine(0,5);
-                        if (pill("120##f", s_shareFps==2, 38)) s_shareFps=2;
+                        // Resolution / FPS / Quality pills
+                        if (pbtn("720p##r", s_shareRes==0, 50)) s_shareRes=0; ImGui::SameLine(0,4);
+                        if (pbtn("1080p##r", s_shareRes==1, 54)) s_shareRes=1; ImGui::SameLine(0,4);
+                        if (pbtn("1440p##r", s_shareRes==2, 54)) s_shareRes=2;
+                        ImGui::SameLine(0, 20);
+                        if (pbtn("30fps##f", s_shareFps==0, 50)) s_shareFps=0; ImGui::SameLine(0,4);
+                        if (pbtn("60fps##f", s_shareFps==1, 50)) s_shareFps=1; ImGui::SameLine(0,4);
+                        if (pbtn("120fps##f", s_shareFps==2, 54)) s_shareFps=2;
+                        ImGui::SameLine(0, 20);
+                        if (pbtn("Low##q", s_shareQuality==0, 40)) s_shareQuality=0; ImGui::SameLine(0,4);
+                        if (pbtn("Med##q", s_shareQuality==1, 42)) s_shareQuality=1; ImGui::SameLine(0,4);
+                        if (pbtn("High##q", s_shareQuality==2, 42)) s_shareQuality=2;
 
-                        ImGui::SameLine(cW * 0.67f);
-                        if (pill("Low##q", s_shareQuality==0, 44)) s_shareQuality=0; ImGui::SameLine(0,5);
-                        if (pill("Med##q", s_shareQuality==1, 44)) s_shareQuality=1; ImGui::SameLine(0,5);
-                        if (pill("High##q", s_shareQuality==2, 44)) s_shareQuality=2;
-
-                        ImGui::Dummy(ImVec2(0, 14));
-
-                        // Action buttons
-                        ImGui::SetCursorPosX(cW - 240);
-                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.20f, 0.24f, 1.0f));
-                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.26f, 0.26f, 0.30f, 1.0f));
-                        if (ImGui::Button("Cancel", ImVec2(100, 38)))
-                            ImGui::CloseCurrentPopup();
+                        // Cancel / Go Live
+                        ImGui::SameLine(cW - 100);
+                        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+                        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.20f, 0.24f, 1));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.26f, 0.26f, 0.30f, 1));
+                        if (ImGui::Button("Cancel", ImVec2(0, 28))) ImGui::CloseCurrentPopup();
                         ImGui::PopStyleColor(2);
-
-                        ImGui::SameLine(0, 12);
+                        ImGui::SameLine(0, 8);
                         ImGui::PushStyleColor(ImGuiCol_Button, accent);
-                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, accentHov);
-                        if (ImGui::Button("Go Live", ImVec2(128, 38))) {
-                            const int fpsOpts[] = { 30, 60, 120 };
-                            const int qualOpts[] = { 40, 70, 95 };
-                            const int resW[] = { 1280, 1920, 2560 };
-                            const int resH[] = { 720, 1080, 1440 };
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, accentH);
+                        if (ImGui::Button("Go Live", ImVec2(80, 28))) {
+                            const int fpsV[] = {30, 60, 120};
+                            const int qualV[] = {40, 70, 95};
+                            const int rW[] = {1280, 1920, 2560};
+                            const int rH[] = {720, 1080, 1440};
                             void* hwnd = nullptr;
-                            if (s_selectedIdx >= 0 && s_selectedIdx < (int)s_windows.size())
-                                hwnd = (void*)s_windows[s_selectedIdx].hwnd;
+                            if (s_tab == 0 && s_selApp >= 0 && s_selApp < (int)s_windows.size())
+                                hwnd = (void*)s_windows[s_selApp].hwnd;
                             if (onStartScreenShare)
-                                onStartScreenShare(fpsOpts[s_shareFps], qualOpts[s_shareQuality],
-                                    resW[s_shareResolution], resH[s_shareResolution], hwnd);
-                            s_needsRefresh = true;
+                                onStartScreenShare(fpsV[s_shareFps], qualV[s_shareQuality], rW[s_shareRes], rH[s_shareRes], hwnd);
+                            s_refresh = true;
                             ImGui::CloseCurrentPopup();
                         }
                         ImGui::PopStyleColor(2);
+                        ImGui::PopStyleVar();
 
                         ImGui::EndPopup();
                     } else {
-                        s_needsRefresh = true;
+                        s_refresh = true;
                     }
 
                     ImGui::PopStyleColor();
-                    ImGui::PopStyleVar(3);
+                    ImGui::PopStyleVar(2);
                 }
 
                 // ====== Games Picker Popup ======

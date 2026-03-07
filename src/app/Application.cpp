@@ -2806,6 +2806,7 @@ namespace TalkMe {
                 LOG_APP("Stopping screen share...");
                 m_DXGICapture.Stop();
                 m_AudioLoopback.Stop();
+                m_WebcamCapture.Stop();
                 m_ScreenShare.iAmSharing = false;
             }
             m_ScreenShare.activeStreams.clear();

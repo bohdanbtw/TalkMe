@@ -119,16 +119,21 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps) {
     pOutputType->SetUINT32(MF_MT_AVG_BITRATE, bitrateKbps * 1000);
     pOutputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
     MFSetAttributeRatio(pOutputType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-    pOutputType->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Main);
+    // Baseline profile for minimal encoding latency (no B-frames, no CABAC)
+    pOutputType->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Base);
 
     hr = m_Encoder->SetOutputType(0, pOutputType, 0);
+    if (FAILED(hr)) {
+        // Fallback to Main profile if Baseline rejected
+        pOutputType->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Main);
+        hr = m_Encoder->SetOutputType(0, pOutputType, 0);
+    }
     pOutputType->Release();
     if (FAILED(hr)) {
         std::fprintf(stderr, "[H264Encoder] SetOutputType failed: 0x%08lx\n", hr);
         return false;
     }
 
-    // Set input type (NV12)
     IMFMediaType* pInputType = nullptr;
     MFCreateMediaType(&pInputType);
     pInputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
@@ -145,13 +150,16 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps) {
         return false;
     }
 
-    // Try low latency mode
+    // Real-time encoding hints for minimum latency
     ICodecAPI* pCodecAPI = nullptr;
     if (SUCCEEDED(m_Encoder->QueryInterface(__uuidof(ICodecAPI), (void**)&pCodecAPI))) {
         VARIANT var;
         var.vt = VT_BOOL;
         var.boolVal = VARIANT_TRUE;
         pCodecAPI->SetValue(&CODECAPI_AVLowLatencyMode, &var);
+        var.vt = VT_UI4;
+        var.ulVal = 0;
+        pCodecAPI->SetValue(&CODECAPI_AVEncMPVDefaultBPictureCount, &var);
         pCodecAPI->Release();
     }
 

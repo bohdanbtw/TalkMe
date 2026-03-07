@@ -29,6 +29,7 @@
 #include "../screen/DXGICapture.h"
 #include "../screen/H264Encoder.h"
 #include "../screen/AudioLoopback.h"
+#include "../screen/WebcamCapture.h"
 #include "../network/KlipyGifProvider.h"
 #include "../ui/GifPickerPanel.h"
 #include "../core/Secrets.h"
@@ -300,6 +301,7 @@ namespace TalkMe {
         DXGICapture m_DXGICapture;
         H264Decoder m_H264Decoder;
         AudioLoopback m_AudioLoopback;
+        WebcamCapture m_WebcamCapture;
 
         std::mutex m_ScreenShareStreamMutex;  // protects m_ScreenShare.activeStreams (capture callback + main/network threads)
 

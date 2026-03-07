@@ -344,9 +344,18 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
                 }
             }
 
+            // Auto-limit encoding resolution for high FPS to keep encoder fast
+            int maxW = m_Settings.maxWidth;
+            int maxH = m_Settings.maxHeight;
+            if (m_Settings.fps > 60 && maxH > 720) {
+                float hfScale = 720.0f / maxH;
+                maxW = (int)(maxW * hfScale);
+                maxH = 720;
+            }
+
             float scale = 1.0f;
-            if (srcW > m_Settings.maxWidth || srcH > m_Settings.maxHeight)
-                scale = (std::min)((float)m_Settings.maxWidth / srcW, (float)m_Settings.maxHeight / srcH);
+            if (srcW > maxW || srcH > maxH)
+                scale = (std::min)((float)maxW / srcW, (float)maxH / srcH);
             int outW = (std::max)(1, (int)(srcW * scale));
             int outH = (std::max)(1, (int)(srcH * scale));
 
@@ -377,7 +386,10 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
                     (int)((ci.ptScreenPos.y - srcY) * scale));
 
             if (!m_UseJpegFallback && !m_H264Encoder.IsInitialized()) {
-                int bitrate = (std::min)(2500, (std::max)(800, 600 + m_Settings.quality * 18));
+                // Scale bitrate with FPS: higher FPS needs more bandwidth for smooth motion
+                int baseBitrate = 600 + m_Settings.quality * 18;
+                int fpsMul = (m_Settings.fps > 60) ? 2 : 1;
+                int bitrate = (std::min)(5000, (std::max)(800, baseBitrate * fpsMul));
                 if (!m_H264Encoder.Initialize(outW, outH, m_Settings.fps, bitrate))
                     m_UseJpegFallback = true;
             }
