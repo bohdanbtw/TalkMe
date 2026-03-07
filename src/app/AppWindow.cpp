@@ -407,6 +407,47 @@ void AppWindow::SetPosition(int x, int y) {
         ::SetWindowPos(m_Hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
 }
 
+void AppWindow::EnterBorderlessFullscreen() {
+    if (!m_Hwnd || m_IsFullscreen) return;
+
+    m_PreFullscreenStyle = static_cast<DWORD>(::GetWindowLongW(m_Hwnd, GWL_STYLE));
+    m_PreFullscreenWasMaximized = (::IsZoomed(m_Hwnd) != FALSE);
+
+    // Restore from maximized first so GetWindowRect gives a meaningful non-inflated rect.
+    if (m_PreFullscreenWasMaximized)
+        ::ShowWindow(m_Hwnd, SW_RESTORE);
+    ::GetWindowRect(m_Hwnd, &m_PreFullscreenRect);
+
+    HMONITOR hMon = ::MonitorFromWindow(m_Hwnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
+    ::GetMonitorInfoW(hMon, &mi);
+    const RECT& r = mi.rcMonitor;
+
+    ::SetWindowLongW(m_Hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+    ::SetWindowPos(m_Hwnd, HWND_TOP,
+        r.left, r.top, r.right - r.left, r.bottom - r.top,
+        SWP_FRAMECHANGED | SWP_NOACTIVATE);
+
+    m_IsFullscreen = true;
+}
+
+void AppWindow::ExitBorderlessFullscreen() {
+    if (!m_Hwnd || !m_IsFullscreen) return;
+
+    ::SetWindowLongW(m_Hwnd, GWL_STYLE, m_PreFullscreenStyle);
+    ::SetWindowPos(m_Hwnd, nullptr,
+        m_PreFullscreenRect.left, m_PreFullscreenRect.top,
+        m_PreFullscreenRect.right  - m_PreFullscreenRect.left,
+        m_PreFullscreenRect.bottom - m_PreFullscreenRect.top,
+        SWP_FRAMECHANGED | SWP_NOZORDER);
+
+    if (m_PreFullscreenWasMaximized)
+        ::ShowWindow(m_Hwnd, SW_MAXIMIZE);
+
+    m_IsFullscreen = false;
+}
+
 void AppWindow::Destroy() {
     if (m_Hwnd) {
         ::RevokeDragDrop(m_Hwnd);
