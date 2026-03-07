@@ -306,7 +306,10 @@ namespace TalkMe::UI::Views {
         std::function<void(std::vector<uint8_t>, std::string)>* onAttachImage,
         std::function<void(const std::string&, int)>* onSendWithAttachedImage,
         const bool* gameMode,
-        const bool* isDraggingFilesOver)
+        const bool* isDraggingFilesOver,
+        int screenShareTargetFps,
+        float screenShareStreamFps,
+        float screenSharePreviewFps)
     {
         const bool gameModeOn = (gameMode && *gameMode);
         const bool showDragOverlay = (isDraggingFilesOver && *isDraggingFilesOver);
@@ -408,9 +411,6 @@ namespace TalkMe::UI::Views {
 
                         // Stream + preview FPS overlay so user can verify both transport and render pacing.
                         {
-                            const int screenShareTargetFps = 0;
-                            const float screenShareStreamFps = 0.0f;
-                            const float screenSharePreviewFps = 0.0f;
                             const float uiFps = ImGui::GetIO().Framerate;
                             const char* streamLabel = (screenShareStreamFps >= 1.0f) ? nullptr : "--";
                             const char* previewLabel = (screenSharePreviewFps >= 1.0f) ? nullptr : "--";

@@ -17,6 +17,7 @@
 #include <random>
 #include <windows.h>
 #include <mmsystem.h>
+#include <intrin.h>
 #include <shlobj.h>
 #include <commdlg.h>
 #include <dxgi1_4.h>
@@ -748,6 +749,10 @@ namespace TalkMe {
     // Voice send path: AudioEngine encode thread -> onMicData -> VoiceSendPacer -> UDP/TCP.
     // -------------------------------------------------------------------------
     void Application::Run() {
+        // Boost Windows timer resolution for accurate sleep-based FPS pacing
+        const bool timerBoosted = (m_TargetFps >= 10 && m_TargetFps <= 1000);
+        if (timerBoosted) ::timeBeginPeriod(1);
+
         try {
             bool done = false;
             HANDLE wakeHandle = static_cast<HANDLE>(m_NetworkWakeEvent);
@@ -772,26 +777,20 @@ namespace TalkMe {
                 if (done || !m_Window.GetHwnd()) break;
 
                 // STEP 2: Wait for quit, network wake, or any input.
-                // Adaptive: INFINITE on login/register; 250ms in voice; MainApp uses 60 fps only when GIFs active, else ~20 fps.
+                // When a target FPS is active, always use waitMs=0 to avoid starving the
+                // render loop (the post-Present pacer handles cadence).
                 DWORD waitMs = INFINITE;
                 if (m_CurrentState == AppState::Login || m_CurrentState == AppState::Login2FA || m_CurrentState == AppState::Register) {
                     waitMs = INFINITE;
+                } else if (m_TargetFps >= 10 && m_TargetFps <= 1000) {
+                    waitMs = 0;
+                } else if (m_GameMode) {
+                    waitMs = 1000;
                 } else if (m_ActiveVoiceChannelId != -1 && m_NetClient.IsConnected()) {
                     waitMs = 250;
                 } else {
-                    // Game mode: 1 FPS for max efficiency (chat-only, minimal CPU).
-                    if (m_GameMode)
-                        waitMs = 1000;
-                    else {
-                        // When target FPS is set, throttle only in the post-Present sleep below.
-                        // Avoid double-wait (message wait + sleep) which would halve the effective FPS.
-                        if (m_TargetFps >= 10 && m_TargetFps <= 1000) {
-                            waitMs = 0;
-                        } else {
-                            const bool hasActiveGifs = TalkMe::TextureManager::Get().HasActiveGifSets() || m_ShowGifPicker;
-                            waitMs = hasActiveGifs ? (DWORD)TalkMe::Limits::kAnimWaitMs : (DWORD)TalkMe::Limits::kIdleWaitMs;
-                        }
-                    }
+                    const bool hasActiveGifs = TalkMe::TextureManager::Get().HasActiveGifSets() || m_ShowGifPicker;
+                    waitMs = hasActiveGifs ? (DWORD)TalkMe::Limits::kAnimWaitMs : (DWORD)TalkMe::Limits::kIdleWaitMs;
                 }
 
                 if (quitHandle) {
@@ -996,12 +995,17 @@ namespace TalkMe {
                     }
                     for (auto& [user, si] : m_ScreenShare.activeStreams) {
                         if (!si.frameUpdated || si.lastFrameData.size() <= 1) continue;
-                        static int s_texLog = 0;
-                        if (s_texLog < 5) {
-                            std::fprintf(stderr, "[Render] Processing frame for '%s': %zu bytes, codec=%d\n",
-                                user.c_str(), si.lastFrameData.size(), si.lastFrameData[0]);
-                            std::fflush(stderr);
-                            s_texLog++;
+
+                        // Dynamic FPS cap for viewers: render at min(source FPS, global FPS).
+                        // Skip throttle until the stream FPS measurement stabilizes (first ~1 s).
+                        const auto now = std::chrono::steady_clock::now();
+                        if (si.streamFps >= 1.0f && si.lastPreviewUpdateTime.time_since_epoch().count() != 0) {
+                            const int sourceFps = static_cast<int>(si.streamFps + 0.5f);
+                            const int globalCap = (std::max)(10, (std::min)(1000, m_TargetFps));
+                            const int viewFps = (std::max)(1, (std::min)(sourceFps, globalCap));
+                            const double minIntervalUs = 1'000'000.0 / viewFps;
+                            const double elapsedUs = std::chrono::duration<double, std::micro>(now - si.lastPreviewUpdateTime).count();
+                            if (elapsedUs < minIntervalUs) continue;
                         }
 
                         uint8_t codec = si.lastFrameData[0];
@@ -1011,13 +1015,7 @@ namespace TalkMe {
 
                         if (codec == 0) {
                             int fw = 0, fh = 0;
-                            auto* srv = tm.LoadFromMemory(texId, payload, payloadSize, &fw, &fh);
-                            static int s_jpegLog = 0;
-                            if (s_jpegLog < 5) {
-                                std::fprintf(stderr, "[Render] JPEG decode: %dx%d, texture=%p, payloadSize=%d\n", fw, fh, (void*)srv, payloadSize);
-                                std::fflush(stderr);
-                                s_jpegLog++;
-                            }
+                            tm.LoadFromMemory(texId, payload, payloadSize, &fw, &fh);
                             if (fw > 0 && fh > 0) { si.frameWidth = fw; si.frameHeight = fh; }
                         } else if (codec == 1) {
                             if (!m_H264Decoder.IsInitialized())
@@ -1030,6 +1028,8 @@ namespace TalkMe {
                             }
                         }
                         si.frameUpdated = false;
+                        si.lastPreviewUpdateTime = now;
+                        UpdateFpsWindow(si.previewFpsWindowStart, si.previewFramesInWindow, si.previewFps, now);
                     }
                 }
 
@@ -1114,17 +1114,33 @@ namespace TalkMe {
                             done = true;
                             break;
                         }
-                        // Cap global UI FPS: sleep until 1/m_TargetFps has passed since last frame
+                        // Cap global UI FPS with deadline-based pacing.
+                        // Uses hybrid sleep+spin to avoid Windows timer granularity issues.
                         if (m_TargetFps >= 10 && m_TargetFps <= 1000) {
-                            auto now = std::chrono::steady_clock::now();
+                            using Clock = std::chrono::steady_clock;
+                            using FpUs = std::chrono::duration<double, std::micro>;
+                            const auto now = Clock::now();
                             if (m_LastRenderTime.time_since_epoch().count() == 0)
                                 m_LastRenderTime = now;
-                            using FpMs = std::chrono::duration<double, std::milli>;
-                            double frameMs = 1000.0 / m_TargetFps;
-                            auto nextFrame = m_LastRenderTime + std::chrono::duration_cast<std::chrono::steady_clock::duration>(FpMs(frameMs));
-                            if (now < nextFrame)
-                                std::this_thread::sleep_for(nextFrame - now);
-                            m_LastRenderTime = std::chrono::steady_clock::now();
+
+                            const double frameUs = 1'000'000.0 / m_TargetFps;
+                            const auto frameInterval = std::chrono::duration_cast<Clock::duration>(FpUs(frameUs));
+                            auto deadline = m_LastRenderTime + frameInterval;
+
+                            if (now < deadline) {
+                                // Sleep the bulk, spin the last ~2 ms for precision
+                                const auto spinThreshold = std::chrono::microseconds(2000);
+                                auto sleepUntil = deadline - spinThreshold;
+                                if (now < sleepUntil)
+                                    std::this_thread::sleep_for(sleepUntil - now);
+                                while (Clock::now() < deadline)
+                                    _mm_pause();
+                            }
+
+                            // Advance deadline; reset if too far behind to avoid burst catch-up
+                            m_LastRenderTime = deadline;
+                            if (Clock::now() - m_LastRenderTime > frameInterval)
+                                m_LastRenderTime = Clock::now();
                         }
                     }
                     catch (const std::exception& e) {
@@ -1147,6 +1163,7 @@ namespace TalkMe {
             LOG_ERROR("Run() unknown exception");
         }
 
+        if (timerBoosted) ::timeEndPeriod(1);
         Cleanup();
     }
 
@@ -2451,20 +2468,20 @@ namespace TalkMe {
                         m_ScreenShare.iAmSharing = true;
                         m_ScreenShare.fps = fps;
                         m_ScreenShare.quality = quality;
-                        CaptureSettings cs;
-                        cs.fps = fps;
-                        cs.quality = quality;
+                        const int effectiveFps = GetEffectiveShareFps();
                         DXGICaptureSettings dxSettings;
-                        dxSettings.fps = fps;
+                        dxSettings.fps = effectiveFps;
                         dxSettings.quality = quality;
                         m_DXGICapture.Start(dxSettings, [this](const std::vector<uint8_t>& data, int w, int h, bool isKey) {
                             m_NetClient.SendRaw(PacketType::Screen_Share_Frame, data);
+                            const auto now = std::chrono::steady_clock::now();
                             auto& si = m_ScreenShare.activeStreams[m_CurrentUser.username];
                             si.username = m_CurrentUser.username;
                             si.lastFrameData = data;
                             si.frameWidth = w;
                             si.frameHeight = h;
                             si.frameUpdated = true;
+                            UpdateFpsWindow(si.streamFpsWindowStart, si.streamFramesInWindow, si.streamFps, now);
                         });
                         // Start system audio loopback capture
                         m_AudioLoopback.Start([this](const float* samples, int frameCount, int sampleRate, int channels) {
@@ -2632,7 +2649,31 @@ namespace TalkMe {
                     &m_OnAttachImage,
                     &m_OnSendWithAttachedImage,
                     &m_GameMode,
-                    &isDraggingFilesOver);
+                    &isDraggingFilesOver,
+                    [this]() -> int {
+                        std::string key = m_ScreenShare.viewingStream;
+                        if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
+                        if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
+                        auto it = m_ScreenShare.activeStreams.find(key);
+                        if (it == m_ScreenShare.activeStreams.end()) return 0;
+                        int src = (std::max)(1, static_cast<int>(it->second.streamFps + 0.5f));
+                        int cap = (std::max)(10, (std::min)(1000, m_TargetFps));
+                        return (std::min)(src, cap);
+                    }(),
+                    [this]() -> float {
+                        std::string key = m_ScreenShare.viewingStream;
+                        if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
+                        if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
+                        auto it = m_ScreenShare.activeStreams.find(key);
+                        return (it != m_ScreenShare.activeStreams.end()) ? it->second.streamFps : 0.0f;
+                    }(),
+                    [this]() -> float {
+                        std::string key = m_ScreenShare.viewingStream;
+                        if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
+                        if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
+                        auto it = m_ScreenShare.activeStreams.find(key);
+                        return (it != m_ScreenShare.activeStreams.end()) ? it->second.previewFps : 0.0f;
+                    }());
             }
         }
         RenderAttachmentViewer();

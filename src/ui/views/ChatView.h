@@ -59,6 +59,9 @@ namespace TalkMe::UI::Views {
         std::function<void(std::vector<uint8_t>, std::string)>* onAttachImage = nullptr,
         std::function<void(const std::string&, int)>* onSendWithAttachedImage = nullptr,
         const bool* gameMode = nullptr,
-        const bool* isDraggingFilesOver = nullptr
+        const bool* isDraggingFilesOver = nullptr,
+        int screenShareTargetFps = 0,
+        float screenShareStreamFps = 0.0f,
+        float screenSharePreviewFps = 0.0f
     );
 }
