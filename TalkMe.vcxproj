@@ -161,6 +161,7 @@
     <ClCompile Include="src\screen\DXGICapture.cpp" />
     <ClCompile Include="src\screen\H264Encoder.cpp" />
     <ClCompile Include="src\screen\AudioLoopback.cpp" />
+    <ClCompile Include="src\screen\WebcamCapture.cpp" />
     <ClCompile Include="src\storage\MessageCacheDb.cpp" />
     <ClCompile Include="src\network\KlipyGifProvider.cpp" />
     <ClCompile Include="src\network\ImageCache.cpp" />
@@ -204,6 +205,7 @@
     <ClInclude Include="src\screen\DXGICapture.h" />
     <ClInclude Include="src\screen\H264Encoder.h" />
     <ClInclude Include="src\screen\AudioLoopback.h" />
+    <ClInclude Include="src\screen\WebcamCapture.h" />
     <ClInclude Include="src\network\KlipyGifProvider.h" />
     <ClInclude Include="src\network\ImageCache.h" />
     <ClInclude Include="src\ui\TextureManager.h" />
