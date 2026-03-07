@@ -37,6 +37,15 @@ public:
     /// Move window to (x, y). Call after Create for relaunch restore. No-op if not created.
     void SetPosition(int x, int y);
 
+    /// Enter borderless full-screen mode on the monitor that contains the window.
+    /// Saves current style/rect so ExitBorderlessFullscreen() can restore them.
+    void EnterBorderlessFullscreen();
+
+    /// Restore the window to its pre-fullscreen style and position.
+    void ExitBorderlessFullscreen();
+
+    bool IsFullscreen() const { return m_IsFullscreen; }
+
     /// Destroy window, unregister class, destroy icons. Safe to call multiple times.
     void Destroy();
 
@@ -69,6 +78,10 @@ private:
     bool m_Foreground = true;
     bool m_TrayIconAdded = false;
     bool m_ReallyClose = false;
+    bool m_IsFullscreen = false;
+    RECT  m_PreFullscreenRect  = {};
+    DWORD m_PreFullscreenStyle = 0;
+    bool  m_PreFullscreenWasMaximized = false;
 };
 
 } // namespace TalkMe

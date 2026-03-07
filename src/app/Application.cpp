@@ -1185,7 +1185,11 @@ namespace TalkMe {
     void Application::RenderUI() {
         ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
         ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+        // Remove window padding in fullscreen stream mode so the stream child truly fills the screen.
+        const bool isFsStream = m_ScreenShare.maximized && m_Window.IsFullscreen();
+        if (isFsStream) ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::Begin("Main", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+        if (isFsStream) ImGui::PopStyleVar();
         if (m_SplashFrames < 3) {
             const ImVec2 ds = ImGui::GetIO().DisplaySize;
             float cx = ds.x * 0.5f, cy = ds.y * 0.5f;
@@ -1218,6 +1222,28 @@ namespace TalkMe {
         else if (m_CurrentState == AppState::Login2FA) RenderLogin2FA();
         else if (m_CurrentState == AppState::Register) RenderRegister();
         else if (m_CurrentState == AppState::MainApp) RenderMainApp();
+
+        // Escape exits the borderless fullscreen stream view.
+        if (m_ScreenShare.maximized && m_Window.IsFullscreen() &&
+            ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            m_ScreenShare.maximized = false;
+
+        // Detect stream maximize toggle and synchronize window mode.
+        {
+            static bool s_prevMaximized = false;
+            // Auto-clear maximized when stream disappears so window restores automatically.
+            if (m_ScreenShare.maximized &&
+                m_ScreenShare.activeStreams.empty() && !m_ScreenShare.iAmSharing)
+                m_ScreenShare.maximized = false;
+
+            if (m_ScreenShare.maximized != s_prevMaximized) {
+                if (m_ScreenShare.maximized)
+                    m_Window.EnterBorderlessFullscreen();
+                else
+                    m_Window.ExitBorderlessFullscreen();
+                s_prevMaximized = m_ScreenShare.maximized;
+            }
+        }
 
         if (wasGifPickerOpen && !m_ShowGifPicker && m_GifPickerPanel)
             m_GifPickerPanel->OnClosed();
@@ -1900,6 +1926,66 @@ namespace TalkMe {
     }
 
     void Application::RenderMainApp() {
+        // True borderless fullscreen stream view: skip sidebar entirely and render
+        // the stream at full window resolution with only an Exit button overlay.
+        if (m_ScreenShare.maximized && m_Window.IsFullscreen()) {
+            const ImVec2 ds = ImGui::GetIO().DisplaySize;
+
+            // Resolve current stream.
+            std::string fsKey = m_ScreenShare.viewingStream;
+            if (fsKey.empty() && m_ScreenShare.iAmSharing) fsKey = m_CurrentUser.username;
+            if (fsKey.empty() && !m_ScreenShare.activeStreams.empty())
+                fsKey = m_ScreenShare.activeStreams.begin()->first;
+
+            auto* fsTex = fsKey.empty()
+                ? nullptr
+                : TalkMe::TextureManager::Get().GetTexture("screenshare_" + fsKey);
+            auto fsIt = fsKey.empty()
+                ? m_ScreenShare.activeStreams.end()
+                : m_ScreenShare.activeStreams.find(fsKey);
+            const int fsW = (fsIt != m_ScreenShare.activeStreams.end()) ? fsIt->second.frameWidth  : 0;
+            const int fsH = (fsIt != m_ScreenShare.activeStreams.end()) ? fsIt->second.frameHeight : 0;
+
+            // Full-screen child fills the whole "Main" window (no padding so stream reaches edges).
+            ImGui::SetCursorPos(ImVec2(0.0f, 0.0f));
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.02f, 0.02f, 0.03f, 1.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            ImGui::BeginChild("FSStreamView", ds, false,
+                ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+            ImGui::PopStyleVar();
+
+            if (fsTex && fsW > 0 && fsH > 0) {
+                const float aspect = (float)fsW / (float)fsH;
+                float iW = ds.x, iH = iW / aspect;
+                if (iH > ds.y) { iH = ds.y; iW = iH * aspect; }
+                const float pX = (ds.x - iW) * 0.5f;
+                const float pY = (ds.y - iH) * 0.5f;
+                ImGui::SetCursorPos(ImVec2(pX, pY));
+                ImGui::Image((ImTextureID)(void*)fsTex, ImVec2(iW, iH));
+            } else {
+                const char* msg = "Waiting for stream...";
+                ImVec2 msz = ImGui::CalcTextSize(msg);
+                ImGui::SetCursorPos(ImVec2((ds.x - msz.x) * 0.5f, ds.y * 0.5f - 12.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.7f, 1.0f, 1.0f));
+                ImGui::Text("%s", msg);
+                ImGui::PopStyleColor();
+            }
+
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+
+            // Exit button rendered after EndChild so it is always on top.
+            constexpr float kBtnW = 90.0f, kBtnH = 30.0f, kMargin = 16.0f;
+            ImGui::SetCursorPos(ImVec2(ds.x - kBtnW - kMargin, kMargin));
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.10f, 0.10f, 0.12f, 0.88f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.22f, 0.26f, 0.95f));
+            ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(1.0f,  1.0f,  1.0f,  1.0f));
+            if (ImGui::Button("Exit##fs", ImVec2(kBtnW, kBtnH)))
+                m_ScreenShare.maximized = false;
+            ImGui::PopStyleColor(3);
+            return;
+        }
+
         UI::Views::VoiceInfoData vi;
         vi.serverVersion = m_ServerVersion;
         vi.voicePath = m_UseUdpVoice ? "UDP" : "TCP";

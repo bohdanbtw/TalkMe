@@ -394,56 +394,53 @@ namespace TalkMe::UI::Views {
                         actualViewH -= ImGui::GetTextLineHeightWithSpacing() + 4;
                     }
 
-                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.05f, 0.05f, 0.07f, 1.0f));
-                    ImGui::BeginChild("ScreenViewport", ImVec2(areaW, actualViewH), false);
-
-                    if (screenShareTexture && screenShareW > 0 && screenShareH > 0) {
+                    // Pre-compute stream image layout before entering child so the
+                    // Fullscreen button can be rendered AFTER EndChild (correct Z-order).
+                    float fitW = 0.0f, fitH = 0.0f, padX = 0.0f, padY = 0.0f;
+                    bool hasStream = (screenShareTexture && screenShareW > 0 && screenShareH > 0);
+                    if (hasStream) {
                         float viewW = areaW - 10.0f;
                         float viewH = actualViewH - 10.0f;
                         float aspect = (float)screenShareW / (float)screenShareH;
-                        float fitW = viewW;
-                        float fitH = fitW / aspect;
+                        fitW = viewW;
+                        fitH = fitW / aspect;
                         if (fitH > viewH) { fitH = viewH; fitW = fitH * aspect; }
-                        float padX = (areaW - fitW) * 0.5f;
-                        float padY = (actualViewH - fitH) * 0.5f;
+                        padX = (areaW - fitW) * 0.5f;
+                        padY = (actualViewH - fitH) * 0.5f;
+                    }
+
+                    // Track viewport top in ChatArea coords for the button overlay below.
+                    float viewportTopY = ImGui::GetCursorPosY();
+
+                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.05f, 0.05f, 0.07f, 1.0f));
+                    ImGui::BeginChild("ScreenViewport", ImVec2(areaW, actualViewH), false,
+                        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+                    if (hasStream) {
                         ImGui::SetCursorPos(ImVec2(padX, padY));
                         ImGui::Image((ImTextureID)screenShareTexture, ImVec2(fitW, fitH));
 
-                        // Stream + preview FPS overlay so user can verify both transport and render pacing.
+                        // FPS stats overlay pinned to the top-left corner of the stream image.
+                        ImGui::SetCursorPos(ImVec2(padX + 10.0f, padY + 10.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 0.9f));
                         {
                             const float uiFps = ImGui::GetIO().Framerate;
-                            const char* streamLabel = (screenShareStreamFps >= 1.0f) ? nullptr : "--";
-                            const char* previewLabel = (screenSharePreviewFps >= 1.0f) ? nullptr : "--";
-                            ImGui::SetCursorPos(ImVec2(padX + 10.0f, padY + 10.0f));
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 0.9f));
-                            if (streamLabel && previewLabel) {
+                            const bool hasStream_ = (screenShareStreamFps >= 1.0f);
+                            const bool hasPreview  = (screenSharePreviewFps >= 1.0f);
+                            if (!hasStream_ && !hasPreview)
                                 ImGui::Text("Stream: -- | Preview: -- (target %d) | UI: %.0f fps",
                                     screenShareTargetFps, uiFps);
-                            } else if (streamLabel) {
+                            else if (!hasStream_)
                                 ImGui::Text("Stream: -- | Preview: %.0f fps (target %d) | UI: %.0f fps",
                                     screenSharePreviewFps, screenShareTargetFps, uiFps);
-                            } else if (previewLabel) {
+                            else if (!hasPreview)
                                 ImGui::Text("Stream: %.0f fps | Preview: -- (target %d) | UI: %.0f fps",
                                     screenShareStreamFps, screenShareTargetFps, uiFps);
-                            } else {
+                            else
                                 ImGui::Text("Stream: %.0f fps | Preview: %.0f fps (target %d) | UI: %.0f fps",
                                     screenShareStreamFps, screenSharePreviewFps, screenShareTargetFps, uiFps);
-                            }
-                            ImGui::PopStyleColor();
                         }
-
-                        // Maximize/minimize button overlaid on bottom-right of the stream image
-                        if (canMaximize) {
-                            float btnX = padX + fitW - 80;
-                            float btnY = padY + fitH - 30;
-                            ImGui::SetCursorPos(ImVec2(btnX, btnY));
-                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.6f));
-                            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.2f, 0.2f, 0.8f));
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 0.9f));
-                            if (ImGui::Button(isMaximized ? "Exit" : "Fullscreen", ImVec2(72, 24)))
-                                *streamMaximized = !*streamMaximized;
-                            ImGui::PopStyleColor(3);
-                        }
+                        ImGui::PopStyleColor();
                     }
                     else {
                         float phH = actualViewH * 0.4f;
@@ -467,7 +464,23 @@ namespace TalkMe::UI::Views {
                     ImGui::EndChild();
                     ImGui::PopStyleColor();
 
-                    // When maximized: skip everything below (users, buttons)
+                    // Render the Fullscreen/Exit button AFTER EndChild so it is drawn on top
+                    // of the viewport contents (correct Z-order, no clipping by child rect).
+                    if (canMaximize && hasStream) {
+                        ImVec2 savedCursor = ImGui::GetCursorPos();
+                        float btnX = padX + fitW - 80.0f;
+                        float btnY = viewportTopY + padY + fitH - 30.0f;
+                        ImGui::SetCursorPos(ImVec2(btnX, btnY));
+                        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.0f, 0.0f, 0.0f, 0.65f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.2f, 0.2f, 0.2f, 0.85f));
+                        ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(1.0f, 1.0f, 1.0f, 0.95f));
+                        if (ImGui::Button(isMaximized ? "Exit" : "Fullscreen", ImVec2(80, 26)))
+                            *streamMaximized = !*streamMaximized;
+                        ImGui::PopStyleColor(3);
+                        ImGui::SetCursorPos(savedCursor);
+                    }
+
+                    // When maximized: skip everything below (users, action bar).
                     if (isMaximized) {
                         ImGui::EndChild(); // ChatArea
                         ImGui::PopStyleColor();
