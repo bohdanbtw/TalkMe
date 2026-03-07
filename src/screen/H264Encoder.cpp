@@ -158,6 +158,26 @@ bool H264Encoder::InitializeGPUConversion(ID3D11Device* device) {
         return false;
     }
 
+    // Pre-create staging textures for readback (avoid per-frame CreateTexture2D)
+    D3D11_TEXTURE2D_DESC yStagingDesc = {};
+    yStagingDesc.Width = m_Width;
+    yStagingDesc.Height = m_Height;
+    yStagingDesc.MipLevels = 1;
+    yStagingDesc.ArraySize = 1;
+    yStagingDesc.Format = DXGI_FORMAT_R8_UNORM;
+    yStagingDesc.SampleDesc.Count = 1;
+    yStagingDesc.Usage = D3D11_USAGE_STAGING;
+    yStagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    hr = device->CreateTexture2D(&yStagingDesc, nullptr, &m_YStaging);
+    if (FAILED(hr)) return false;
+
+    D3D11_TEXTURE2D_DESC uvStagingDesc = yStagingDesc;
+    uvStagingDesc.Width = m_Width / 2;
+    uvStagingDesc.Height = m_Height / 2;
+    uvStagingDesc.Format = DXGI_FORMAT_R8G8_UNORM;
+    hr = device->CreateTexture2D(&uvStagingDesc, nullptr, &m_UVStaging);
+    if (FAILED(hr)) return false;
+
     std::fprintf(stderr, "[H264Encoder] GPU conversion initialized successfully\n");
     m_GPUConversionReady = true;
     return true;
@@ -167,22 +187,13 @@ bool H264Encoder::ConvertBGRAviaGPU(const uint8_t* bgraData, int width, int heig
                                      uint8_t*& outNV12, DWORD& outNV12Size) {
     if (!m_GPUConversionReady || !m_D3DContext) return false;
 
-    // Update input texture with BGRA data
-    D3D11_MAPPED_SUBRESOURCE mapped = {};
-    HRESULT hr = m_D3DContext->Map(m_BGRATexture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-    if (FAILED(hr)) return false;
-
-    uint8_t* pDest = (uint8_t*)mapped.pData;
-    const uint8_t* pSrc = bgraData;
-    for (int y = 0; y < height; y++) {
-        memcpy(pDest + y * mapped.RowPitch, pSrc + y * width * 4, width * 4);
-    }
-    m_D3DContext->Unmap(m_BGRATexture, 0);
+    // Upload BGRA via UpdateSubresource (DEFAULT texture can't be mapped)
+    D3D11_BOX srcBox = { 0, 0, 0, (UINT)width, (UINT)height, 1 };
+    m_D3DContext->UpdateSubresource(m_BGRATexture, 0, &srcBox, bgraData, width * 4, 0);
 
     // Update constant buffer
     D3D11_MAPPED_SUBRESOURCE cbMapped = {};
-    hr = m_D3DContext->Map(m_ConversionParamsCB, 0, D3D11_MAP_WRITE_DISCARD, 0, &cbMapped);
-    if (SUCCEEDED(hr)) {
+    if (SUCCEEDED(m_D3DContext->Map(m_ConversionParamsCB, 0, D3D11_MAP_WRITE_DISCARD, 0, &cbMapped))) {
         uint32_t* pCB = (uint32_t*)cbMapped.pData;
         pCB[0] = width;
         pCB[1] = height;
@@ -195,82 +206,40 @@ bool H264Encoder::ConvertBGRAviaGPU(const uint8_t* bgraData, int width, int heig
     m_D3DContext->CSSetShaderResources(0, 1, &m_BGRASRV);
     m_D3DContext->CSSetConstantBuffers(0, 1, &m_ConversionParamsCB);
     m_D3DContext->CSSetShader(m_ColorConversionShader, nullptr, 0);
+    m_D3DContext->Dispatch((width + 15) / 16, (height + 15) / 16, 1);
 
-    // Dispatch threads (16x16 per group)
-    UINT groupsX = (width + 15) / 16;
-    UINT groupsY = (height + 15) / 16;
-    m_D3DContext->Dispatch(groupsX, groupsY, 1);
-
-    // Reset UAVs
     ID3D11UnorderedAccessView* nullUAVs[] = { nullptr, nullptr };
     m_D3DContext->CSSetUnorderedAccessViews(0, 2, nullUAVs, nullptr);
 
-    // Read back NV12 data
+    // Read back NV12 using cached staging textures
     outNV12Size = width * height * 3 / 2;
     outNV12 = new uint8_t[outNV12Size];
 
-    // Copy Y plane
-    D3D11_TEXTURE2D_DESC desc = {};
-    m_YTexture->GetDesc(&desc);
-    D3D11_BOX yBox = { 0, 0, 0, width, height, 1 };
-
-    ID3D11Texture2D* pStaging = nullptr;
-    D3D11_TEXTURE2D_DESC stagingDesc = desc;
-    stagingDesc.Usage = D3D11_USAGE_STAGING;
-    stagingDesc.BindFlags = 0;
-    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    hr = m_D3DDevice->CreateTexture2D(&stagingDesc, nullptr, &pStaging);
-    if (FAILED(hr)) {
-        delete[] outNV12;
-        return false;
-    }
-
-    m_D3DContext->CopySubresourceRegion(pStaging, 0, 0, 0, 0, m_YTexture, 0, &yBox);
-
+    // Y plane readback
+    m_D3DContext->CopyResource(m_YStaging, m_YTexture);
     D3D11_MAPPED_SUBRESOURCE mappedY = {};
-    hr = m_D3DContext->Map(pStaging, 0, D3D11_MAP_READ, 0, &mappedY);
-    if (SUCCEEDED(hr)) {
-        for (int y = 0; y < height; y++) {
-            memcpy(outNV12 + y * width,
-                   (uint8_t*)mappedY.pData + y * mappedY.RowPitch,
-                   width);
-        }
-        m_D3DContext->Unmap(pStaging, 0);
-    }
-    pStaging->Release();
-
-    // Copy UV plane
-    m_UVTexture->GetDesc(&desc);
-    stagingDesc = desc;
-    stagingDesc.Usage = D3D11_USAGE_STAGING;
-    stagingDesc.BindFlags = 0;
-    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    hr = m_D3DDevice->CreateTexture2D(&stagingDesc, nullptr, &pStaging);
-    if (FAILED(hr)) {
-        delete[] outNV12;
-        return false;
+    if (SUCCEEDED(m_D3DContext->Map(m_YStaging, 0, D3D11_MAP_READ, 0, &mappedY))) {
+        for (int y = 0; y < height; y++)
+            memcpy(outNV12 + y * width, (uint8_t*)mappedY.pData + y * mappedY.RowPitch, width);
+        m_D3DContext->Unmap(m_YStaging, 0);
     }
 
-    D3D11_BOX uvBox = { 0, 0, 0, width / 2, height / 2, 1 };
-    m_D3DContext->CopySubresourceRegion(pStaging, 0, 0, 0, 0, m_UVTexture, 0, &uvBox);
-
+    // UV plane readback
+    m_D3DContext->CopyResource(m_UVStaging, m_UVTexture);
     D3D11_MAPPED_SUBRESOURCE mappedUV = {};
-    hr = m_D3DContext->Map(pStaging, 0, D3D11_MAP_READ, 0, &mappedUV);
-    if (SUCCEEDED(hr)) {
+    if (SUCCEEDED(m_D3DContext->Map(m_UVStaging, 0, D3D11_MAP_READ, 0, &mappedUV))) {
         uint8_t* pUV = outNV12 + width * height;
-        for (int y = 0; y < height / 2; y++) {
-            memcpy(pUV + y * width,
-                   (uint8_t*)mappedUV.pData + y * mappedUV.RowPitch,
-                   width);
-        }
-        m_D3DContext->Unmap(pStaging, 0);
+        for (int y = 0; y < height / 2; y++)
+            memcpy(pUV + y * width, (uint8_t*)mappedUV.pData + y * mappedUV.RowPitch, width);
+        m_D3DContext->Unmap(m_UVStaging, 0);
     }
-    pStaging->Release();
 
     return true;
 }
 
 void H264Encoder::ShutdownGPUResources() {
+    if (m_YStaging) { m_YStaging->Release(); m_YStaging = nullptr; }
+    if (m_UVStaging) { m_UVStaging->Release(); m_UVStaging = nullptr; }
     if (m_ColorConversionShader) { m_ColorConversionShader->Release(); m_ColorConversionShader = nullptr; }
     if (m_ConversionParamsCB) { m_ConversionParamsCB->Release(); m_ConversionParamsCB = nullptr; }
     if (m_BGRASRV) { m_BGRASRV->Release(); m_BGRASRV = nullptr; }
@@ -280,6 +249,7 @@ void H264Encoder::ShutdownGPUResources() {
     if (m_UVUAV) { m_UVUAV->Release(); m_UVUAV = nullptr; }
     if (m_UVTexture) { m_UVTexture->Release(); m_UVTexture = nullptr; }
     if (m_D3DContext) { m_D3DContext->Release(); m_D3DContext = nullptr; }
+    m_GPUConversionReady = false;
 }
 
 bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps, ID3D11Device* d3dDevice) {
@@ -655,26 +625,29 @@ bool H264Decoder::Decode(const uint8_t* h264Data, int dataSize, std::vector<uint
             outWidth = m_Width;
             outHeight = m_Height;
 
-            // Convert NV12 to RGBA
+            // NV12 to RGBA using fixed-point integer math (BT.601)
             int ySize = m_Width * m_Height;
             if ((int)len >= ySize * 3 / 2) {
-                rgbaOut.resize(m_Width * m_Height * 4);
+                rgbaOut.resize(ySize * 4);
                 const uint8_t* Y = raw;
                 const uint8_t* UV = raw + ySize;
+                uint8_t* dst = rgbaOut.data();
                 for (int y = 0; y < m_Height; y++) {
+                    const uint8_t* yRow = Y + y * m_Width;
+                    const uint8_t* uvRow = UV + (y / 2) * m_Width;
+                    uint8_t* dstRow = dst + y * m_Width * 4;
                     for (int x = 0; x < m_Width; x++) {
-                        int yVal = Y[y * m_Width + x];
-                        int uvIdx = (y / 2) * m_Width + (x / 2) * 2;
-                        int u = UV[uvIdx] - 128;
-                        int v = UV[uvIdx + 1] - 128;
-                        int r = (std::min)(255, (std::max)(0, (int)(yVal + 1.402f * v)));
-                        int g = (std::min)(255, (std::max)(0, (int)(yVal - 0.344f * u - 0.714f * v)));
-                        int b = (std::min)(255, (std::max)(0, (int)(yVal + 1.772f * u)));
-                        int dstIdx = (y * m_Width + x) * 4;
-                        rgbaOut[dstIdx + 0] = (uint8_t)r;
-                        rgbaOut[dstIdx + 1] = (uint8_t)g;
-                        rgbaOut[dstIdx + 2] = (uint8_t)b;
-                        rgbaOut[dstIdx + 3] = 255;
+                        int C = (int)yRow[x] - 16;
+                        int uvBase = (x & ~1);
+                        int D = (int)uvRow[uvBase] - 128;
+                        int E = (int)uvRow[uvBase + 1] - 128;
+                        int r = (298 * C + 409 * E + 128) >> 8;
+                        int g = (298 * C - 100 * D - 208 * E + 128) >> 8;
+                        int b = (298 * C + 516 * D + 128) >> 8;
+                        dstRow[x * 4 + 0] = (uint8_t)((unsigned)r <= 255 ? r : (r < 0 ? 0 : 255));
+                        dstRow[x * 4 + 1] = (uint8_t)((unsigned)g <= 255 ? g : (g < 0 ? 0 : 255));
+                        dstRow[x * 4 + 2] = (uint8_t)((unsigned)b <= 255 ? b : (b < 0 ? 0 : 255));
+                        dstRow[x * 4 + 3] = 255;
                     }
                 }
                 decoded = true;
