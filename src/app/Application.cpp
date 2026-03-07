@@ -369,6 +369,7 @@ namespace TalkMe {
     }
     ConfigManager::Get().LoadKeybinds(m_KeyMuteMic, m_KeyDeafen);
     ConfigManager::Get().LoadOverlay(m_OverlayEnabled, m_OverlayCorner, m_OverlayOpacity);
+    m_TargetFps = ConfigManager::Get().LoadTargetFps(60);
     m_GameMode = ConfigManager::Get().LoadGameMode(false);
     m_NoiseMode = ConfigManager::Get().LoadNoiseSuppressionMode(1);
     {
@@ -782,8 +783,14 @@ namespace TalkMe {
                     if (m_GameMode)
                         waitMs = 1000;
                     else {
-                        const bool hasActiveGifs = TalkMe::TextureManager::Get().HasActiveGifSets() || m_ShowGifPicker;
-                        waitMs = hasActiveGifs ? (DWORD)TalkMe::Limits::kAnimWaitMs : (DWORD)TalkMe::Limits::kIdleWaitMs;
+                        // When target FPS is set, throttle only in the post-Present sleep below.
+                        // Avoid double-wait (message wait + sleep) which would halve the effective FPS.
+                        if (m_TargetFps >= 10 && m_TargetFps <= 1000) {
+                            waitMs = 0;
+                        } else {
+                            const bool hasActiveGifs = TalkMe::TextureManager::Get().HasActiveGifSets() || m_ShowGifPicker;
+                            waitMs = hasActiveGifs ? (DWORD)TalkMe::Limits::kAnimWaitMs : (DWORD)TalkMe::Limits::kIdleWaitMs;
+                        }
                     }
                 }
 
@@ -1107,6 +1114,18 @@ namespace TalkMe {
                             done = true;
                             break;
                         }
+                        // Cap global UI FPS: sleep until 1/m_TargetFps has passed since last frame
+                        if (m_TargetFps >= 10 && m_TargetFps <= 1000) {
+                            auto now = std::chrono::steady_clock::now();
+                            if (m_LastRenderTime.time_since_epoch().count() == 0)
+                                m_LastRenderTime = now;
+                            using FpMs = std::chrono::duration<double, std::milli>;
+                            double frameMs = 1000.0 / m_TargetFps;
+                            auto nextFrame = m_LastRenderTime + std::chrono::duration_cast<std::chrono::steady_clock::duration>(FpMs(frameMs));
+                            if (now < nextFrame)
+                                std::this_thread::sleep_for(nextFrame - now);
+                            m_LastRenderTime = std::chrono::steady_clock::now();
+                        }
                     }
                     catch (const std::exception& e) {
                         LOG_ERROR(std::string("Rendering exception: ") + e.what());
@@ -1132,13 +1151,12 @@ namespace TalkMe {
     }
 
     void Application::RenderUI() {
-        const ImGuiViewport* viewport = ImGui::GetMainViewport(); ImGui::SetNextWindowPos(viewport->WorkPos); ImGui::SetNextWindowSize(viewport->WorkSize);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f); ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f); ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-        ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar;
-        ImGui::Begin("MainShell", nullptr, flags);
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+        ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+        ImGui::Begin("Main", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
         if (m_SplashFrames < 3) {
-            float cx = viewport->WorkPos.x + viewport->WorkSize.x * 0.5f;
-            float cy = viewport->WorkPos.y + viewport->WorkSize.y * 0.5f;
+            const ImVec2 ds = ImGui::GetIO().DisplaySize;
+            float cx = ds.x * 0.5f, cy = ds.y * 0.5f;
             float r = 24.0f;
             float t = (float)ImGui::GetTime();
             ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -1149,7 +1167,7 @@ namespace TalkMe {
             m_SplashFrames++;
             if (m_SplashFrames == 3)
                 m_Window.Show(SW_MAXIMIZE);
-            ImGui::End(); ImGui::PopStyleVar(3);
+            ImGui::End();
             return;
         }
         if (ImGui::IsKeyPressed(ImGuiKey_F1))
@@ -1169,11 +1187,10 @@ namespace TalkMe {
         else if (m_CurrentState == AppState::Register) RenderRegister();
         else if (m_CurrentState == AppState::MainApp) RenderMainApp();
 
-        // When panel is closed (by F4, click outside, or popup close), nuke picker RAM so reopen shows skeletons.
         if (wasGifPickerOpen && !m_ShowGifPicker && m_GifPickerPanel)
             m_GifPickerPanel->OnClosed();
 
-        ImGui::End(); ImGui::PopStyleVar(3);
+        ImGui::End();
 
         // Friends panel removed — now rendered as a full tab (like Settings)
         if (false) {
@@ -1841,6 +1858,15 @@ namespace TalkMe {
 
     void Application::RenderRegister() { UI::Views::RenderRegister(m_NetClient, m_CurrentState, m_EmailBuf, m_UsernameBuf, m_PasswordBuf, m_PasswordRepeatBuf, m_StatusMessage, m_ServerIP, m_ServerPort, &m_LoginConnectInProgress); }
 
+    void Application::RecordSharePerfSample(const char* metric, double ms) {
+        if (!metric) return;
+        std::lock_guard<std::mutex> lock(m_SharePerfMutex);
+        SharePerfMetric& m = m_SharePerfMetrics[metric];
+        m.totalMs += ms;
+        m.maxMs = (std::max)(m.maxMs, ms);
+        m.count++;
+    }
+
     void Application::RenderMainApp() {
         UI::Views::VoiceInfoData vi;
         vi.serverVersion = m_ServerVersion;
@@ -2018,6 +2044,12 @@ namespace TalkMe {
             sctx.onGameModeChange = [this](bool enabled) {
                 ConfigManager::Get().SaveGameMode(enabled);
                 m_PendingRelaunch = true;  // Invisible relaunch so new process runs with the new setting
+            };
+            sctx.targetFps = &m_TargetFps;
+            sctx.onTargetFpsChange = [this](int fps) {
+                m_TargetFps = (std::max)(10, (std::min)(1000, fps));
+                ConfigManager::Get().SaveTargetFps(m_TargetFps);
+                m_PendingRelaunch = true;
             };
             UI::Views::RenderSettings(sctx);
         }

@@ -441,6 +441,60 @@ namespace TalkMe::UI::Views {
     }
 
     static void RenderPerformanceTab(SettingsContext& ctx) {
+        ImGui::Text("Target FPS");
+        ImGui::TextDisabled("Cap the global UI frame rate. Choose a value, then press Apply; the app will restart to apply.");
+        ImGui::Dummy(ImVec2(0, 8));
+        if (ctx.targetFps) {
+            static const char* fpsLabels[] = { "30", "60", "120", "Manual" };
+            static const int fpsValues[] = { 30, 60, 120, -1 };  // -1 = use manual value
+            const int n = (int)(sizeof(fpsValues) / sizeof(fpsValues[0]));
+            static int s_preset = -1;
+            static int s_manualFps = 60;
+            int current = *ctx.targetFps;
+            if (s_preset < 0) {
+                s_manualFps = (std::max)(10, (std::min)(1000, current));
+                s_preset = 3;
+                for (int i = 0; i < 3; i++)
+                    if (fpsValues[i] == current) { s_preset = i; break; }
+            }
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, Styles::ButtonSubtle());
+            ImGui::PushItemWidth(220);
+            if (ImGui::BeginCombo("##target_fps", fpsLabels[s_preset])) {
+                for (int i = 0; i < n; i++) {
+                    bool sel = (s_preset == i);
+                    if (ImGui::Selectable(fpsLabels[i], sel)) {
+                        s_preset = i;
+                        if (i == 3) s_manualFps = (std::max)(10, (std::min)(1000, *ctx.targetFps));
+                    }
+                    if (sel) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::PopItemWidth();
+            ImGui::PopStyleColor();
+            if (s_preset == 3) {
+                ImGui::Dummy(ImVec2(0, 8));
+                ImGui::Text("FPS value (10-1000)");
+                ImGui::SetNextItemWidth(220);
+                int manual = s_manualFps;
+                if (ImGui::InputInt("##manual_fps", &manual, 10, 100, ImGuiInputTextFlags_EnterReturnsTrue))
+                    manual = (std::max)(10, (std::min)(1000, manual));
+                s_manualFps = (std::max)(10, (std::min)(1000, manual));
+            }
+            ImGui::Dummy(ImVec2(0, 8));
+            int applyFps = (s_preset >= 0 && s_preset <= 2) ? fpsValues[s_preset] : s_manualFps;
+            bool sameAsCurrent = (applyFps == *ctx.targetFps);
+            ImGui::BeginDisabled(sameAsCurrent);
+            if (ImGui::Button("Apply", ImVec2(100, 0))) {
+                *ctx.targetFps = applyFps;
+                if (ctx.onTargetFpsChange) ctx.onTargetFpsChange(applyFps);
+            }
+            ImGui::EndDisabled();
+            if (sameAsCurrent)
+                ImGui::SameLine(0, 8), ImGui::TextDisabled("(current)");
+            ImGui::Dummy(ImVec2(0, 24));
+        }
+
         ImGui::Text("Game Mode");
         ImGui::TextDisabled("Minimize resources for chat-only use while gaming");
         ImGui::Dummy(ImVec2(0, 16));

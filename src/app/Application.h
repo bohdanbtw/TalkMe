@@ -11,6 +11,8 @@
 #include <queue>
 #include <thread>
 #include <unordered_set>
+#include <unordered_map>
+#include <condition_variable>
 #include "AppSounds.h"
 #include "AppWindow.h"
 #include "AppGraphics.h"
@@ -112,6 +114,16 @@ namespace TalkMe {
         void RenderRegister();
         void RenderMainApp();
 
+        void StartScreenShareProcess(int fps, int quality, int width, int height);
+        void StopScreenShareProcess();
+        int GetEffectiveShareFps() const;
+        static void UpdateFpsWindow(std::chrono::steady_clock::time_point& windowStart,
+                                    uint32_t& framesInWindow,
+                                    float& outFps,
+                                    const std::chrono::steady_clock::time_point& now);
+        void RecordSharePerfSample(const char* metric, double ms);
+        void FlushSharePerfIfNeeded();
+
     private:
         std::string m_ServerIP;       // from secret/secrets "server_ip", or set in Settings
         int m_ServerPort = 5555;
@@ -192,6 +204,8 @@ namespace TalkMe {
         int m_EmotionsPanelTab = 2;       // 0=Emoji, 1=Stickers, 2=GIFs
         char m_StatusBuf[128] = "";
         bool m_GameMode = false;          // When true: chat-only, no images/GIFs/screen share, max performance
+        int m_TargetFps = 60;             // App render target in FPS (10..1000), configurable in Settings > Performance
+        std::chrono::steady_clock::time_point m_LastRenderTime;  // For FPS cap in Run()
         bool m_PendingRelaunch = false;   // When true: next frame write rect, spawn --relaunch-instead, exit
 
         struct NotificationSettings {
@@ -287,6 +301,8 @@ namespace TalkMe {
         H264Decoder m_H264Decoder;
         AudioLoopback m_AudioLoopback;
 
+        std::mutex m_ScreenShareStreamMutex;  // protects m_ScreenShare.activeStreams (capture callback + main/network threads)
+
         struct CinemaQueueItem {
             std::string url;
             std::string title;
@@ -312,6 +328,16 @@ namespace TalkMe {
             int frameWidth = 0;
             int frameHeight = 0;
             bool frameUpdated = false;
+            // Incoming encoded stream FPS meter (capture/network arrival rate).
+            std::chrono::steady_clock::time_point streamFpsWindowStart{};
+            uint32_t streamFramesInWindow = 0;
+            float streamFps = 0.0f;
+            // Target FPS throttle for preview texture uploads.
+            std::chrono::steady_clock::time_point lastPreviewUpdateTime{};
+            // Preview FPS meter (counts actual texture uploads in Render loop).
+            std::chrono::steady_clock::time_point previewFpsWindowStart{};
+            uint32_t previewFramesInWindow = 0;
+            float previewFps = 0.0f;
         };
 
         struct ScreenShareState {
@@ -322,6 +348,18 @@ namespace TalkMe {
             std::string viewingStream;
             bool maximized = false;
         } m_ScreenShare;
+
+        bool m_SharePerfEnabled = false;
+        bool m_AdaptiveSharePreview = true;
+        struct SharePerfMetric {
+            double totalMs = 0.0;
+            double maxMs = 0.0;
+            uint32_t count = 0;
+            std::deque<double> samples;
+        };
+        std::mutex m_SharePerfMutex;
+        std::unordered_map<std::string, SharePerfMetric> m_SharePerfMetrics;
+        std::chrono::steady_clock::time_point m_SharePerfLastFlush{};
 
         struct FriendEntry { std::string username; std::string status; std::string direction; };
         std::vector<FriendEntry> m_Friends;

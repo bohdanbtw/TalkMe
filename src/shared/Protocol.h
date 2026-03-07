@@ -205,7 +205,8 @@ namespace TalkMe {
         Game_State,          // Server -> Client: game state update (board, turn, result)
 
         // --- PAGINATION ---
-        Message_History_Page,// Client -> Server: request older messages (before_id)
+        Message_History_Page,   // Client -> Server: request older messages (before_id)
+        Message_History_Around, // Client -> Server: request messages around anchor (cid, anchor, before, after)
 
         // --- EPHEMERAL ---
         Set_Disappearing,    // Client -> Server: set disappearing duration for channel

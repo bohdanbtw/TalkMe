@@ -178,6 +178,23 @@ namespace TalkMe {
             return enabled;
         }
 
+        void SaveTargetFps(int fps) {
+            std::string dir = GetConfigDir();
+            CreateDirectoryA(dir.c_str(), NULL);
+            std::ofstream f(dir + "\\target_fps.cfg", std::ios::trunc);
+            if (f.is_open()) f << fps;
+        }
+
+        int LoadTargetFps(int defaultFps = 60) {
+            std::ifstream f(GetConfigDir() + "\\target_fps.cfg");
+            int fps = defaultFps;
+            if (f.is_open()) {
+                f >> fps;
+                if (fps < 10 || fps > 1000) fps = defaultFps;
+            }
+            return fps;
+        }
+
         /// Returns persistent device ID (16-char hex). Generates and saves to config if missing.
         std::string GetDeviceId() {
             std::string path = GetConfigDirectory() + "\\device_id.cfg";

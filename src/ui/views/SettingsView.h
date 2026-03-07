@@ -54,6 +54,8 @@ namespace TalkMe::UI::Views {
         bool* notifMuteJoinLeave = nullptr;
         bool* gameMode = nullptr;
         std::function<void(bool)> onGameModeChange;
+        int* targetFps = nullptr;
+        std::function<void(int)> onTargetFpsChange;
     };
 
     void RenderSettings(SettingsContext& ctx);

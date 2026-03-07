@@ -49,6 +49,8 @@ void ScreenCapture::Start(const CaptureSettings& settings, FrameCallback onFrame
     if (m_Thread.joinable()) m_Thread.join();
 
     m_Thread = std::thread([this]() {
+        // Lower thread priority to avoid UI contention
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
         std::fprintf(stderr, "[ScreenCapture] Thread started, initializing GDI+\n");
@@ -164,7 +166,10 @@ void ScreenCapture::CaptureLoop() {
 
         auto elapsed = std::chrono::steady_clock::now() - start;
         int sleepMs = intervalMs - (int)std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+        std::fprintf(stderr, "[ScreenCapture] Frame time: %lld ms\n", std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
+        std::fflush(stderr);
         if (sleepMs > 1) Sleep(sleepMs);
+        else Sleep(1); // Always yield at least 1ms
     }
 }
 

@@ -105,6 +105,9 @@
     <ClCompile Include="src\screen\ScreenCapture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\screen\ScreenCaptureProcess.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\screen\DXGICapture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -121,6 +124,21 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\ui\GifPickerPanel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\Secrets.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\network\KlipyGifProvider.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\network\ImageCache.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\MarkdownRenderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\app\ScreenShareFunctions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -218,6 +236,9 @@
     <ClInclude Include="src\screen\ScreenCapture.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\screen\ScreenCaptureProcess.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="src\screen\DXGICapture.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -237,6 +258,27 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\game\Racing.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\Secrets.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\network\KlipyGifProvider.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\network\ImageCache.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\FlappyBird.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\TicTacToe.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\audio\Soundboard.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\MarkdownRenderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -259,6 +301,7 @@
     <None Include="SUMMARY.md" />
     <None Include="TECHNICAL_ANALYSIS.md" />
     <None Include="TESTING_CHECKLIST.md" />
+    <None Include="secret\secrets" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="TalkMe.rc">

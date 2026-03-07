@@ -406,6 +406,32 @@ namespace TalkMe::UI::Views {
                         ImGui::SetCursorPos(ImVec2(padX, padY));
                         ImGui::Image((ImTextureID)screenShareTexture, ImVec2(fitW, fitH));
 
+                        // Stream + preview FPS overlay so user can verify both transport and render pacing.
+                        {
+                            const int screenShareTargetFps = 0;
+                            const float screenShareStreamFps = 0.0f;
+                            const float screenSharePreviewFps = 0.0f;
+                            const float uiFps = ImGui::GetIO().Framerate;
+                            const char* streamLabel = (screenShareStreamFps >= 1.0f) ? nullptr : "--";
+                            const char* previewLabel = (screenSharePreviewFps >= 1.0f) ? nullptr : "--";
+                            ImGui::SetCursorPos(ImVec2(padX + 10.0f, padY + 10.0f));
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 0.9f));
+                            if (streamLabel && previewLabel) {
+                                ImGui::Text("Stream: -- | Preview: -- (target %d) | UI: %.0f fps",
+                                    screenShareTargetFps, uiFps);
+                            } else if (streamLabel) {
+                                ImGui::Text("Stream: -- | Preview: %.0f fps (target %d) | UI: %.0f fps",
+                                    screenSharePreviewFps, screenShareTargetFps, uiFps);
+                            } else if (previewLabel) {
+                                ImGui::Text("Stream: %.0f fps | Preview: -- (target %d) | UI: %.0f fps",
+                                    screenShareStreamFps, screenShareTargetFps, uiFps);
+                            } else {
+                                ImGui::Text("Stream: %.0f fps | Preview: %.0f fps (target %d) | UI: %.0f fps",
+                                    screenShareStreamFps, screenSharePreviewFps, screenShareTargetFps, uiFps);
+                            }
+                            ImGui::PopStyleColor();
+                        }
+
                         // Maximize/minimize button overlaid on bottom-right of the stream image
                         if (canMaximize) {
                             float btnX = padX + fitW - 80;
@@ -777,7 +803,7 @@ namespace TalkMe::UI::Views {
                 ImGui::PopStyleVar();
 
                 // ====== Screen Share Setup — Discord-style centered modal ======
-                ImGui::SetNextWindowSize(ImVec2(480, 340), ImGuiCond_Always);
+                ImGui::SetNextWindowSize(ImVec2(480, 400), ImGuiCond_Always);
                 ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(28, 24));
                 ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f);
@@ -786,6 +812,7 @@ namespace TalkMe::UI::Views {
                     static int s_shareMode = 0;
                     static int s_shareFps = 1;
                     static int s_shareQuality = 1;
+                    static int s_shareResolution = 1;
 
                     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 1, 1, 1));
                     ImGui::SetWindowFontScale(1.2f);
@@ -815,7 +842,24 @@ namespace TalkMe::UI::Views {
                     if (ImGui::Button("Application", ImVec2(halfW, 40))) s_shareMode = 1;
                     ImGui::PopStyleColor();
 
-                    ImGui::Dummy(ImVec2(0, 16));
+                    ImGui::Dummy(ImVec2(0, 12));
+
+                    // Resolution
+                    ImGui::Text("Resolution");
+                    ImGui::Dummy(ImVec2(0, 4));
+                    ImGui::PushStyleColor(ImGuiCol_Button, s_shareResolution == 0 ? selCol : unselCol);
+                    if (ImGui::Button("720p", ImVec2(60, 30))) s_shareResolution = 0;
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine(0, 6);
+                    ImGui::PushStyleColor(ImGuiCol_Button, s_shareResolution == 1 ? selCol : unselCol);
+                    if (ImGui::Button("1080p", ImVec2(60, 30))) s_shareResolution = 1;
+                    ImGui::PopStyleColor();
+                    ImGui::SameLine(0, 6);
+                    ImGui::PushStyleColor(ImGuiCol_Button, s_shareResolution == 2 ? selCol : unselCol);
+                    if (ImGui::Button("1440p", ImVec2(60, 30))) s_shareResolution = 2;
+                    ImGui::PopStyleColor();
+
+                    ImGui::Dummy(ImVec2(0, 12));
 
                     // FPS and Quality — side by side
                     ImGui::Columns(2, nullptr, false);
@@ -866,6 +910,8 @@ namespace TalkMe::UI::Views {
                     if (ImGui::Button("Go Live", ImVec2(startW, 38))) {
                         int fps[] = { 30, 60, 120 };
                         int quality[] = { 40, 70, 95 };
+                        int resW[] = { 1280, 1920, 2560 };
+                        int resH[] = { 720, 1080, 1440 };
                         if (onStartScreenShare) onStartScreenShare(fps[s_shareFps], quality[s_shareQuality]);
                         ImGui::CloseCurrentPopup();
                     }
@@ -1251,7 +1297,13 @@ namespace TalkMe::UI::Views {
                     ImGui::PopStyleColor();
 
                     ImGui::SameLine();
-                    ImGui::TextDisabled("%s", msg.timestamp.c_str());
+                    // Correct common server typo: 2006 -> 2026 for display
+                    if (msg.timestamp.size() >= 4 && msg.timestamp.compare(0, 4, "2006") == 0) {
+                        std::string tsFixed = "2026" + msg.timestamp.substr(4);
+                        ImGui::TextDisabled("%s", tsFixed.c_str());
+                    } else {
+                        ImGui::TextDisabled("%s", msg.timestamp.c_str());
+                    }
                     if (msg.pinned) {
                         ImGui::SameLine();
                         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "[pinned]");

@@ -1,0 +1,30 @@
+#include "Version.h"
+#include <winver.h>
+
+// Task Manager shows FileDescription, so this exe appears as "Screen Recording".
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION     TALKME_VERSION_MAJOR, TALKME_VERSION_MINOR, TALKME_VERSION_PATCH, 0
+ PRODUCTVERSION  TALKME_VERSION_MAJOR, TALKME_VERSION_MINOR, TALKME_VERSION_PATCH, 0
+ FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+ FILEFLAGS       0
+ FILEOS          VOS__WINDOWS32
+ FILETYPE        VFT_APP
+ FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "bohdanbtw"
+            VALUE "FileDescription", "Screen Recording"
+            VALUE "FileVersion",     TALKME_VERSION_STRING
+            VALUE "LegalCopyright",  "Copyright (C) 2026 bohdanbtw"
+            VALUE "ProductName",     "TalkMe"
+            VALUE "ProductVersion",  TALKME_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

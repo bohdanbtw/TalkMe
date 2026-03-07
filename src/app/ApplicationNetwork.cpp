@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <chrono>
 #include <format>
+#include <fstream>
+#include <cstdlib>
 
 using json = nlohmann::json;
 
@@ -25,6 +27,38 @@ static std::string GetCurrentTimeStr() {
         std::chrono::zoned_time{ std::chrono::current_zone(),
                                  std::chrono::system_clock::now() });
 }
+
+// #region agent log
+static void DebugSessionLogNet(const char* runId,
+                               const char* hypothesisId,
+                               const char* location,
+                               const char* message,
+                               const json& data) {
+    try {
+        static bool s_enabled = []() {
+            char* value = nullptr;
+            size_t len = 0;
+            if (_dupenv_s(&value, &len, "TALKME_DEBUG_SESSION") != 0 || !value) return false;
+            bool enabled = (value[0] == '1' || value[0] == 'y' || value[0] == 'Y' || value[0] == 't' || value[0] == 'T');
+            free(value);
+            return enabled;
+        }();
+        if (!s_enabled) return;
+        std::ofstream f("debug-904cb8.log", std::ios::app);
+        if (!f.is_open()) return;
+        json j;
+        j["sessionId"] = "904cb8";
+        j["runId"] = runId ? runId : "run1";
+        j["hypothesisId"] = hypothesisId ? hypothesisId : "unknown";
+        j["location"] = location ? location : "unknown";
+        j["message"] = message ? message : "log";
+        j["data"] = data;
+        j["timestamp"] = (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        f << j.dump() << "\n";
+    } catch (...) {}
+}
+// #endregion
 
 } // namespace
 
@@ -55,18 +89,30 @@ void Application::ProcessNetworkMessages() {
 
             // ── Binary packets (not JSON) — handle before JSON validation ──
             if (msg.type == PacketType::Screen_Share_Frame) {
+                const auto perfStart = std::chrono::steady_clock::now();
                 if (!msg.data.empty()) {
-                    // Frames come from the currently broadcasting user — find which stream
-                    // For now frames don't contain sender info, so update the viewingStream
+                    std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
                     std::string streamUser = m_ScreenShare.viewingStream;
                     if (streamUser.empty() && !m_ScreenShare.activeStreams.empty())
                         streamUser = m_ScreenShare.activeStreams.begin()->first;
+                    // When we are sharing and previewing self (or auto-selected self),
+                    // local capture callback already feeds preview frames directly.
+                    // Ignoring echoed network frames avoids double decode/upload workload.
+                    if (m_ScreenShare.iAmSharing &&
+                        (streamUser.empty() || streamUser == m_CurrentUser.username)) {
+                        continue;
+                    }
                     if (!streamUser.empty()) {
                         auto& si = m_ScreenShare.activeStreams[streamUser];
-                        si.lastFrameData = std::vector<uint8_t>(msg.data.begin(), msg.data.end());
+                        auto now = std::chrono::steady_clock::now();
+                        UpdateFpsWindow(si.streamFpsWindowStart, si.streamFramesInWindow, si.streamFps, now);
+                        // Latest-frame semantics: always keep the newest encoded frame.
+                        si.lastFrameData.assign(msg.data.begin(), msg.data.end());
                         si.frameUpdated = true;
                     }
                 }
+                RecordSharePerfSample("network.screen_share_frame_ms",
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - perfStart).count());
                 continue;
             }
 
@@ -309,12 +355,14 @@ void Application::ProcessNetworkMessages() {
                 std::string action = j.value("action", "");
                 std::string user = j.value("u", "");
                 if (action == "start" && !user.empty()) {
+                    std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
                     StreamInfo si;
                     si.username = user;
                     m_ScreenShare.activeStreams[user] = si;
                     if (m_ScreenShare.viewingStream.empty() && user != m_CurrentUser.username)
                         m_ScreenShare.viewingStream = user;
                 } else if (action == "stop" && !user.empty()) {
+                    std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
                     m_ScreenShare.activeStreams.erase(user);
                     if (m_ScreenShare.viewingStream == user) {
                         m_ScreenShare.viewingStream.clear();

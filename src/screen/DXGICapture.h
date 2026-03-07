@@ -29,9 +29,12 @@ public:
     void Stop();
     bool IsRunning() const { return m_Running.load(); }
 
+    /// Run capture loop on the current thread (for child process). Runs until stopFlag is true.
+    void RunLoopSynchronous(const DXGICaptureSettings& settings, std::atomic<bool>* stopFlag, FrameCallback onFrame);
+
 private:
-    void CaptureLoop();
-    void GDIFallbackLoop();
+    void CaptureLoop(std::atomic<bool>* externalStop = nullptr);
+    void GDIFallbackLoop(std::atomic<bool>* externalStop = nullptr);  // when null, uses m_Running
     bool InitDXGI();
     bool InitEncoder(int width, int height);
     std::vector<uint8_t> EncodeFrame(ID3D11Texture2D* texture);
