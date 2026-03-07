@@ -998,7 +998,6 @@ namespace TalkMe {
                 UpdateOverlay();
 
                 // Update screen share textures from active streams
-                // Skip decode/upload when window is minimized or unfocused to save GPU/CPU
                 {
                     auto& tm = TalkMe::TextureManager::Get();
                     tm.SetDevice(m_Graphics.GetDevice());
@@ -1006,9 +1005,11 @@ namespace TalkMe {
                     if (!s_friendsIconLoaded && tm.GetTexture("friends_icon") == nullptr) {
                         s_friendsIconLoaded = LoadFriendsIconOnce();
                     }
+                    // Skip decode when minimized or unfocused to save resources
+                    const bool windowActive = !m_Window.IsMinimized() && m_Window.IsForeground();
                     for (auto& [user, si] : m_ScreenShare.activeStreams) {
                         if (!si.frameUpdated || si.lastFrameData.size() <= 1) continue;
-                        if (m_Window.IsMinimized()) continue;
+                        if (!windowActive) { si.frameUpdated = false; continue; }
 
                         const auto now = std::chrono::steady_clock::now();
 
@@ -2564,7 +2565,10 @@ namespace TalkMe {
                         dxSettings.maxHeight = (std::max)(240, maxH);
                         dxSettings.targetWindow = hwnd;
                         m_DXGICapture.Start(dxSettings, [this](const std::vector<uint8_t>& data, int w, int h, bool isKey) {
-                            m_NetClient.SendRaw(PacketType::Screen_Share_Frame, data);
+                            if (data.empty()) return;
+                            // Only send to server when at least one other user is in the channel
+                            if (m_VoiceMembers.size() > 1)
+                                m_NetClient.SendRaw(PacketType::Screen_Share_Frame, data);
                             const auto now = std::chrono::steady_clock::now();
                             auto& si = m_ScreenShare.activeStreams[m_CurrentUser.username];
                             si.username = m_CurrentUser.username;

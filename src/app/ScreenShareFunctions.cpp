@@ -58,7 +58,8 @@ void Application::StartScreenShareProcess(int fps, int quality, int width, int h
             si.frameUpdated = true;
             UpdateFpsWindow(si.streamFpsWindowStart, si.streamFramesInWindow, si.streamFps, now);
         }
-        m_NetClient.SendRaw(PacketType::Screen_Share_Frame, data);
+        if (m_VoiceMembers.size() > 1)
+            m_NetClient.SendRaw(PacketType::Screen_Share_Frame, data);
     };
 
     m_DXGICapture.Start(settings, std::move(onFrame));

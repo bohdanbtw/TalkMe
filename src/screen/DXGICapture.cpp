@@ -344,18 +344,9 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
                 }
             }
 
-            // Auto-limit encoding resolution for high FPS to keep encoder fast
-            int maxW = m_Settings.maxWidth;
-            int maxH = m_Settings.maxHeight;
-            if (m_Settings.fps > 60 && maxH > 720) {
-                float hfScale = 720.0f / maxH;
-                maxW = (int)(maxW * hfScale);
-                maxH = 720;
-            }
-
             float scale = 1.0f;
-            if (srcW > maxW || srcH > maxH)
-                scale = (std::min)((float)maxW / srcW, (float)maxH / srcH);
+            if (srcW > m_Settings.maxWidth || srcH > m_Settings.maxHeight)
+                scale = (std::min)((float)m_Settings.maxWidth / srcW, (float)m_Settings.maxHeight / srcH);
             int outW = (std::max)(1, (int)(srcW * scale));
             int outH = (std::max)(1, (int)(srcH * scale));
 
@@ -394,12 +385,14 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
                     m_UseJpegFallback = true;
             }
 
+            // Encode frame; never fall back to JPEG when H264 is active
+            // (H264 returns empty on first frame due to pipeline latency — not an error)
             std::vector<uint8_t> encoded;
-            if (!m_UseJpegFallback && m_H264Encoder.IsInitialized())
+            if (!m_UseJpegFallback && m_H264Encoder.IsInitialized()) {
                 encoded = m_H264Encoder.Encode(bgraBuffer.data(), outW, outH);
-
-            if (encoded.empty())
+            } else {
                 encoded = EncodeRGBAtoJPEG(bgraBuffer.data(), outW, outH, m_Settings.quality);
+            }
 
             if (!encoded.empty() && m_OnFrame) {
                 const uint8_t codec = (m_UseJpegFallback || !m_H264Encoder.IsInitialized()) ? 0 : 1;

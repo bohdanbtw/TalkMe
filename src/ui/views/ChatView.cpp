@@ -910,79 +910,95 @@ namespace TalkMe::UI::Views {
 
                         // ── Content area ──
                         ImGui::SetCursorPos(ImVec2(pad, 48 + 12));
-                        float contentH = popH - 48 - 12 - 90;
+                        const float contentH = popH - 48 - 12 - 90;
+                        const int cols = 2;
+                        const float gap = 12.0f;
+                        const float cardW = (cW - gap * (cols - 1)) / cols;
+                        const float cardH = 120.0f;
+                        const float thumbH = 70.0f;
 
-                        auto renderCard = [&](const char* label, const char* sub, bool selected, float w, float h) -> bool {
+                        // Draws a selection card at fixed grid position
+                        auto drawCard = [&](int idx, int total, bool selected, const char* title, const char* subtitle, float cw, float ch, float th) -> bool {
+                            int col = idx % cols;
+                            int row = idx / cols;
+                            float x = col * (cw + gap);
+                            float y = row * (ch + gap);
+                            ImGui::SetCursorPos(ImVec2(x, y));
+
+                            ImGui::PushID(idx);
+                            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
                             ImGui::PushStyleColor(ImGuiCol_Button, selected ? cardSel : cardBg);
                             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, selected ? cardSel : cardHov);
-                            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-                            ImVec2 pos = ImGui::GetCursorScreenPos();
-                            bool clicked = ImGui::Button(label, ImVec2(w, h));
-                            ImGui::PopStyleVar();
+                            ImVec2 screenPos = ImGui::GetCursorScreenPos();
+                            bool clicked = ImGui::Button("##card", ImVec2(cw, ch));
                             ImGui::PopStyleColor(2);
+                            ImGui::PopStyleVar();
+
                             if (selected) {
-                                ImGui::GetWindowDrawList()->AddRect(pos, ImVec2(pos.x+w, pos.y+h),
+                                ImGui::GetWindowDrawList()->AddRect(screenPos, ImVec2(screenPos.x + cw, screenPos.y + ch),
                                     ImGui::ColorConvertFloat4ToU32(border), 8.0f, 0, 2.0f);
                             }
-                            if (sub && sub[0]) {
-                                ImGui::SetCursorScreenPos(ImVec2(pos.x + 8, pos.y + h - 22));
-                                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.82f, 0.82f, 0.86f, 1));
-                                ImGui::Text("%s", sub);
-                                ImGui::PopStyleColor();
-                                ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + h + 4));
+
+                            // Thumbnail placeholder
+                            ImGui::GetWindowDrawList()->AddRectFilled(
+                                ImVec2(screenPos.x + 8, screenPos.y + 8),
+                                ImVec2(screenPos.x + cw - 8, screenPos.y + 8 + th),
+                                IM_COL32(18, 18, 22, 255), 6.0f);
+
+                            if (subtitle && subtitle[0]) {
+                                ImGui::GetWindowDrawList()->AddText(
+                                    ImVec2(screenPos.x + 14, screenPos.y + th * 0.35f),
+                                    IM_COL32(120, 120, 130, 255), subtitle);
                             }
+
+                            // Title below thumbnail
+                            std::string disp = title;
+                            if (disp.length() > 36) disp = disp.substr(0, 33) + "...";
+                            ImGui::GetWindowDrawList()->AddText(
+                                ImVec2(screenPos.x + 8, screenPos.y + th + 16),
+                                IM_COL32(210, 210, 220, 255), disp.c_str());
+
+                            ImGui::PopID();
                             return clicked;
                         };
 
                         if (s_tab == 0) {
-                            // ── Applications tab ──
                             ImGui::BeginChild("##apps", ImVec2(cW, contentH), false);
-                            const float cardW = (cW - 16) * 0.5f;
-                            const float cardH = 100.0f;
                             for (int i = 0; i < (int)s_windows.size(); i++) {
-                                if (i % 2 != 0) ImGui::SameLine(0, 16);
-                                ImGui::PushID(i);
-                                const auto& w = s_windows[i];
-                                std::string disp = (w.title.length() > 38) ? w.title.substr(0, 35) + "..." : w.title;
-                                std::string id = "##app" + std::to_string(i);
-                                if (renderCard(id.c_str(), disp.c_str(), s_selApp == i, cardW, cardH))
+                                RECT wr = {};
+                                char sub[32] = {};
+                                if (::GetWindowRect(s_windows[i].hwnd, &wr))
+                                    std::snprintf(sub, 32, "%dx%d", wr.right - wr.left, wr.bottom - wr.top);
+                                if (drawCard(i, (int)s_windows.size(), s_selApp == i,
+                                    s_windows[i].title.c_str(), sub, cardW, cardH, thumbH))
                                     s_selApp = i;
-                                ImGui::PopID();
                             }
                             if (s_windows.empty()) {
                                 ImGui::PushStyleColor(ImGuiCol_Text, dim);
-                                ImGui::SetCursorPos(ImVec2(cW * 0.3f, contentH * 0.4f));
+                                ImGui::SetCursorPos(ImVec2(cW * 0.25f, contentH * 0.4f));
                                 ImGui::Text("No applications found");
                                 ImGui::PopStyleColor();
                             }
                             ImGui::EndChild();
                         }
                         else if (s_tab == 1) {
-                            // ── Screens tab ──
                             ImGui::BeginChild("##screens", ImVec2(cW, contentH), false);
-                            const float cardW = cW - 4;
-                            std::string id = "##screen0";
                             int sw = ::GetSystemMetrics(SM_CXSCREEN);
                             int sh = ::GetSystemMetrics(SM_CYSCREEN);
-                            char sub[64]; std::snprintf(sub, 64, "Entire Screen  %dx%d", sw, sh);
-                            if (renderCard(id.c_str(), sub, true, cardW, 110.0f)) {}
+                            char sub[32]; std::snprintf(sub, 32, "%dx%d", sw, sh);
+                            drawCard(0, 1, true, "Entire Screen", sub, cW * 0.48f, cardH, thumbH);
                             ImGui::EndChild();
                         }
                         else {
-                            // ── Cameras tab ──
                             ImGui::BeginChild("##cams", ImVec2(cW, contentH), false);
-                            const float cardW = (cW - 16) * 0.5f;
                             for (int i = 0; i < (int)s_cameras.size(); i++) {
-                                if (i % 2 != 0) ImGui::SameLine(0, 16);
-                                ImGui::PushID(1000 + i);
-                                std::string id = "##cam" + std::to_string(i);
-                                if (renderCard(id.c_str(), s_cameras[i].name.c_str(), s_selCam == i, cardW, 80.0f))
+                                if (drawCard(i, (int)s_cameras.size(), s_selCam == i,
+                                    s_cameras[i].name.c_str(), "Camera", cardW, cardH, thumbH))
                                     s_selCam = i;
-                                ImGui::PopID();
                             }
                             if (s_cameras.empty()) {
                                 ImGui::PushStyleColor(ImGuiCol_Text, dim);
-                                ImGui::SetCursorPos(ImVec2(cW * 0.3f, contentH * 0.4f));
+                                ImGui::SetCursorPos(ImVec2(cW * 0.28f, contentH * 0.4f));
                                 ImGui::Text("No cameras detected");
                                 ImGui::PopStyleColor();
                             }
