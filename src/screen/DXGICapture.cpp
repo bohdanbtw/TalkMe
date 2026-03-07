@@ -329,15 +329,27 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
         D3D11_MAPPED_SUBRESOURCE mapped;
         hr = m_Context->Map(m_StagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
         if (SUCCEEDED(hr)) {
-            const int fullW = m_CaptureWidth;
-            const int fullH = m_CaptureHeight;
-            float scale = 1.0f;
-            if (fullW > m_Settings.maxWidth || fullH > m_Settings.maxHeight)
-                scale = (std::min)((float)m_Settings.maxWidth / fullW, (float)m_Settings.maxHeight / fullH);
-            int outW = (std::max)(1, (int)(fullW * scale));
-            int outH = (std::max)(1, (int)(fullH * scale));
+            // Region of interest (default: entire desktop)
+            int srcX = 0, srcY = 0, srcW = m_CaptureWidth, srcH = m_CaptureHeight;
+            HWND targetHwnd = static_cast<HWND>(m_Settings.targetWindow);
+            if (targetHwnd && ::IsWindow(targetHwnd)) {
+                RECT wr = {};
+                if (::GetWindowRect(targetHwnd, &wr)) {
+                    srcX = (std::max)(0, (int)wr.left);
+                    srcY = (std::max)(0, (int)wr.top);
+                    srcW = (std::min)(m_CaptureWidth - srcX, (int)(wr.right - wr.left));
+                    srcH = (std::min)(m_CaptureHeight - srcY, (int)(wr.bottom - wr.top));
+                    if (srcW < 1) srcW = 1;
+                    if (srcH < 1) srcH = 1;
+                }
+            }
 
-            // Resize buffer only when dimensions change
+            float scale = 1.0f;
+            if (srcW > m_Settings.maxWidth || srcH > m_Settings.maxHeight)
+                scale = (std::min)((float)m_Settings.maxWidth / srcW, (float)m_Settings.maxHeight / srcH);
+            int outW = (std::max)(1, (int)(srcW * scale));
+            int outH = (std::max)(1, (int)(srcH * scale));
+
             const size_t bgraSize = (size_t)outW * outH * 4;
             if (outW != prevOutW || outH != prevOutH) {
                 bgraBuffer.resize(bgraSize);
@@ -345,12 +357,14 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
                 prevOutH = outH;
             }
 
-            if (outW == fullW && outH == fullH) {
+            // Offset source pointer to the region of interest
+            const uint8_t* srcBase = (const uint8_t*)mapped.pData + (size_t)srcY * mapped.RowPitch + (size_t)srcX * 4;
+            if (outW == srcW && outH == srcH) {
                 for (int y = 0; y < outH; y++)
                     memcpy(bgraBuffer.data() + (size_t)y * outW * 4,
-                        (uint8_t*)mapped.pData + (size_t)y * mapped.RowPitch, (size_t)outW * 4);
+                        srcBase + (size_t)y * mapped.RowPitch, (size_t)outW * 4);
             } else {
-                BoxDownscaleBgra((const uint8_t*)mapped.pData, fullW, fullH, (int)mapped.RowPitch,
+                BoxDownscaleBgra(srcBase, srcW, srcH, (int)mapped.RowPitch,
                     bgraBuffer.data(), outW, outH);
             }
             m_Context->Unmap(m_StagingTexture, 0);
@@ -359,7 +373,8 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
             ci.cbSize = sizeof(ci);
             if (GetCursorInfo(&ci) && ci.hCursor && ci.flags == CURSOR_SHOWING)
                 DrawCursorOntoBgra(bgraBuffer.data(), outW, outH,
-                    (int)(ci.ptScreenPos.x * scale), (int)(ci.ptScreenPos.y * scale));
+                    (int)((ci.ptScreenPos.x - srcX) * scale),
+                    (int)((ci.ptScreenPos.y - srcY) * scale));
 
             if (!m_UseJpegFallback && !m_H264Encoder.IsInitialized()) {
                 int bitrate = (std::min)(2500, (std::max)(800, 600 + m_Settings.quality * 18));

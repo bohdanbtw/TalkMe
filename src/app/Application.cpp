@@ -1006,22 +1006,11 @@ namespace TalkMe {
                     if (!s_friendsIconLoaded && tm.GetTexture("friends_icon") == nullptr) {
                         s_friendsIconLoaded = LoadFriendsIconOnce();
                     }
-                    const bool skipPreview = m_Window.IsMinimized();
                     for (auto& [user, si] : m_ScreenShare.activeStreams) {
                         if (!si.frameUpdated || si.lastFrameData.size() <= 1) continue;
-                        if (skipPreview) continue;
+                        if (m_Window.IsMinimized()) continue;
 
-                        // Dynamic FPS cap for viewers: render at min(source FPS, global FPS).
-                        // Skip throttle until the stream FPS measurement stabilizes (first ~1 s).
                         const auto now = std::chrono::steady_clock::now();
-                        if (si.streamFps >= 1.0f && si.lastPreviewUpdateTime.time_since_epoch().count() != 0) {
-                            const int sourceFps = static_cast<int>(si.streamFps + 0.5f);
-                            const int globalCap = (std::max)(10, (std::min)(1000, m_TargetFps));
-                            const int viewFps = (std::max)(1, (std::min)(sourceFps, globalCap));
-                            const double minIntervalUs = 1'000'000.0 / viewFps;
-                            const double elapsedUs = std::chrono::duration<double, std::micro>(now - si.lastPreviewUpdateTime).count();
-                            if (elapsedUs < minIntervalUs) continue;
-                        }
 
                         uint8_t codec = si.lastFrameData[0];
                         const uint8_t* payload = si.lastFrameData.data() + 1;
@@ -2563,7 +2552,7 @@ namespace TalkMe {
                     }(),
                     &m_ShowMemberList,
                     m_SearchBuf, &m_ShowSearch,
-                    [this](int fps, int quality, int maxW, int maxH) {
+                    [this](int fps, int quality, int maxW, int maxH, void* hwnd) {
                         m_ScreenShare.iAmSharing = true;
                         m_ScreenShare.fps = fps;
                         m_ScreenShare.quality = quality;
@@ -2573,6 +2562,7 @@ namespace TalkMe {
                         dxSettings.quality = quality;
                         dxSettings.maxWidth = (std::max)(320, maxW);
                         dxSettings.maxHeight = (std::max)(240, maxH);
+                        dxSettings.targetWindow = hwnd;
                         m_DXGICapture.Start(dxSettings, [this](const std::vector<uint8_t>& data, int w, int h, bool isKey) {
                             m_NetClient.SendRaw(PacketType::Screen_Share_Frame, data);
                             const auto now = std::chrono::steady_clock::now();

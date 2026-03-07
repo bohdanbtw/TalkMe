@@ -16,6 +16,7 @@ struct DXGICaptureSettings {
     int quality = 70;       // 0-100
     int maxWidth = 1920;
     int maxHeight = 1080;
+    void* targetWindow = nullptr;  // HWND; nullptr = entire screen
 };
 
 class DXGICapture {

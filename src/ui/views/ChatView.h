@@ -32,7 +32,7 @@ namespace TalkMe::UI::Views {
         bool* showMemberList = nullptr,
         char* searchBuf = nullptr,
         bool* showSearch = nullptr,
-        std::function<void(int fps, int quality, int maxW, int maxH)> onStartScreenShare = nullptr,
+        std::function<void(int fps, int quality, int maxW, int maxH, void* hwnd)> onStartScreenShare = nullptr,
         std::function<void()> onStopScreenShare = nullptr,
         bool isScreenSharing = false,
         bool someoneIsSharing = false,

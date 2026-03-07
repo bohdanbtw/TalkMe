@@ -115,17 +115,41 @@ bool AppGraphics::InitImGui() {
     s_iniPath       = configDir + "\\imgui.ini";
     io.IniFilename  = s_iniPath.c_str();
 
-    // Font atlas is built once here (and by the backend when creating the font texture).
-    // Rebuild only on font/size change if you add settings for that; do not rebuild every frame.
+    // Primary font with Latin + Cyrillic glyphs
     static constexpr const char* kFontPaths[] = {
         "c:\\Windows\\Fonts\\segoeui.ttf",
         "c:\\Windows\\Fonts\\Arial.ttf",
     };
+    static const ImWchar latinCyrillicRanges[] = {
+        0x0020, 0x00FF, // Basic Latin + Latin Supplement
+        0x0400, 0x052F, // Cyrillic + Cyrillic Supplement
+        0x2DE0, 0x2DFF, // Cyrillic Extended-A
+        0xA640, 0xA69F, // Cyrillic Extended-B
+        0
+    };
     bool fontLoaded = false;
     for (const char* path : kFontPaths) {
-        if (io.Fonts->AddFontFromFileTTF(path, 20.0f)) { fontLoaded = true; break; }
+        if (io.Fonts->AddFontFromFileTTF(path, 20.0f, nullptr, latinCyrillicRanges)) {
+            fontLoaded = true;
+            break;
+        }
     }
     if (!fontLoaded) io.Fonts->AddFontDefault();
+
+    // Merge CJK font for Chinese/Japanese/Korean support
+    ImFontConfig mergeCfg;
+    mergeCfg.MergeMode = true;
+    mergeCfg.PixelSnapH = true;
+    static constexpr const char* kCjkFontPaths[] = {
+        "c:\\Windows\\Fonts\\msyh.ttc",     // Microsoft YaHei
+        "c:\\Windows\\Fonts\\msgothic.ttc",  // MS Gothic
+        "c:\\Windows\\Fonts\\malgun.ttf",    // Malgun Gothic
+        "c:\\Windows\\Fonts\\meiryo.ttc",    // Meiryo
+    };
+    for (const char* path : kCjkFontPaths) {
+        if (io.Fonts->AddFontFromFileTTF(path, 20.0f, &mergeCfg, io.Fonts->GetGlyphRangesChineseFull()))
+            break;
+    }
 
     UI::ApplyAppStyle();
     ImGui_ImplWin32_Init(m_Hwnd);
