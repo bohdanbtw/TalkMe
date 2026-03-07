@@ -276,33 +276,18 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
     auto nextFrameDeadline = std::chrono::steady_clock::now();
     int frameCount = 0;
 
-    // Pre-allocated buffers to avoid per-frame heap churn
     std::vector<uint8_t> bgraBuffer;
     std::vector<uint8_t> packetBuffer;
     int prevOutW = 0, prevOutH = 0;
 
-    auto advanceDeadline = [&]() {
-        nextFrameDeadline += frameInterval;
-        auto n = std::chrono::steady_clock::now();
-        if (nextFrameDeadline <= n)
-            do { nextFrameDeadline += frameInterval; } while (nextFrameDeadline <= n);
-    };
-
     while ((externalStop ? !externalStop->load() : m_Running.load())) {
-        auto now = std::chrono::steady_clock::now();
-        if (now < nextFrameDeadline) {
-            auto remainMs = std::chrono::duration_cast<std::chrono::milliseconds>(nextFrameDeadline - now).count();
-            if (remainMs > 0) Sleep((DWORD)remainMs);
-        }
-
-        const UINT acquireTimeoutMs = (std::max)(1u, (std::min)(20u, (UINT)(1000 / targetFps)));
+        // Let AcquireNextFrame handle ALL waiting — no separate Sleep.
+        // This prevents missing DXGI frames that arrive during a Sleep call.
         IDXGIResource* desktopResource = nullptr;
         DXGI_OUTDUPL_FRAME_INFO frameInfo;
-        HRESULT hr = m_Duplication->AcquireNextFrame(acquireTimeoutMs, &frameInfo, &desktopResource);
+        HRESULT hr = m_Duplication->AcquireNextFrame(100, &frameInfo, &desktopResource);
 
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-            // Desktop is static; skip sending to save bandwidth
-            advanceDeadline();
             continue;
         }
 
@@ -315,6 +300,14 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
 
         if (FAILED(hr)) {
             Sleep(50);
+            continue;
+        }
+
+        // Rate limit: if the monitor provides frames faster than our target, skip excess
+        auto now = std::chrono::steady_clock::now();
+        if (now < nextFrameDeadline) {
+            desktopResource->Release();
+            m_Duplication->ReleaseFrame();
             continue;
         }
 
@@ -344,9 +337,16 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
                 }
             }
 
+            // At >60fps, cap to 720p to keep encoding within frame budget
+            int maxEncW = m_Settings.maxWidth;
+            int maxEncH = m_Settings.maxHeight;
+            if (targetFps > 60 && maxEncH > 720) {
+                maxEncW = (int)(maxEncW * (720.0f / maxEncH));
+                maxEncH = 720;
+            }
             float scale = 1.0f;
-            if (srcW > m_Settings.maxWidth || srcH > m_Settings.maxHeight)
-                scale = (std::min)((float)m_Settings.maxWidth / srcW, (float)m_Settings.maxHeight / srcH);
+            if (srcW > maxEncW || srcH > maxEncH)
+                scale = (std::min)((float)maxEncW / srcW, (float)maxEncH / srcH);
             int outW = (std::max)(1, (int)(srcW * scale));
             int outH = (std::max)(1, (int)(srcH * scale));
 
@@ -405,7 +405,11 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
             frameCount++;
         }
 
-        advanceDeadline();
+        // Advance deadline for rate limiting
+        nextFrameDeadline += frameInterval;
+        auto n = std::chrono::steady_clock::now();
+        if (nextFrameDeadline <= n)
+            nextFrameDeadline = n;
     }
 }
 
