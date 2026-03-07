@@ -1006,7 +1006,7 @@ namespace TalkMe {
                     if (!s_friendsIconLoaded && tm.GetTexture("friends_icon") == nullptr) {
                         s_friendsIconLoaded = LoadFriendsIconOnce();
                     }
-                    const bool skipPreview = m_Window.IsMinimized() || !m_Window.IsForeground();
+                    const bool skipPreview = m_Window.IsMinimized();
                     for (auto& [user, si] : m_ScreenShare.activeStreams) {
                         if (!si.frameUpdated || si.lastFrameData.size() <= 1) continue;
                         if (skipPreview) continue;
@@ -2563,9 +2563,7 @@ namespace TalkMe {
                     }(),
                     &m_ShowMemberList,
                     m_SearchBuf, &m_ShowSearch,
-                    [this](int fps, int quality) {
-                        std::fprintf(stderr, "[TalkMe] onStartScreenShare called: fps=%d quality=%d\n", fps, quality);
-                        std::fflush(stderr);
+                    [this](int fps, int quality, int maxW, int maxH) {
                         m_ScreenShare.iAmSharing = true;
                         m_ScreenShare.fps = fps;
                         m_ScreenShare.quality = quality;
@@ -2573,6 +2571,8 @@ namespace TalkMe {
                         DXGICaptureSettings dxSettings;
                         dxSettings.fps = effectiveFps;
                         dxSettings.quality = quality;
+                        dxSettings.maxWidth = (std::max)(320, maxW);
+                        dxSettings.maxHeight = (std::max)(240, maxH);
                         m_DXGICapture.Start(dxSettings, [this](const std::vector<uint8_t>& data, int w, int h, bool isKey) {
                             m_NetClient.SendRaw(PacketType::Screen_Share_Frame, data);
                             const auto now = std::chrono::steady_clock::now();
@@ -2605,7 +2605,7 @@ namespace TalkMe {
                             }
                         });
                         nlohmann::json sj;
-                        sj["width"] = 1920; sj["height"] = 1080; sj["fps"] = fps;
+                        sj["width"] = maxW; sj["height"] = maxH; sj["fps"] = fps;
                         m_NetClient.Send(PacketType::Screen_Share_Start, sj.dump());
                     },
                     [this]() {
@@ -2751,16 +2751,7 @@ namespace TalkMe {
                     &m_OnSendWithAttachedImage,
                     &m_GameMode,
                     &isDraggingFilesOver,
-                    [this]() -> int {
-                        std::string key = m_ScreenShare.viewingStream;
-                        if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
-                        if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
-                        auto it = m_ScreenShare.activeStreams.find(key);
-                        if (it == m_ScreenShare.activeStreams.end()) return 0;
-                        int src = (std::max)(1, static_cast<int>(it->second.streamFps + 0.5f));
-                        int cap = (std::max)(10, (std::min)(1000, m_TargetFps));
-                        return (std::min)(src, cap);
-                    }(),
+                    m_TargetFps,
                     [this]() -> float {
                         std::string key = m_ScreenShare.viewingStream;
                         if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
