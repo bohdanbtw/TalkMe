@@ -116,6 +116,7 @@ namespace TalkMe {
         void RenderMainApp();
 
         void StartScreenShareProcess(int fps, int quality, int width, int height, void* targetWindow = nullptr);
+        void StartWebcamShareProcess(int fps, int quality, int width, int height, const std::string& cameraSymLink);
         void StopScreenShareProcess();
         int GetEffectiveShareFps() const;
         static void UpdateFpsWindow(std::chrono::steady_clock::time_point& windowStart,
@@ -300,6 +301,7 @@ namespace TalkMe {
         ScreenCapture m_ScreenCapture;
         DXGICapture m_DXGICapture;
         H264Decoder m_H264Decoder;
+        H264Encoder m_WebcamH264Encoder;
         AudioLoopback m_AudioLoopback;
         WebcamCapture m_WebcamCapture;
 
@@ -329,6 +331,7 @@ namespace TalkMe {
             std::vector<uint8_t> lastFrameData;
             int frameWidth = 0;
             int frameHeight = 0;
+            int sourceFps = 0;
             bool frameUpdated = false;
             // Incoming encoded stream FPS meter (capture/network arrival rate).
             std::chrono::steady_clock::time_point streamFpsWindowStart{};
@@ -346,6 +349,7 @@ namespace TalkMe {
             int fps = 30;
             int quality = 75;
             bool iAmSharing = false;
+            bool usingWebcam = false;
             bool keyframeOnlyMode = false;  // NEW: Low bandwidth mode
             int keyframeIntervalFrames = 30;  // NEW: Keyframe every N frames
             std::map<std::string, StreamInfo> activeStreams;

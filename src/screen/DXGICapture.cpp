@@ -4,6 +4,7 @@
 #include "DXGICapture.h"
 #include <d3d11.h>
 #include <dxgi1_2.h>
+#include <dxgi1_6.h>
 #include <windows.h>
 #include <mmsystem.h>
 #include <chrono>
@@ -30,6 +31,29 @@ struct TimerResolutionGuard {
     TimerResolutionGuard() { active = (::timeBeginPeriod(1) == TIMERR_NOERROR); }
     ~TimerResolutionGuard() { if (active) ::timeEndPeriod(1); }
 };
+
+IDXGIAdapter1* PickHighPerformanceAdapter() {
+    IDXGIFactory6* factory6 = nullptr;
+    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory6), (void**)&factory6)) || !factory6)
+        return nullptr;
+
+    IDXGIAdapter1* adapter = nullptr;
+    for (UINT i = 0; ; ++i) {
+        IDXGIAdapter1* cand = nullptr;
+        if (FAILED(factory6->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+            __uuidof(IDXGIAdapter1), (void**)&cand)))
+            break;
+        DXGI_ADAPTER_DESC1 d = {};
+        cand->GetDesc1(&d);
+        if ((d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0) {
+            adapter = cand;
+            break;
+        }
+        cand->Release();
+    }
+    factory6->Release();
+    return adapter;
+}
 
 int GetJpegEncoderClsid(CLSID* pClsid) {
     UINT num = 0, size = 0;
@@ -214,60 +238,92 @@ void DXGICapture::RunLoopSynchronous(const DXGICaptureSettings& settings, std::a
 }
 
 bool DXGICapture::InitDXGI() {
-    D3D_FEATURE_LEVEL featureLevel;
-    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-        D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
-        &m_Device, &featureLevel, &m_Context);
-    if (FAILED(hr)) {
-        std::fprintf(stderr, "[DXGICapture] D3D11CreateDevice failed: 0x%08lx\n", hr);
-        return false;
+    auto initWithAdapter = [&](IDXGIAdapter1* preferredAdapter) -> bool {
+        Cleanup();
+        D3D_FEATURE_LEVEL featureLevel{};
+        const D3D_DRIVER_TYPE driverType = preferredAdapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE;
+        const HRESULT hrCreate = D3D11CreateDevice(preferredAdapter, driverType, nullptr,
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
+            &m_Device, &featureLevel, &m_Context);
+        if (FAILED(hrCreate)) {
+            std::fprintf(stderr, "[DXGICapture] D3D11CreateDevice failed: 0x%08lx\n", hrCreate);
+            return false;
+        }
+
+        IDXGIDevice* dxgiDevice = nullptr;
+        if (FAILED(m_Device->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDevice)) || !dxgiDevice)
+            return false;
+        IDXGIAdapter* adapter = nullptr;
+        dxgiDevice->GetAdapter(&adapter);
+        if (!adapter) {
+            dxgiDevice->Release();
+            return false;
+        }
+
+        DXGI_ADAPTER_DESC ad = {};
+        adapter->GetDesc(&ad);
+        char descUtf8[256] = {};
+        ::WideCharToMultiByte(CP_UTF8, 0, ad.Description, -1, descUtf8, sizeof(descUtf8), nullptr, nullptr);
+        std::fprintf(stderr, "[DXGICapture] Adapter: %s\n", descUtf8);
+        std::fflush(stderr);
+
+        IDXGIOutput* output = nullptr;
+        HRESULT hr = adapter->EnumOutputs(0, &output);
+        if (FAILED(hr) || !output) {
+            std::fprintf(stderr, "[DXGICapture] EnumOutputs failed for adapter\n");
+            adapter->Release(); dxgiDevice->Release();
+            return false;
+        }
+
+        IDXGIOutput1* output1 = nullptr;
+        hr = output->QueryInterface(__uuidof(IDXGIOutput1), (void**)&output1);
+        if (FAILED(hr) || !output1) {
+            output->Release(); adapter->Release(); dxgiDevice->Release();
+            return false;
+        }
+
+        DXGI_OUTPUT_DESC desc{};
+        output->GetDesc(&desc);
+        m_CaptureWidth = desc.DesktopCoordinates.right - desc.DesktopCoordinates.left;
+        m_CaptureHeight = desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top;
+
+        hr = output1->DuplicateOutput(m_Device, &m_Duplication);
+        if (FAILED(hr)) {
+            std::fprintf(stderr, "[DXGICapture] DuplicateOutput failed: 0x%08lx\n", hr);
+            output1->Release(); output->Release(); adapter->Release(); dxgiDevice->Release();
+            return false;
+        }
+
+        D3D11_TEXTURE2D_DESC texDesc = {};
+        texDesc.Width = m_CaptureWidth;
+        texDesc.Height = m_CaptureHeight;
+        texDesc.MipLevels = 1;
+        texDesc.ArraySize = 1;
+        texDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        texDesc.SampleDesc.Count = 1;
+        texDesc.Usage = D3D11_USAGE_STAGING;
+        texDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        hr = m_Device->CreateTexture2D(&texDesc, nullptr, &m_StagingTexture);
+
+        output1->Release();
+        output->Release();
+        adapter->Release();
+        dxgiDevice->Release();
+        return SUCCEEDED(hr);
+    };
+
+    IDXGIAdapter1* highPerf = PickHighPerformanceAdapter();
+    if (highPerf) {
+        if (initWithAdapter(highPerf)) {
+            highPerf->Release();
+            return true;
+        }
+        highPerf->Release();
+        std::fprintf(stderr, "[DXGICapture] High-performance adapter path failed, falling back to default adapter\n");
+        std::fflush(stderr);
     }
 
-    IDXGIDevice* dxgiDevice = nullptr;
-    m_Device->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDevice);
-    IDXGIAdapter* adapter = nullptr;
-    dxgiDevice->GetAdapter(&adapter);
-    IDXGIOutput* output = nullptr;
-    hr = adapter->EnumOutputs(0, &output);
-    if (FAILED(hr)) {
-        std::fprintf(stderr, "[DXGICapture] EnumOutputs failed\n");
-        adapter->Release(); dxgiDevice->Release();
-        return false;
-    }
-
-    IDXGIOutput1* output1 = nullptr;
-    output->QueryInterface(__uuidof(IDXGIOutput1), (void**)&output1);
-
-    DXGI_OUTPUT_DESC desc;
-    output->GetDesc(&desc);
-    m_CaptureWidth = desc.DesktopCoordinates.right - desc.DesktopCoordinates.left;
-    m_CaptureHeight = desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top;
-
-    hr = output1->DuplicateOutput(m_Device, &m_Duplication);
-    if (FAILED(hr)) {
-        std::fprintf(stderr, "[DXGICapture] DuplicateOutput failed: 0x%08lx\n", hr);
-        output1->Release(); output->Release(); adapter->Release(); dxgiDevice->Release();
-        return false;
-    }
-
-    // Create staging texture for CPU readback
-    D3D11_TEXTURE2D_DESC texDesc = {};
-    texDesc.Width = m_CaptureWidth;
-    texDesc.Height = m_CaptureHeight;
-    texDesc.MipLevels = 1;
-    texDesc.ArraySize = 1;
-    texDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    texDesc.SampleDesc.Count = 1;
-    texDesc.Usage = D3D11_USAGE_STAGING;
-    texDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    hr = m_Device->CreateTexture2D(&texDesc, nullptr, &m_StagingTexture);
-
-    output1->Release();
-    output->Release();
-    adapter->Release();
-    dxgiDevice->Release();
-
-    return SUCCEEDED(hr);
+    return initWithAdapter(nullptr);
 }
 
 void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
@@ -278,9 +334,20 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
 
     std::vector<uint8_t> bgraBuffer;
     std::vector<uint8_t> packetBuffer;
+    std::vector<uint8_t> lastPacketBuffer;
+    int lastPacketW = 0;
+    int lastPacketH = 0;
     int prevOutW = 0, prevOutH = 0;
     POINT prevCursorPos{ LONG_MIN, LONG_MIN };
     bool prevCursorVisible = false;
+    int lastAppliedQuality = -1;
+    auto calcTargetBitrateKbps = [&](int outW, int outH, int fps, int qualityPct) {
+        const double pixelsPerSecond = static_cast<double>(outW) * static_cast<double>(outH) * static_cast<double>((std::max)(1, fps));
+        const double quality01 = (std::clamp)(qualityPct, 1, 100) / 100.0;
+        const double bitsPerPixelPerFrame = 0.05 + quality01 * 0.12; // 0.05..0.17
+        int bitrate = static_cast<int>((pixelsPerSecond * bitsPerPixelPerFrame) / 1000.0);
+        return (std::clamp)(bitrate, 1200, 18000);
+    };
 
     // Smart timeout: Don't spin too fast at high FPS
     // Use longer timeout (25ms) to reduce CPU usage and jitter
@@ -294,6 +361,14 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
         HRESULT hr = m_Duplication->AcquireNextFrame(waitTimeoutMs, &frameInfo, &desktopResource);
 
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+            auto now = std::chrono::steady_clock::now();
+            if (now >= nextFrameDeadline && !lastPacketBuffer.empty() && m_OnFrame) {
+                m_OnFrame(lastPacketBuffer, lastPacketW, lastPacketH, false);
+                frameCount++;
+                nextFrameDeadline += frameInterval;
+                if (nextFrameDeadline <= now)
+                    nextFrameDeadline = now;
+            }
             continue;
         }
 
@@ -434,11 +509,8 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
 
                 // Quality-based bitrate model (kbps) based on pixel throughput.
                 // This avoids severe artifacts at high fps where fixed low caps under-allocate bitrate.
-                const double pixelsPerSecond = static_cast<double>(outW) * static_cast<double>(outH) * static_cast<double>(targetFps);
-                const double quality01 = (std::clamp)(effectiveQuality, 1, 100) / 100.0;
-                const double bitsPerPixelPerFrame = 0.05 + quality01 * 0.12; // 0.05..0.17
-                int bitrate = static_cast<int>((pixelsPerSecond * bitsPerPixelPerFrame) / 1000.0);
-                bitrate = (std::clamp)(bitrate, 1200, 18000);
+                int bitrate = calcTargetBitrateKbps(outW, outH, targetFps, effectiveQuality);
+                lastAppliedQuality = effectiveQuality;
 
                 // Keyframe-only mode is not compatible with predictive H.264 streaming.
                 if (m_Settings.keyframeOnlyMode && !m_UseJpegFallback) {
@@ -447,6 +519,15 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
 
                 if (!m_H264Encoder.Initialize(outW, outH, m_Settings.fps, bitrate, m_Device))
                     m_UseJpegFallback = true;
+            }
+
+            if (!m_UseJpegFallback && m_H264Encoder.IsInitialized() && m_Settings.pAdaptiveQuality) {
+                const int adaptiveQuality = (std::max)(1, (std::min)(100, m_Settings.pAdaptiveQuality->load()));
+                if (adaptiveQuality != lastAppliedQuality) {
+                    const int newBitrate = calcTargetBitrateKbps(outW, outH, targetFps, adaptiveQuality);
+                    if (m_H264Encoder.ReconfigureBitrate(newBitrate))
+                        lastAppliedQuality = adaptiveQuality;
+                }
             }
 
             // NEVER skip frames with H.264 - temporal prediction requires all frames
@@ -473,6 +554,9 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
                 packetBuffer[0] = codec;
                 memcpy(packetBuffer.data() + 1, encoded.data(), encoded.size());
                 m_OnFrame(packetBuffer, outW, outH, isKeyframe);
+                lastPacketBuffer = packetBuffer;
+                lastPacketW = outW;
+                lastPacketH = outH;
             }
             frameCount++;
         }

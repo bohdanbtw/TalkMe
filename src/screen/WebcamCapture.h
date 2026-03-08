@@ -16,7 +16,8 @@ struct WebcamDeviceInfo {
 
 class WebcamCapture {
 public:
-    using FrameCallback = std::function<void(const std::vector<uint8_t>& rgbaData, int width, int height)>;
+    // Callback receives BGRA pixels (4 bytes per pixel).
+    using FrameCallback = std::function<void(const std::vector<uint8_t>& bgraData, int width, int height)>;
 
     WebcamCapture() = default;
     ~WebcamCapture() { Stop(); }

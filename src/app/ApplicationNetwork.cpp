@@ -58,9 +58,26 @@ void Application::ProcessNetworkMessages() {
                 const auto perfStart = std::chrono::steady_clock::now();
                 if (!msg.data.empty()) {
                     std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
-                    std::string streamUser = m_ScreenShare.viewingStream;
-                    if (streamUser.empty() && !m_ScreenShare.activeStreams.empty())
-                        streamUser = m_ScreenShare.activeStreams.begin()->first;
+                    std::string streamUser;
+                    std::vector<uint8_t> framePayload;
+
+                    // Wire format v1: [0xA5][u16 usernameLen BE][username][framePayload]
+                    if (msg.data.size() >= 4 && msg.data[0] == 0xA5) {
+                        const uint16_t ulen = (static_cast<uint16_t>(msg.data[1]) << 8) | static_cast<uint16_t>(msg.data[2]);
+                        const size_t headerLen = static_cast<size_t>(3) + ulen;
+                        if (headerLen < msg.data.size()) {
+                            streamUser.assign(reinterpret_cast<const char*>(msg.data.data() + 3), ulen);
+                            framePayload.assign(msg.data.begin() + headerLen, msg.data.end());
+                        }
+                    }
+
+                    if (streamUser.empty()) {
+                        streamUser = m_ScreenShare.viewingStream;
+                        if (streamUser.empty() && !m_ScreenShare.activeStreams.empty())
+                            streamUser = m_ScreenShare.activeStreams.begin()->first;
+                        framePayload = msg.data;
+                    }
+
                     // When we are sharing and previewing self (or auto-selected self),
                     // local capture callback already feeds preview frames directly.
                     // Ignoring echoed network frames avoids double decode/upload workload.
@@ -68,11 +85,12 @@ void Application::ProcessNetworkMessages() {
                         (streamUser.empty() || streamUser == m_CurrentUser.username)) {
                         continue;
                     }
-                    if (!streamUser.empty()) {
+                    if (!streamUser.empty() && !framePayload.empty()) {
                         auto& si = m_ScreenShare.activeStreams[streamUser];
+                        si.username = streamUser;
                         const auto now = std::chrono::steady_clock::now();
                         UpdateFpsWindow(si.streamFpsWindowStart, si.streamFramesInWindow, si.streamFps, now);
-                        si.lastFrameData = std::move(msg.data);
+                        si.lastFrameData = std::move(framePayload);
                         si.frameUpdated = true;
                     }
                 }
@@ -323,6 +341,7 @@ void Application::ProcessNetworkMessages() {
                     std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
                     StreamInfo si;
                     si.username = user;
+                    si.sourceFps = (std::max)(1, j.value("fps", 30));
                     m_ScreenShare.activeStreams[user] = si;
                     if (m_ScreenShare.viewingStream.empty() && user != m_CurrentUser.username)
                         m_ScreenShare.viewingStream = user;

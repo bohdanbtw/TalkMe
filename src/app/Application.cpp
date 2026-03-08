@@ -1006,8 +1006,8 @@ namespace TalkMe {
                     if (!s_friendsIconLoaded && tm.GetTexture("friends_icon") == nullptr) {
                         s_friendsIconLoaded = LoadFriendsIconOnce();
                     }
-                    // Skip decode when minimized or unfocused to save resources
-                    const bool windowActive = !m_Window.IsMinimized() && m_Window.IsForeground();
+                    // Keep decode active even when minimized/unfocused so transport behavior
+                    // does not depend on window visibility.
                     struct PendingPreviewFrame {
                         std::string user;
                         std::vector<uint8_t> frame;
@@ -1026,15 +1026,12 @@ namespace TalkMe {
                                 continue; // decode/upload only the viewed stream
                             if (!si.frameUpdated || si.lastFrameData.size() <= 1)
                                 continue;
-                            if (!windowActive) {
-                                si.frameUpdated = false;
-                                continue;
-                            }
-
                             const auto now = std::chrono::steady_clock::now();
                             if (m_AdaptiveSharePreview) {
-                                const int effectiveShareFps = (std::max)(1, GetEffectiveShareFps());
-                                const int targetPreviewFps = (effectiveShareFps > 90) ? 75 : effectiveShareFps;
+                                const int uiCap = (std::max)(10, (std::min)(1000, m_TargetFps));
+                                int targetPreviewFps = GetEffectiveShareFps();
+                                if (si.sourceFps > 0)
+                                    targetPreviewFps = (std::max)(1, (std::min)(uiCap, si.sourceFps));
                                 const auto minInterval = std::chrono::microseconds(1'000'000 / (std::max)(1, targetPreviewFps));
                                 if (si.lastPreviewUpdateTime.time_since_epoch().count() > 0 &&
                                     (now - si.lastPreviewUpdateTime) < minInterval) {
@@ -2610,33 +2607,36 @@ namespace TalkMe {
                     }(),
                     &m_ShowMemberList,
                     m_SearchBuf, &m_ShowSearch,
-                    [this](int fps, int quality, int maxW, int maxH, void* hwnd) {
-                        m_ScreenShare.iAmSharing = true;
+                    [this](int fps, int quality, int maxW, int maxH, void* hwnd, int sourceType, const std::string& sourceId) {
                         m_ScreenShare.fps = fps;
                         m_ScreenShare.quality = quality;
-                        StartScreenShareProcess(fps, quality, (std::max)(320, maxW), (std::max)(240, maxH), hwnd);
-                        // Start system audio loopback capture
-                        m_AudioLoopback.Start([this](const float* samples, int frameCount, int sampleRate, int channels) {
-                            // Resample to mono 48kHz if needed, then send as voice data alongside mic
-                            // For now, mix into the existing voice stream by feeding the audio engine
-                            if (frameCount > 0 && channels > 0) {
-                                // Downmix to mono
-                                std::vector<float> mono(frameCount);
-                                for (int i = 0; i < frameCount; i++) {
-                                    float sum = 0;
-                                    for (int c = 0; c < channels; c++)
-                                        sum += samples[i * channels + c];
-                                    mono[i] = sum / channels;
+                        m_ScreenShare.usingWebcam = (sourceType == 2);
+                        if (sourceType == 2) {
+                            if (sourceId.empty())
+                                return;
+                            m_ScreenShare.iAmSharing = true;
+                            StartWebcamShareProcess(fps, quality, (std::max)(320, maxW), (std::max)(240, maxH), sourceId);
+                        } else {
+                            m_ScreenShare.iAmSharing = true;
+                            StartScreenShareProcess(fps, quality, (std::max)(320, maxW), (std::max)(240, maxH), hwnd);
+                            // Start system audio loopback capture for screen sharing.
+                            m_AudioLoopback.Start([this](const float* samples, int frameCount, int sampleRate, int channels) {
+                                if (frameCount > 0 && channels > 0) {
+                                    std::vector<float> mono(frameCount);
+                                    for (int i = 0; i < frameCount; i++) {
+                                        float sum = 0;
+                                        for (int c = 0; c < channels; c++)
+                                            sum += samples[i * channels + c];
+                                        mono[i] = sum / channels;
+                                    }
+                                    for (auto& s : mono) s *= 0.5f;
+                                    m_AudioEngine.PushSystemAudio(mono.data(), frameCount, sampleRate);
                                 }
-                                // Scale down system audio volume to avoid overwhelming mic
-                                for (auto& s : mono) s *= 0.5f;
-                                // Feed into audio engine's playback for local mixing
-                                // The opus encoder will pick this up from the capture ring buffer
-                                m_AudioEngine.PushSystemAudio(mono.data(), frameCount, sampleRate);
-                            }
-                        });
+                            });
+                        }
                         nlohmann::json sj;
                         sj["width"] = maxW; sj["height"] = maxH; sj["fps"] = fps;
+                        sj["source"] = (sourceType == 2) ? "camera" : ((sourceType == 0) ? "application" : "screen");
                         m_NetClient.Send(PacketType::Screen_Share_Start, sj.dump());
                     },
                     [this]() {
@@ -2791,7 +2791,17 @@ namespace TalkMe {
                     &m_OnSendWithAttachedImage,
                     &m_GameMode,
                     &isDraggingFilesOver,
-                    m_TargetFps,
+                    [this]() -> int {
+                        const int uiCap = (std::max)(10, (std::min)(1000, m_TargetFps));
+                        std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                        std::string key = m_ScreenShare.viewingStream;
+                        if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
+                        if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
+                        auto it = m_ScreenShare.activeStreams.find(key);
+                        if (it != m_ScreenShare.activeStreams.end() && it->second.sourceFps > 0)
+                            return (std::max)(1, (std::min)(uiCap, it->second.sourceFps));
+                        return GetEffectiveShareFps();
+                    }(),
                     [this]() -> float {
                         std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
                         std::string key = m_ScreenShare.viewingStream;

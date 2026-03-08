@@ -11,6 +11,7 @@
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
+#include <cstdint>
 #include <algorithm>
 #include <cmath>
 #include <shellapi.h>
@@ -280,7 +281,7 @@ namespace TalkMe::UI::Views {
         bool* showMemberList,
         char* searchBuf,
         bool* showSearch,
-        std::function<void(int fps, int quality, int maxW, int maxH, void* hwnd)> onStartScreenShare,
+        std::function<void(int fps, int quality, int maxW, int maxH, void* hwnd, int sourceType, const std::string& sourceId)> onStartScreenShare,
         std::function<void()> onStopScreenShare,
         bool isScreenSharing,
         bool someoneIsSharing,
@@ -829,6 +830,63 @@ namespace TalkMe::UI::Views {
                     static int s_shareQuality = 1;
                     static int s_shareRes = 1;
                     static bool s_refresh = true;
+                    static double s_lastThumbRefresh = 0.0;
+
+                    auto updateSharePickerThumb = [](const std::string& texId, HWND srcWindow, bool captureDesktop, int outW, int outH) {
+                        if (outW <= 0 || outH <= 0) return;
+                        HDC srcDC = ::GetDC(nullptr);
+                        if (!srcDC) return;
+                        HDC memDC = ::CreateCompatibleDC(srcDC);
+                        if (!memDC) { ::ReleaseDC(nullptr, srcDC); return; }
+
+                        BITMAPINFO bmi = {};
+                        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                        bmi.bmiHeader.biWidth = outW;
+                        bmi.bmiHeader.biHeight = -outH;
+                        bmi.bmiHeader.biPlanes = 1;
+                        bmi.bmiHeader.biBitCount = 32;
+                        bmi.bmiHeader.biCompression = BI_RGB;
+
+                        void* bits = nullptr;
+                        HBITMAP dib = ::CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+                        if (!dib || !bits) {
+                            if (dib) ::DeleteObject(dib);
+                            ::DeleteDC(memDC);
+                            ::ReleaseDC(nullptr, srcDC);
+                            return;
+                        }
+                        HGDIOBJ old = ::SelectObject(memDC, dib);
+                        ::SetStretchBltMode(memDC, HALFTONE);
+
+                        RECT src = {};
+                        if (captureDesktop || !srcWindow || !::IsWindow(srcWindow)) {
+                            src.left = 0;
+                            src.top = 0;
+                            src.right = ::GetSystemMetrics(SM_CXSCREEN);
+                            src.bottom = ::GetSystemMetrics(SM_CYSCREEN);
+                        } else {
+                            if (!::GetWindowRect(srcWindow, &src))
+                                src = RECT{ 0, 0, ::GetSystemMetrics(SM_CXSCREEN), ::GetSystemMetrics(SM_CYSCREEN) };
+                        }
+                        int srcW = (std::max)(1, src.right - src.left);
+                        int srcH = (std::max)(1, src.bottom - src.top);
+                        ::StretchBlt(memDC, 0, 0, outW, outH, srcDC, src.left, src.top, srcW, srcH, SRCCOPY);
+
+                        std::vector<uint8_t> rgba(static_cast<size_t>(outW) * static_cast<size_t>(outH) * 4);
+                        const uint8_t* bgra = reinterpret_cast<const uint8_t*>(bits);
+                        for (int i = 0; i < outW * outH; i++) {
+                            rgba[i * 4 + 0] = bgra[i * 4 + 2];
+                            rgba[i * 4 + 1] = bgra[i * 4 + 1];
+                            rgba[i * 4 + 2] = bgra[i * 4 + 0];
+                            rgba[i * 4 + 3] = 255;
+                        }
+                        TalkMe::TextureManager::Get().LoadFromRGBA(texId, rgba.data(), outW, outH, false, rgba.size());
+
+                        ::SelectObject(memDC, old);
+                        ::DeleteObject(dib);
+                        ::DeleteDC(memDC);
+                        ::ReleaseDC(nullptr, srcDC);
+                    };
 
                     if (s_refresh) {
                         s_windows.clear();
@@ -853,7 +911,20 @@ namespace TalkMe::UI::Views {
                         auto devs = TalkMe::WebcamCapture::EnumerateDevices();
                         for (auto& d : devs)
                             s_cameras.push_back({std::move(d.name), std::move(d.symbolicLink)});
+                        if (s_selApp < 0 && !s_windows.empty()) s_selApp = 0;
+                        if (s_selCam < 0 && !s_cameras.empty()) s_selCam = 0;
                         s_refresh = false;
+                    }
+
+                    if (ImGui::GetTime() - s_lastThumbRefresh > 1.0) {
+                        const int thumbW = 320;
+                        const int thumbH = 180;
+                        for (size_t i = 0; i < s_windows.size() && i < 12; ++i) {
+                            const std::string texId = "sharepick_app_" + std::to_string(reinterpret_cast<uintptr_t>(s_windows[i].hwnd));
+                            updateSharePickerThumb(texId, s_windows[i].hwnd, false, thumbW, thumbH);
+                        }
+                        updateSharePickerThumb("sharepick_screen", nullptr, true, thumbW, thumbH);
+                        s_lastThumbRefresh = ImGui::GetTime();
                     }
 
                     const float popW = 740.0f, popH = 530.0f;
@@ -918,7 +989,7 @@ namespace TalkMe::UI::Views {
                         const float thumbH = 70.0f;
 
                         // Draws a selection card at fixed grid position
-                        auto drawCard = [&](int idx, int total, bool selected, const char* title, const char* subtitle, float cw, float ch, float th) -> bool {
+                        auto drawCard = [&](int idx, int total, bool selected, const char* title, const char* subtitle, float cw, float ch, float th, const char* previewTexId) -> bool {
                             int col = idx % cols;
                             int row = idx / cols;
                             float x = col * (cw + gap);
@@ -945,6 +1016,16 @@ namespace TalkMe::UI::Views {
                                 ImVec2(screenPos.x + cw - 8, screenPos.y + 8 + th),
                                 IM_COL32(18, 18, 22, 255), 6.0f);
 
+                            if (previewTexId && previewTexId[0]) {
+                                if (auto* thumbSrv = TalkMe::TextureManager::Get().GetTexture(previewTexId)) {
+                                    ImGui::GetWindowDrawList()->AddImageRounded(
+                                        (ImTextureID)thumbSrv,
+                                        ImVec2(screenPos.x + 8, screenPos.y + 8),
+                                        ImVec2(screenPos.x + cw - 8, screenPos.y + 8 + th),
+                                        ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 255), 6.0f);
+                                }
+                            }
+
                             if (subtitle && subtitle[0]) {
                                 ImGui::GetWindowDrawList()->AddText(
                                     ImVec2(screenPos.x + 14, screenPos.y + th * 0.35f),
@@ -967,10 +1048,11 @@ namespace TalkMe::UI::Views {
                             for (int i = 0; i < (int)s_windows.size(); i++) {
                                 RECT wr = {};
                                 char sub[32] = {};
+                                const std::string texId = "sharepick_app_" + std::to_string(reinterpret_cast<uintptr_t>(s_windows[i].hwnd));
                                 if (::GetWindowRect(s_windows[i].hwnd, &wr))
                                     std::snprintf(sub, 32, "%dx%d", wr.right - wr.left, wr.bottom - wr.top);
                                 if (drawCard(i, (int)s_windows.size(), s_selApp == i,
-                                    s_windows[i].title.c_str(), sub, cardW, cardH, thumbH))
+                                    s_windows[i].title.c_str(), sub, cardW, cardH, thumbH, texId.c_str()))
                                     s_selApp = i;
                             }
                             if (s_windows.empty()) {
@@ -986,14 +1068,14 @@ namespace TalkMe::UI::Views {
                             int sw = ::GetSystemMetrics(SM_CXSCREEN);
                             int sh = ::GetSystemMetrics(SM_CYSCREEN);
                             char sub[32]; std::snprintf(sub, 32, "%dx%d", sw, sh);
-                            drawCard(0, 1, true, "Entire Screen", sub, cW * 0.48f, cardH, thumbH);
+                            drawCard(0, 1, true, "Entire Screen", sub, cW * 0.48f, cardH, thumbH, "sharepick_screen");
                             ImGui::EndChild();
                         }
                         else {
                             ImGui::BeginChild("##cams", ImVec2(cW, contentH), false);
                             for (int i = 0; i < (int)s_cameras.size(); i++) {
                                 if (drawCard(i, (int)s_cameras.size(), s_selCam == i,
-                                    s_cameras[i].name.c_str(), "Camera", cardW, cardH, thumbH))
+                                    s_cameras[i].name.c_str(), "Camera", cardW, cardH, thumbH, nullptr))
                                     s_selCam = i;
                             }
                             if (s_cameras.empty()) {
@@ -1052,10 +1134,20 @@ namespace TalkMe::UI::Views {
                             const int rW[] = {1280, 1920, 2560};
                             const int rH[] = {720, 1080, 1440};
                             void* hwnd = nullptr;
+                            int sourceType = 1; // 0=application, 1=screen, 2=camera
+                            std::string sourceId;
                             if (s_tab == 0 && s_selApp >= 0 && s_selApp < (int)s_windows.size())
+                            {
                                 hwnd = (void*)s_windows[s_selApp].hwnd;
+                                sourceType = 0;
+                            }
+                            else if (s_tab == 2 && s_selCam >= 0 && s_selCam < (int)s_cameras.size())
+                            {
+                                sourceType = 2;
+                                sourceId = s_cameras[s_selCam].symLink;
+                            }
                             if (onStartScreenShare)
-                                onStartScreenShare(fpsV[s_shareFps], qualV[s_shareQuality], rW[s_shareRes], rH[s_shareRes], hwnd);
+                                onStartScreenShare(fpsV[s_shareFps], qualV[s_shareQuality], rW[s_shareRes], rH[s_shareRes], hwnd, sourceType, sourceId);
                             s_refresh = true;
                             ImGui::CloseCurrentPopup();
                         }

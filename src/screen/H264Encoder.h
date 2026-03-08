@@ -5,6 +5,7 @@
 #include <mfreadwrite.h>
 #include <mftransform.h>
 #include <codecapi.h>
+#include <dxgi.h>
 #include <vector>
 #include <cstdint>
 
@@ -22,6 +23,7 @@ public:
 
     bool Initialize(int width, int height, int fps, int bitrateKbps, ID3D11Device* d3dDevice = nullptr);
     std::vector<uint8_t> Encode(const uint8_t* bgraData, int width, int height);
+    bool ReconfigureBitrate(int bitrateKbps);
     void Shutdown();
 
     bool IsInitialized() const { return m_Initialized; }
@@ -46,6 +48,7 @@ private:
 
     // GPU capability tracking (for adaptive bitrate)
     bool m_HasGPUEncoder = false;  // Set if hardware encoder detected
+    int m_CurrentBitrateKbps = 0;
 
     // Encoder health telemetry (for Solution C: Frame Skipping)
     float m_LastProcessOutputTimeMs = 0.0f;
@@ -65,9 +68,16 @@ private:
     ID3D11UnorderedAccessView* m_UVUAV = nullptr;
     ID3D11Texture2D* m_YStaging = nullptr;
     ID3D11Texture2D* m_UVStaging = nullptr;
+    ID3D11Texture2D* m_DxgiInputTexture = nullptr;
+    IMFDXGIDeviceManager* m_DxgiDeviceManager = nullptr;
+    UINT m_DxgiResetToken = 0;
+    bool m_UseDxgiSurfaceInput = false;
+    GUID m_InputSubtype = GUID_NULL;
 
     bool InitializeGPUConversion(ID3D11Device* device);
     bool ConvertBGRAviaGPU(const uint8_t* bgraData, int width, int height, std::vector<uint8_t>& outNV12);
+    bool InitializeDxgiSurfaceInput(ID3D11Device* device);
+    IMFSample* CreateDxgiBgraSample(const uint8_t* bgraData, int width, int height, int64_t frameIndex);
     void ShutdownGPUResources();
 };
 

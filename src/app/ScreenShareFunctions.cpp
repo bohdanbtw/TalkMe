@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 
 namespace TalkMe {
 
@@ -32,6 +33,7 @@ void Application::StartScreenShareProcess(int fps, int quality, int width, int h
     (void)fps; // m_ScreenShare.fps already set by caller
     if (m_DXGICapture.IsRunning())
         return;
+    m_ScreenShare.usingWebcam = false;
 
     const int effectiveFps = GetEffectiveShareFps();
     std::fprintf(stderr, "[TalkMe] StartScreenShareProcess: effectiveFps=%d (targetFps=%d, shareFps=%d)\n",
@@ -86,6 +88,7 @@ void Application::StartScreenShareProcess(int fps, int quality, int width, int h
             si.lastFrameData = data;
             si.frameWidth = w;
             si.frameHeight = h;
+            si.sourceFps = GetEffectiveShareFps();
             si.frameUpdated = true;
 
             const auto now = std::chrono::steady_clock::now();
@@ -96,10 +99,90 @@ void Application::StartScreenShareProcess(int fps, int quality, int width, int h
     m_DXGICapture.Start(settings, std::move(onFrame));
 }
 
+void Application::StartWebcamShareProcess(int fps, int quality, int width, int height, const std::string& cameraSymLink) {
+    if (cameraSymLink.empty()) {
+        m_ScreenShare.iAmSharing = false;
+        return;
+    }
+    if (m_WebcamCapture.IsRunning())
+        return;
+    m_ScreenShare.usingWebcam = true;
+    m_DXGICapture.Stop();
+
+    const int effectiveFps = (std::max)(1, (std::min)(GetEffectiveShareFps(), (std::max)(1, fps)));
+    m_AdaptiveQualityLevel.store((std::max)(1, (std::min)(100, quality)));
+
+    {
+        std::lock_guard<std::mutex> lock(m_ScreenShareSendQueueMutex);
+        while (!m_ScreenShareSendQueue.empty())
+            m_ScreenShareSendQueue.pop();
+    }
+    m_ScreenShareQueueDepth.store(0);
+
+    if (!m_ScreenShareSendThreadRunning.load()) {
+        m_ScreenShareSendThreadRunning.store(true);
+        if (m_ScreenShareSendThread.joinable())
+            m_ScreenShareSendThread.join();
+        m_ScreenShareSendThread = std::thread([this]() { RunScreenShareSendThread(); });
+    }
+
+    m_WebcamCapture.Start(cameraSymLink, effectiveFps, width, height,
+        [this, effectiveFps, quality](const std::vector<uint8_t>& bgraData, int w, int h) {
+            if (bgraData.empty() || !m_NetClient.IsConnected() || w <= 0 || h <= 0)
+                return;
+
+            const int adaptiveQuality = (std::max)(1, (std::min)(100, m_AdaptiveQualityLevel.load()));
+            const double pixelsPerSecond = static_cast<double>(w) * static_cast<double>(h) * static_cast<double>(effectiveFps);
+            const double quality01 = adaptiveQuality / 100.0;
+            const double bitsPerPixelPerFrame = 0.05 + quality01 * 0.12;
+            int bitrate = static_cast<int>((pixelsPerSecond * bitsPerPixelPerFrame) / 1000.0);
+            bitrate = (std::clamp)(bitrate, 1000, 12000);
+
+            if (!m_WebcamH264Encoder.IsInitialized()) {
+                if (!m_WebcamH264Encoder.Initialize(w, h, effectiveFps, bitrate))
+                    return;
+            } else {
+                m_WebcamH264Encoder.ReconfigureBitrate(bitrate);
+            }
+
+            std::vector<uint8_t> encoded = m_WebcamH264Encoder.Encode(bgraData.data(), w, h);
+            if (encoded.empty())
+                return;
+
+            std::vector<uint8_t> packet(1 + encoded.size());
+            packet[0] = 1;
+            std::memcpy(packet.data() + 1, encoded.data(), encoded.size());
+
+            {
+                std::lock_guard<std::mutex> queueLock(m_ScreenShareSendQueueMutex);
+                while (m_ScreenShareSendQueue.size() > 2)
+                    m_ScreenShareSendQueue.pop();
+                m_ScreenShareSendQueue.push(packet);
+            }
+            m_ScreenShareSendCV.notify_one();
+
+            {
+                std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                auto& si = m_ScreenShare.activeStreams[m_CurrentUser.username];
+                si.username = m_CurrentUser.username;
+                si.lastFrameData = packet;
+                si.frameWidth = w;
+                si.frameHeight = h;
+                si.sourceFps = effectiveFps;
+                si.frameUpdated = true;
+                const auto now = std::chrono::steady_clock::now();
+                UpdateFpsWindow(si.streamFpsWindowStart, si.streamFramesInWindow, si.streamFps, now);
+            }
+        });
+}
+
 void Application::StopScreenShareProcess() {
     m_DXGICapture.Stop();
+    m_WebcamCapture.Stop();
+    m_WebcamH264Encoder.Shutdown();
     m_AudioLoopback.Stop();
     m_ScreenShare.iAmSharing = false;
+    m_ScreenShare.usingWebcam = false;
 
     // Drain send queue
     m_ScreenShareSendThreadRunning.store(false);
@@ -189,7 +272,17 @@ void Application::RunScreenShareSendThread() {
 
         // Send outside the lock (this might block a bit, that's OK)
         if (!frameData.empty() && m_NetClient.IsConnected()) {
-            m_NetClient.SendRaw(PacketType::Screen_Share_Frame, frameData);
+            // Wire format v1: [0xA5][u16 usernameLen BE][username][framePayload(codec+bitstream)]
+            std::vector<uint8_t> wirePayload;
+            const std::string& user = m_CurrentUser.username;
+            const uint16_t unameLen = static_cast<uint16_t>((std::min)(user.size(), static_cast<size_t>(0xFFFF)));
+            wirePayload.reserve(3 + unameLen + frameData.size());
+            wirePayload.push_back(0xA5);
+            wirePayload.push_back(static_cast<uint8_t>((unameLen >> 8) & 0xFF));
+            wirePayload.push_back(static_cast<uint8_t>(unameLen & 0xFF));
+            wirePayload.insert(wirePayload.end(), user.begin(), user.begin() + unameLen);
+            wirePayload.insert(wirePayload.end(), frameData.begin(), frameData.end());
+            m_NetClient.SendRaw(PacketType::Screen_Share_Frame, wirePayload);
             framesSent++;
 
             // Log every second

@@ -147,15 +147,9 @@ void WebcamCapture::CaptureLoop() {
             }
 
             if ((int)len >= w * h * 4 && m_OnFrame) {
-                // RGB32 (BGRA) -> RGBA
-                std::vector<uint8_t> rgba(w * h * 4);
-                for (int i = 0; i < w * h; i++) {
-                    rgba[i * 4 + 0] = pData[i * 4 + 2]; // R
-                    rgba[i * 4 + 1] = pData[i * 4 + 1]; // G
-                    rgba[i * 4 + 2] = pData[i * 4 + 0]; // B
-                    rgba[i * 4 + 3] = 255;
-                }
-                m_OnFrame(rgba, w, h);
+                std::vector<uint8_t> bgra(static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+                std::memcpy(bgra.data(), pData, bgra.size());
+                m_OnFrame(bgra, w, h);
             }
             pBuf->Unlock();
             pBuf->Release();

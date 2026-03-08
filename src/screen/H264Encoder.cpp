@@ -66,11 +66,37 @@ static IMFSample* CreateSampleFromBGRA(const uint8_t* bgra, int width, int heigh
     return pSample;
 }
 
+static IMFSample* CreateSampleFromRGB32(const uint8_t* bgra, int width, int height, int64_t timestamp, int fps) {
+    const DWORD sizeBytes = static_cast<DWORD>(width * height * 4);
+    IMFMediaBuffer* pBuf = nullptr;
+    MFCreateMemoryBuffer(sizeBytes, &pBuf);
+    if (!pBuf) return nullptr;
+    BYTE* dst = nullptr;
+    pBuf->Lock(&dst, nullptr, nullptr);
+    std::memcpy(dst, bgra, sizeBytes);
+    pBuf->Unlock();
+    pBuf->SetCurrentLength(sizeBytes);
+
+    IMFSample* pSample = nullptr;
+    MFCreateSample(&pSample);
+    pSample->AddBuffer(pBuf);
+    pBuf->Release();
+
+    const LONGLONG duration = 10'000'000LL / (std::max)(1, fps);
+    pSample->SetSampleTime(timestamp * duration);
+    pSample->SetSampleDuration(duration);
+    return pSample;
+}
+
 // GPU-accelerated BGRA to NV12 conversion (saves 3-5ms per frame!)
 bool H264Encoder::InitializeGPUConversion(ID3D11Device* device) {
     if (!device) return false;
 
     m_D3DDevice = device;
+    if (m_D3DContext) {
+        m_D3DContext->Release();
+        m_D3DContext = nullptr;
+    }
     device->GetImmediateContext(&m_D3DContext);
     if (!m_D3DContext) return false;
 
@@ -240,6 +266,53 @@ bool H264Encoder::ConvertBGRAviaGPU(const uint8_t* bgraData, int width, int heig
     return true;
 }
 
+bool H264Encoder::InitializeDxgiSurfaceInput(ID3D11Device* device) {
+    if (!device) return false;
+    if (FAILED(MFCreateDXGIDeviceManager(&m_DxgiResetToken, &m_DxgiDeviceManager)) || !m_DxgiDeviceManager)
+        return false;
+    if (FAILED(m_DxgiDeviceManager->ResetDevice(device, m_DxgiResetToken)))
+        return false;
+    if (FAILED(m_Encoder->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, reinterpret_cast<ULONG_PTR>(m_DxgiDeviceManager))))
+        return false;
+
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width = static_cast<UINT>(m_Width);
+    desc.Height = static_cast<UINT>(m_Height);
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    if (FAILED(device->CreateTexture2D(&desc, nullptr, &m_DxgiInputTexture)))
+        return false;
+
+    return true;
+}
+
+IMFSample* H264Encoder::CreateDxgiBgraSample(const uint8_t* bgraData, int width, int height, int64_t frameIndex) {
+    if (!m_DxgiInputTexture || !m_D3DContext || !bgraData) return nullptr;
+
+    m_D3DContext->UpdateSubresource(m_DxgiInputTexture, 0, nullptr, bgraData, width * 4, 0);
+
+    IMFMediaBuffer* pBuf = nullptr;
+    if (FAILED(MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D), m_DxgiInputTexture, 0, FALSE, &pBuf)) || !pBuf)
+        return nullptr;
+
+    IMFSample* pSample = nullptr;
+    if (FAILED(MFCreateSample(&pSample)) || !pSample) {
+        pBuf->Release();
+        return nullptr;
+    }
+    pSample->AddBuffer(pBuf);
+    pBuf->Release();
+
+    const LONGLONG duration = 10'000'000LL / (std::max)(1, m_Fps);
+    pSample->SetSampleTime(frameIndex * duration);
+    pSample->SetSampleDuration(duration);
+    return pSample;
+}
+
 void H264Encoder::ShutdownGPUResources() {
     if (m_YStaging) { m_YStaging->Release(); m_YStaging = nullptr; }
     if (m_UVStaging) { m_UVStaging->Release(); m_UVStaging = nullptr; }
@@ -252,6 +325,9 @@ void H264Encoder::ShutdownGPUResources() {
     if (m_UVUAV) { m_UVUAV->Release(); m_UVUAV = nullptr; }
     if (m_UVTexture) { m_UVTexture->Release(); m_UVTexture = nullptr; }
     if (m_D3DContext) { m_D3DContext->Release(); m_D3DContext = nullptr; }
+    if (m_DxgiInputTexture) { m_DxgiInputTexture->Release(); m_DxgiInputTexture = nullptr; }
+    if (m_DxgiDeviceManager) { m_DxgiDeviceManager->Release(); m_DxgiDeviceManager = nullptr; }
+    m_UseDxgiSurfaceInput = false;
     m_GPUConversionReady = false;
 }
 
@@ -259,6 +335,7 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps, ID
     m_Width = width;
     m_Height = height;
     m_Fps = fps;
+    m_CurrentBitrateKbps = bitrateKbps;
 
     HRESULT hr = MFStartup(MF_VERSION);
     if (FAILED(hr)) return false;
@@ -327,20 +404,42 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps, ID
         return false;
     }
 
-    IMFMediaType* pInputType = nullptr;
-    MFCreateMediaType(&pInputType);
-    pInputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    pInputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
-    MFSetAttributeSize(pInputType, MF_MT_FRAME_SIZE, width, height);
-    MFSetAttributeRatio(pInputType, MF_MT_FRAME_RATE, fps, 1);
-    pInputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-    MFSetAttributeRatio(pInputType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+    if (d3dDevice) {
+        m_D3DDevice = d3dDevice;
+        m_D3DDevice->GetImmediateContext(&m_D3DContext);
+    }
 
-    hr = m_Encoder->SetInputType(0, pInputType, 0);
-    pInputType->Release();
-    if (FAILED(hr)) {
-        std::fprintf(stderr, "[H264Encoder] SetInputType failed: 0x%08lx\n", hr);
+    GUID preferredInputs[] = { MFVideoFormat_ARGB32, MFVideoFormat_RGB32, MFVideoFormat_NV12 };
+    bool inputSet = false;
+    for (GUID subtype : preferredInputs) {
+        IMFMediaType* pInputType = nullptr;
+        MFCreateMediaType(&pInputType);
+        pInputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+        pInputType->SetGUID(MF_MT_SUBTYPE, subtype);
+        MFSetAttributeSize(pInputType, MF_MT_FRAME_SIZE, width, height);
+        MFSetAttributeRatio(pInputType, MF_MT_FRAME_RATE, fps, 1);
+        pInputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+        MFSetAttributeRatio(pInputType, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+        hr = m_Encoder->SetInputType(0, pInputType, 0);
+        pInputType->Release();
+        if (SUCCEEDED(hr)) {
+            m_InputSubtype = subtype;
+            inputSet = true;
+            break;
+        }
+    }
+    if (!inputSet) {
+        std::fprintf(stderr, "[H264Encoder] SetInputType failed for all candidates\n");
         return false;
+    }
+
+    if (d3dDevice && (m_InputSubtype == MFVideoFormat_ARGB32 || m_InputSubtype == MFVideoFormat_RGB32)) {
+        if (InitializeDxgiSurfaceInput(d3dDevice)) {
+            m_UseDxgiSurfaceInput = true;
+            std::fprintf(stderr, "[H264Encoder] Using DXGI zero-copy ARGB input\n");
+        } else {
+            std::fprintf(stderr, "[H264Encoder] DXGI surface input unavailable, falling back to CPU sample path\n");
+        }
     }
 
     // Real-time encoding hints for minimum latency
@@ -366,8 +465,8 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps, ID
     m_Initialized = true;
     m_FrameIndex = 0;
 
-    // Try to initialize GPU conversion (optional, falls back to CPU if fails)
-    if (d3dDevice) {
+    // Try to initialize GPU conversion for NV12 path (optional, falls back to CPU if fails)
+    if (d3dDevice && m_InputSubtype == MFVideoFormat_NV12) {
         if (!InitializeGPUConversion(d3dDevice)) {
             std::fprintf(stderr, "[H264Encoder] GPU conversion init failed, falling back to CPU\n");
         } else {
@@ -379,13 +478,49 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps, ID
     return true;
 }
 
+bool H264Encoder::ReconfigureBitrate(int bitrateKbps) {
+    if (!m_Initialized || !m_Encoder) return false;
+    bitrateKbps = (std::max)(100, bitrateKbps);
+    if (bitrateKbps == m_CurrentBitrateKbps) return true;
+
+    bool applied = false;
+    ICodecAPI* pCodecAPI = nullptr;
+    if (SUCCEEDED(m_Encoder->QueryInterface(__uuidof(ICodecAPI), (void**)&pCodecAPI))) {
+        VARIANT var;
+        var.vt = VT_UI4;
+        var.ulVal = static_cast<ULONG>(bitrateKbps * 1000);
+        if (SUCCEEDED(pCodecAPI->SetValue(&CODECAPI_AVEncCommonMeanBitRate, &var)))
+            applied = true;
+        pCodecAPI->Release();
+    }
+
+    if (!applied) {
+        IMFMediaType* pOutType = nullptr;
+        if (SUCCEEDED(m_Encoder->GetOutputCurrentType(0, &pOutType)) && pOutType) {
+            pOutType->SetUINT32(MF_MT_AVG_BITRATE, static_cast<UINT32>(bitrateKbps * 1000));
+            HRESULT hr = m_Encoder->SetOutputType(0, pOutType, 0);
+            applied = SUCCEEDED(hr);
+            pOutType->Release();
+        }
+    }
+
+    if (applied)
+        m_CurrentBitrateKbps = bitrateKbps;
+    return applied;
+}
+
 std::vector<uint8_t> H264Encoder::Encode(const uint8_t* bgraData, int width, int height) {
     std::vector<uint8_t> result;
     if (!m_Initialized || !m_Encoder) return result;
 
-    // Try GPU conversion if available, fall back to CPU
+    // Preferred path: zero-copy DXGI surface input when encoder accepts ARGB input.
     IMFSample* pInputSample = nullptr;
-    if (m_GPUConversionReady) {
+    if (m_UseDxgiSurfaceInput && (m_InputSubtype == MFVideoFormat_ARGB32 || m_InputSubtype == MFVideoFormat_RGB32)) {
+        pInputSample = CreateDxgiBgraSample(bgraData, width, height, m_FrameIndex);
+    }
+
+    // Try GPU conversion (NV12) if available, fall back to CPU.
+    if (!pInputSample && m_InputSubtype == MFVideoFormat_NV12 && m_GPUConversionReady) {
         std::vector<uint8_t> nv12Data;
         if (ConvertBGRAviaGPU(bgraData, width, height, nv12Data) && !nv12Data.empty()) {
             // Create MFSample from GPU-converted NV12
@@ -409,9 +544,13 @@ std::vector<uint8_t> H264Encoder::Encode(const uint8_t* bgraData, int width, int
         }
     }
 
-    // Fallback to CPU conversion if GPU failed
+    // Fallback to CPU conversion if DXGI / GPU path failed.
     if (!pInputSample) {
-        pInputSample = CreateSampleFromBGRA(bgraData, width, height, m_FrameIndex, m_Fps);
+        if (m_InputSubtype == MFVideoFormat_NV12) {
+            pInputSample = CreateSampleFromBGRA(bgraData, width, height, m_FrameIndex, m_Fps);
+        } else {
+            pInputSample = CreateSampleFromRGB32(bgraData, width, height, m_FrameIndex, m_Fps);
+        }
     }
 
     if (!pInputSample) return result;
