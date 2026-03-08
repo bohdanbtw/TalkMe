@@ -15,7 +15,11 @@
 #include <algorithm>
 #include <cmath>
 #include <shellapi.h>
+#include <windows.h>
+#include <dwmapi.h>
 #include <cstdio>
+
+#pragma comment(lib, "dwmapi.lib")
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -24,6 +28,10 @@
 #undef max
 
 namespace TalkMe::UI::Views {
+
+#ifndef PW_RENDERFULLCONTENT
+#define PW_RENDERFULLCONTENT 0x00000002
+#endif
 
     namespace {
         using namespace TalkMe::Limits;
@@ -830,14 +838,12 @@ namespace TalkMe::UI::Views {
                     static int s_shareQuality = 1;
                     static int s_shareRes = 1;
                     static bool s_refresh = true;
-                    static double s_lastThumbRefresh = 0.0;
+                    static bool s_popupWasOpen = false;
 
                     auto updateSharePickerThumb = [](const std::string& texId, HWND srcWindow, bool captureDesktop, int outW, int outH) {
                         if (outW <= 0 || outH <= 0) return;
-                        HDC srcDC = ::GetDC(nullptr);
-                        if (!srcDC) return;
-                        HDC memDC = ::CreateCompatibleDC(srcDC);
-                        if (!memDC) { ::ReleaseDC(nullptr, srcDC); return; }
+                        HDC memDC = ::CreateCompatibleDC(nullptr);
+                        if (!memDC) return;
 
                         BITMAPINFO bmi = {};
                         bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -858,20 +864,39 @@ namespace TalkMe::UI::Views {
                         HGDIOBJ old = ::SelectObject(memDC, dib);
                         ::SetStretchBltMode(memDC, HALFTONE);
 
-                        RECT src = {};
-                        if (captureDesktop || !srcWindow || !::IsWindow(srcWindow)) {
-                            src.left = 0;
-                            src.top = 0;
-                            src.right = ::GetSystemMetrics(SM_CXSCREEN);
-                            src.bottom = ::GetSystemMetrics(SM_CYSCREEN);
-                        } else {
-                            if (!::GetWindowRect(srcWindow, &src))
-                                src = RECT{ 0, 0, ::GetSystemMetrics(SM_CXSCREEN), ::GetSystemMetrics(SM_CYSCREEN) };
+                        bool copied = false;
+                        if (!captureDesktop && srcWindow && ::IsWindow(srcWindow)) {
+                            // Capture independent window content even if obscured by our popup.
+                            if (::PrintWindow(srcWindow, memDC, PW_RENDERFULLCONTENT) != 0) {
+                                copied = true;
+                            } else {
+                                RECT wr = {};
+                                if (::GetWindowRect(srcWindow, &wr)) {
+                                    HDC wndDC = ::GetWindowDC(srcWindow);
+                                    if (wndDC) {
+                                        int srcW = (std::max)(1, wr.right - wr.left);
+                                        int srcH = (std::max)(1, wr.bottom - wr.top);
+                                        ::StretchBlt(memDC, 0, 0, outW, outH, wndDC, 0, 0, srcW, srcH, SRCCOPY);
+                                        ::ReleaseDC(srcWindow, wndDC);
+                                        copied = true;
+                                    }
+                                }
+                            }
                         }
-                        int srcW = (std::max)(1, static_cast<int>(src.right - src.left));
-                        int srcH = (std::max)(1, static_cast<int>(src.bottom - src.top));
-                        ::StretchBlt(memDC, 0, 0, outW, outH, srcDC, src.left, src.top, srcW, srcH, SRCCOPY);
-
+                        if (!copied) {
+                            HDC srcDC = ::GetDC(nullptr);
+                            if (!srcDC) {
+                                ::SelectObject(memDC, old);
+                                ::DeleteObject(dib);
+                                ::DeleteDC(memDC);
+                                return;
+                            }
+                            RECT src = { 0, 0, ::GetSystemMetrics(SM_CXSCREEN), ::GetSystemMetrics(SM_CYSCREEN) };
+                            int srcW = (std::max)(1, src.right - src.left);
+                            int srcH = (std::max)(1, src.bottom - src.top);
+                            ::StretchBlt(memDC, 0, 0, outW, outH, srcDC, src.left, src.top, srcW, srcH, SRCCOPY);
+                            ::ReleaseDC(nullptr, srcDC);
+                        }
                         std::vector<uint8_t> rgba(static_cast<size_t>(outW) * static_cast<size_t>(outH) * 4);
                         const uint8_t* bgra = reinterpret_cast<const uint8_t*>(bits);
                         for (int i = 0; i < outW * outH; i++) {
@@ -885,10 +910,10 @@ namespace TalkMe::UI::Views {
                         ::SelectObject(memDC, old);
                         ::DeleteObject(dib);
                         ::DeleteDC(memDC);
-                        ::ReleaseDC(nullptr, srcDC);
                     };
 
                     if (s_refresh) {
+                        TalkMe::TextureManager::Get().EvictTexturesWithPrefixExcept("sharepick_", std::unordered_set<std::string>{});
                         s_windows.clear();
                         s_cameras.clear();
                         s_selApp = -1;
@@ -898,6 +923,10 @@ namespace TalkMe::UI::Views {
                             if (::GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) return TRUE;
                             if (::GetWindow(h, GW_OWNER)) return TRUE;
                             DWORD pid = 0; ::GetWindowThreadProcessId(h, &pid);
+                            if (pid == ::GetCurrentProcessId()) return TRUE; // Hide TalkMe itself.
+                            BOOL cloaked = FALSE;
+                            if (SUCCEEDED(::DwmGetWindowAttribute(h, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
+                                return TRUE;
                             wchar_t buf[256] = {};
                             if (::GetWindowTextW(h, buf, 256) <= 0) return TRUE;
                             char u8[512] = {};
@@ -913,21 +942,18 @@ namespace TalkMe::UI::Views {
                             s_cameras.push_back({std::move(d.name), std::move(d.symbolicLink)});
                         if (s_selApp < 0 && !s_windows.empty()) s_selApp = 0;
                         if (s_selCam < 0 && !s_cameras.empty()) s_selCam = 0;
-                        s_refresh = false;
-                    }
-
-                    if (ImGui::GetTime() - s_lastThumbRefresh > 1.0) {
+                        // One-shot thumbnails on open/refresh (not continuous updates).
                         const int thumbW = 320;
                         const int thumbH = 180;
-                        for (size_t i = 0; i < s_windows.size() && i < 12; ++i) {
+                        for (size_t i = 0; i < s_windows.size() && i < 8; ++i) {
                             const std::string texId = "sharepick_app_" + std::to_string(reinterpret_cast<uintptr_t>(s_windows[i].hwnd));
                             updateSharePickerThumb(texId, s_windows[i].hwnd, false, thumbW, thumbH);
                         }
                         updateSharePickerThumb("sharepick_screen", nullptr, true, thumbW, thumbH);
-                        s_lastThumbRefresh = ImGui::GetTime();
+                        s_refresh = false;
                     }
 
-                    const float popW = 740.0f, popH = 530.0f;
+                    const float popW = 940.0f, popH = 640.0f;
                     ImGui::SetNextWindowSize(ImVec2(popW, popH), ImGuiCond_Always);
                     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
                     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
@@ -935,6 +961,7 @@ namespace TalkMe::UI::Views {
                     ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.11f, 0.11f, 0.13f, 1.0f));
 
                     if (ImGui::BeginPopup("ScreenShareSetup")) {
+                        s_popupWasOpen = true;
                         const float pad = 24.0f;
                         const float cW = popW - pad * 2;
                         const ImVec4 accent(0.40f, 0.52f, 0.96f, 1.0f);
@@ -1156,6 +1183,12 @@ namespace TalkMe::UI::Views {
 
                         ImGui::EndPopup();
                     } else {
+                        if (s_popupWasOpen) {
+                            TalkMe::TextureManager::Get().EvictTexturesWithPrefixExcept("sharepick_", std::unordered_set<std::string>{});
+                            s_windows.clear();
+                            s_cameras.clear();
+                        }
+                        s_popupWasOpen = false;
                         s_refresh = true;
                     }
 

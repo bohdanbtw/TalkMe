@@ -482,11 +482,7 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
             if (GetCursorInfo(&ci) && ci.hCursor && ci.flags == CURSOR_SHOWING) {
                 const int cursorX = (int)((ci.ptScreenPos.x - srcX) * scale);
                 const int cursorY = (int)((ci.ptScreenPos.y - srcY) * scale);
-                const bool cursorMoved = (ci.ptScreenPos.x != prevCursorPos.x || ci.ptScreenPos.y != prevCursorPos.y);
-                const bool visibilityChanged = !prevCursorVisible;
-                const bool shouldDrawCursor = (targetFps <= 90) || cursorMoved || visibilityChanged || ((frameCount % 6) == 0);
-                if (shouldDrawCursor)
-                    DrawCursorOntoBgra(bgraBuffer.data(), outW, outH, cursorX, cursorY);
+                DrawCursorOntoBgra(bgraBuffer.data(), outW, outH, cursorX, cursorY);
                 prevCursorPos = ci.ptScreenPos;
                 prevCursorVisible = true;
             } else {

@@ -6,6 +6,7 @@
 #include <mftransform.h>
 #include <codecapi.h>
 #include <dxgi.h>
+#include <string>
 #include <vector>
 #include <cstdint>
 
@@ -71,9 +72,12 @@ private:
     ID3D11Texture2D* m_DxgiInputTexture = nullptr;
     IMFDXGIDeviceManager* m_DxgiDeviceManager = nullptr;
     UINT m_DxgiResetToken = 0;
+    ID3D11Device* m_EncodeDevice = nullptr;
+    ID3D11DeviceContext* m_EncodeContext = nullptr;
     bool m_UseDxgiSurfaceInput = false;
     GUID m_InputSubtype = GUID_NULL;
 
+    bool InitializeEncoderD3DManager(ID3D11Device* device);
     bool InitializeGPUConversion(ID3D11Device* device);
     bool ConvertBGRAviaGPU(const uint8_t* bgraData, int width, int height, std::vector<uint8_t>& outNV12);
     bool InitializeDxgiSurfaceInput(ID3D11Device* device);

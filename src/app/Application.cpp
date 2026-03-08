@@ -2611,6 +2611,10 @@ namespace TalkMe {
                         m_ScreenShare.fps = fps;
                         m_ScreenShare.quality = quality;
                         m_ScreenShare.usingWebcam = (sourceType == 2);
+                        {
+                            std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                            m_ScreenShare.viewingStream = m_CurrentUser.username;
+                        }
                         if (sourceType == 2) {
                             if (sourceId.empty())
                                 return;

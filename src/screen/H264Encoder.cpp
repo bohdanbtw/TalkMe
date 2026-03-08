@@ -4,10 +4,12 @@
 #include "H264Encoder.h"
 #include <mferror.h>
 #include <wmcodecdsp.h>
+#include <dxgi1_6.h>
 #include <cstring>
 #include <cstdio>
 #include <algorithm>
 #include <chrono>
+#include <string>
 
 namespace TalkMe {
 
@@ -15,6 +17,42 @@ namespace TalkMe {
 #include "ColorConversion_bytecode.h"
 
 static inline uint8_t Clamp255(int v) { return (uint8_t)((unsigned)v <= 255 ? v : (v < 0 ? 0 : 255)); }
+
+static bool CreateHighPerfD3D11Device(ID3D11Device** outDevice, ID3D11DeviceContext** outContext, std::string& outAdapterName) {
+    if (!outDevice || !outContext) return false;
+    *outDevice = nullptr;
+    *outContext = nullptr;
+    IDXGIFactory6* factory6 = nullptr;
+    if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory6), (void**)&factory6)) || !factory6)
+        return false;
+
+    IDXGIAdapter1* adapter = nullptr;
+    for (UINT i = 0; ; ++i) {
+        IDXGIAdapter1* cand = nullptr;
+        if (FAILED(factory6->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+            __uuidof(IDXGIAdapter1), (void**)&cand)))
+            break;
+        DXGI_ADAPTER_DESC1 d = {};
+        cand->GetDesc1(&d);
+        if ((d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0) {
+            adapter = cand;
+            char utf8[256] = {};
+            ::WideCharToMultiByte(CP_UTF8, 0, d.Description, -1, utf8, sizeof(utf8), nullptr, nullptr);
+            outAdapterName = utf8;
+            break;
+        }
+        cand->Release();
+    }
+    factory6->Release();
+    if (!adapter) return false;
+
+    D3D_FEATURE_LEVEL fl{};
+    const HRESULT hr = D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr,
+        D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
+        outDevice, &fl, outContext);
+    adapter->Release();
+    return SUCCEEDED(hr) && *outDevice && *outContext;
+}
 
 static IMFSample* CreateSampleFromBGRA(const uint8_t* bgra, int width, int height, int64_t timestamp, int fps) {
     const DWORD nv12Size = width * height * 3 / 2;
@@ -268,11 +306,12 @@ bool H264Encoder::ConvertBGRAviaGPU(const uint8_t* bgraData, int width, int heig
 
 bool H264Encoder::InitializeDxgiSurfaceInput(ID3D11Device* device) {
     if (!device) return false;
-    if (FAILED(MFCreateDXGIDeviceManager(&m_DxgiResetToken, &m_DxgiDeviceManager)) || !m_DxgiDeviceManager)
+    if (!InitializeEncoderD3DManager(device))
         return false;
-    if (FAILED(m_DxgiDeviceManager->ResetDevice(device, m_DxgiResetToken)))
-        return false;
-    if (FAILED(m_Encoder->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, reinterpret_cast<ULONG_PTR>(m_DxgiDeviceManager))))
+    m_D3DDevice = device;
+    if (!m_D3DContext)
+        m_D3DDevice->GetImmediateContext(&m_D3DContext);
+    if (!m_D3DContext)
         return false;
 
     D3D11_TEXTURE2D_DESC desc = {};
@@ -288,6 +327,20 @@ bool H264Encoder::InitializeDxgiSurfaceInput(ID3D11Device* device) {
         return false;
 
     return true;
+}
+
+bool H264Encoder::InitializeEncoderD3DManager(ID3D11Device* device) {
+    if (!device || !m_Encoder) return false;
+    if (m_DxgiDeviceManager) {
+        m_DxgiDeviceManager->Release();
+        m_DxgiDeviceManager = nullptr;
+    }
+    m_DxgiResetToken = 0;
+    if (FAILED(MFCreateDXGIDeviceManager(&m_DxgiResetToken, &m_DxgiDeviceManager)) || !m_DxgiDeviceManager)
+        return false;
+    if (FAILED(m_DxgiDeviceManager->ResetDevice(device, m_DxgiResetToken)))
+        return false;
+    return SUCCEEDED(m_Encoder->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, reinterpret_cast<ULONG_PTR>(m_DxgiDeviceManager)));
 }
 
 IMFSample* H264Encoder::CreateDxgiBgraSample(const uint8_t* bgraData, int width, int height, int64_t frameIndex) {
@@ -327,6 +380,8 @@ void H264Encoder::ShutdownGPUResources() {
     if (m_D3DContext) { m_D3DContext->Release(); m_D3DContext = nullptr; }
     if (m_DxgiInputTexture) { m_DxgiInputTexture->Release(); m_DxgiInputTexture = nullptr; }
     if (m_DxgiDeviceManager) { m_DxgiDeviceManager->Release(); m_DxgiDeviceManager = nullptr; }
+    if (m_EncodeContext) { m_EncodeContext->Release(); m_EncodeContext = nullptr; }
+    if (m_EncodeDevice) { m_EncodeDevice->Release(); m_EncodeDevice = nullptr; }
     m_UseDxgiSurfaceInput = false;
     m_GPUConversionReady = false;
 }
@@ -404,9 +459,13 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps, ID
         return false;
     }
 
-    if (d3dDevice) {
-        m_D3DDevice = d3dDevice;
-        m_D3DDevice->GetImmediateContext(&m_D3DContext);
+    ID3D11Device* managerDevice = d3dDevice;
+    std::string perfAdapterName;
+    if (CreateHighPerfD3D11Device(&m_EncodeDevice, &m_EncodeContext, perfAdapterName)) {
+        managerDevice = m_EncodeDevice;
+        std::fprintf(stderr, "[H264Encoder] Preferred encode adapter: %s\n", perfAdapterName.c_str());
+    } else if (d3dDevice) {
+        std::fprintf(stderr, "[H264Encoder] Preferred encode adapter unavailable, using capture adapter\n");
     }
 
     GUID preferredInputs[] = { MFVideoFormat_ARGB32, MFVideoFormat_RGB32, MFVideoFormat_NV12 };
@@ -439,6 +498,10 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps, ID
             std::fprintf(stderr, "[H264Encoder] Using DXGI zero-copy ARGB input\n");
         } else {
             std::fprintf(stderr, "[H264Encoder] DXGI surface input unavailable, falling back to CPU sample path\n");
+        }
+    } else if (managerDevice) {
+        if (InitializeEncoderD3DManager(managerDevice)) {
+            std::fprintf(stderr, "[H264Encoder] Hardware encode device manager configured\n");
         }
     }
 
