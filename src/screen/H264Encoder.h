@@ -91,7 +91,8 @@ public:
     ~H264Decoder() { Shutdown(); }
 
     bool Initialize(int width, int height);
-    bool Decode(const uint8_t* h264Data, int dataSize, std::vector<uint8_t>& rgbaOut, int& outWidth, int& outHeight);
+    // Decodes to BGRA (DXGI_FORMAT_B8G8R8A8_UNORM compatible byte layout).
+    bool Decode(const uint8_t* h264Data, int dataSize, std::vector<uint8_t>& bgraOut, int& outWidth, int& outHeight);
     void Shutdown();
 
     bool IsInitialized() const { return m_Initialized; }
@@ -103,6 +104,7 @@ private:
     DWORD m_OutputStreamID = 0;
     int m_Width = 0;
     int m_Height = 0;
+    bool m_OutputIsRGB32 = false;
     MFT_OUTPUT_STREAM_INFO m_OutputInfo = {};
 };
 

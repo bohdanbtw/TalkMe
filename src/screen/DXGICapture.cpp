@@ -21,6 +21,9 @@
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "winmm.lib")
+#ifndef PW_RENDERFULLCONTENT
+#define PW_RENDERFULLCONTENT 0x00000002
+#endif
 
 namespace TalkMe {
 
@@ -151,6 +154,55 @@ void DrawCursorOntoBgra(uint8_t* bgra, int bufW, int bufH, int cursorX, int curs
     DeleteObject(hBmp);
     DeleteDC(memDc);
     ReleaseDC(nullptr, screenDc);
+}
+
+bool CaptureWindowContentToBgra(HWND hwnd, int outW, int outH, uint8_t* outBgra) {
+    if (!hwnd || !::IsWindow(hwnd) || outW <= 0 || outH <= 0 || !outBgra)
+        return false;
+
+    HDC windowDc = ::GetWindowDC(hwnd);
+    if (!windowDc) return false;
+    HDC memDc = ::CreateCompatibleDC(windowDc);
+    if (!memDc) {
+        ::ReleaseDC(hwnd, windowDc);
+        return false;
+    }
+
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = outW;
+    bmi.bmiHeader.biHeight = -outH;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP dib = ::CreateDIBSection(memDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!dib || !bits) {
+        if (dib) ::DeleteObject(dib);
+        ::DeleteDC(memDc);
+        ::ReleaseDC(hwnd, windowDc);
+        return false;
+    }
+
+    HBITMAP old = (HBITMAP)::SelectObject(memDc, dib);
+    BOOL ok = ::PrintWindow(hwnd, memDc, PW_RENDERFULLCONTENT);
+    if (!ok) {
+        RECT wr = {};
+        ::GetWindowRect(hwnd, &wr);
+        const int srcW = (std::max)(1, wr.right - wr.left);
+        const int srcH = (std::max)(1, wr.bottom - wr.top);
+        ::SetStretchBltMode(memDc, HALFTONE);
+        ok = ::StretchBlt(memDc, 0, 0, outW, outH, windowDc, 0, 0, srcW, srcH, SRCCOPY);
+    }
+
+    if (ok)
+        std::memcpy(outBgra, bits, static_cast<size_t>(outW) * static_cast<size_t>(outH) * 4);
+
+    ::SelectObject(memDc, old);
+    ::DeleteObject(dib);
+    ::DeleteDC(memDc);
+    ::ReleaseDC(hwnd, windowDc);
+    return ok == TRUE;
 }
 
 void BoxDownscaleBgra(const uint8_t* src, int srcW, int srcH, int srcPitch,
@@ -465,15 +517,22 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
                     std::fflush(stderr);
                 }
             }
-            // Offset source pointer to the region of interest
-            const uint8_t* srcBase = (const uint8_t*)mapped.pData + (size_t)srcY * mapped.RowPitch + (size_t)srcX * 4;
-            if (outW == srcW && outH == srcH) {
-                for (int y = 0; y < outH; y++)
-                    memcpy(bgraBuffer.data() + (size_t)y * outW * 4,
-                        srcBase + (size_t)y * mapped.RowPitch, (size_t)outW * 4);
-            } else {
-                BoxDownscaleBgra(srcBase, srcW, srcH, (int)mapped.RowPitch,
-                    bgraBuffer.data(), outW, outH);
+            // For specific app/window capture, prefer real window content over desktop crop.
+            bool capturedFromWindow = false;
+            if (targetHwnd && ::IsWindow(targetHwnd))
+                capturedFromWindow = CaptureWindowContentToBgra(targetHwnd, outW, outH, bgraBuffer.data());
+
+            if (!capturedFromWindow) {
+                // Fallback: crop region from duplicated desktop.
+                const uint8_t* srcBase = (const uint8_t*)mapped.pData + (size_t)srcY * mapped.RowPitch + (size_t)srcX * 4;
+                if (outW == srcW && outH == srcH) {
+                    for (int y = 0; y < outH; y++)
+                        memcpy(bgraBuffer.data() + (size_t)y * outW * 4,
+                            srcBase + (size_t)y * mapped.RowPitch, (size_t)outW * 4);
+                } else {
+                    BoxDownscaleBgra(srcBase, srcW, srcH, (int)mapped.RowPitch,
+                        bgraBuffer.data(), outW, outH);
+                }
             }
             m_Context->Unmap(m_StagingTexture, 0);
 

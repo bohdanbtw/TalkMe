@@ -13,6 +13,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <condition_variable>
+#include <cstdint>
 #include "AppSounds.h"
 #include "AppWindow.h"
 #include "AppGraphics.h"
@@ -332,6 +333,8 @@ namespace TalkMe {
             int frameWidth = 0;
             int frameHeight = 0;
             int sourceFps = 0;
+            uint64_t lastPreviewFrameHash = 0;
+            uint32_t lastPreviewFrameBytes = 0;
             bool frameUpdated = false;
             // Incoming encoded stream FPS meter (capture/network arrival rate).
             std::chrono::steady_clock::time_point streamFpsWindowStart{};

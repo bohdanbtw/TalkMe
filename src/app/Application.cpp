@@ -108,6 +108,15 @@ using json = nlohmann::json;
 
 namespace TalkMe {
 
+    static uint64_t Fnv1a64(const uint8_t* data, size_t len) {
+        uint64_t h = 1469598103934665603ull;
+        for (size_t i = 0; i < len; ++i) {
+            h ^= static_cast<uint64_t>(data[i]);
+            h *= 1099511628211ull;
+        }
+        return h;
+    }
+
     static std::string GetExeDirectory() {
         wchar_t path[MAX_PATH] = {};
         if (::GetModuleFileNameW(nullptr, path, MAX_PATH) == 0) return {};
@@ -1049,19 +1058,41 @@ namespace TalkMe {
                         const uint8_t* payload = pf.frame.data() + 1;
                         const int payloadSize = (int)pf.frame.size() - 1;
                         const std::string texId = "screenshare_" + pf.user;
+                        const uint64_t frameHash = Fnv1a64(pf.frame.data(), pf.frame.size());
 
                         int fw = 0;
                         int fh = 0;
                         bool updated = false;
+                        bool skipDecode = false;
+
+                        {
+                            std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                            auto it = m_ScreenShare.activeStreams.find(pf.user);
+                            if (it != m_ScreenShare.activeStreams.end() &&
+                                it->second.lastPreviewFrameBytes == static_cast<uint32_t>(pf.frame.size()) &&
+                                it->second.lastPreviewFrameHash == frameHash) {
+                                skipDecode = true;
+                            }
+                        }
+                        if (skipDecode) {
+                            const auto now = std::chrono::steady_clock::now();
+                            std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                            auto it = m_ScreenShare.activeStreams.find(pf.user);
+                            if (it != m_ScreenShare.activeStreams.end()) {
+                                it->second.lastPreviewUpdateTime = now;
+                                UpdateFpsWindow(it->second.previewFpsWindowStart, it->second.previewFramesInWindow, it->second.previewFps, now);
+                            }
+                            continue;
+                        }
 
                         if (codec == 0) {
                             updated = (tm.LoadFromMemory(texId, payload, payloadSize, &fw, &fh) != nullptr);
                         } else if (codec == 1) {
                             if (!m_H264Decoder.IsInitialized())
                                 m_H264Decoder.Initialize(1920, 1080);
-                            std::vector<uint8_t> rgba;
-                            if (m_H264Decoder.Decode(payload, payloadSize, rgba, fw, fh) && !rgba.empty()) {
-                                updated = (tm.UpsertDynamicFromRGBA(texId, rgba.data(), fw, fh, rgba.size()) != nullptr);
+                            std::vector<uint8_t> bgra;
+                            if (m_H264Decoder.Decode(payload, payloadSize, bgra, fw, fh) && !bgra.empty()) {
+                                updated = (tm.UpsertDynamicFromBGRA(texId, bgra.data(), fw, fh, bgra.size()) != nullptr);
                             }
                         }
 
@@ -1074,6 +1105,8 @@ namespace TalkMe {
                                     it->second.frameWidth = fw;
                                     it->second.frameHeight = fh;
                                 }
+                                it->second.lastPreviewFrameHash = frameHash;
+                                it->second.lastPreviewFrameBytes = static_cast<uint32_t>(pf.frame.size());
                                 it->second.lastPreviewUpdateTime = now;
                                 UpdateFpsWindow(it->second.previewFpsWindowStart, it->second.previewFramesInWindow, it->second.previewFps, now);
                             }

@@ -24,6 +24,8 @@ public:
     ID3D11ShaderResourceView* LoadFromRGBA(const std::string& id, const uint8_t* rgba, int width, int height, bool flipY = false, size_t dataSizeBytes = 0);
     /// Uploads to an existing dynamic texture when possible; otherwise recreates as dynamic.
     ID3D11ShaderResourceView* UpsertDynamicFromRGBA(const std::string& id, const uint8_t* rgba, int width, int height, size_t dataSizeBytes = 0);
+    /// Uploads BGRA data using DXGI_FORMAT_B8G8R8A8_UNORM.
+    ID3D11ShaderResourceView* UpsertDynamicFromBGRA(const std::string& id, const uint8_t* bgra, int width, int height, size_t dataSizeBytes = 0);
     ID3D11ShaderResourceView* LoadFromMemory(const std::string& id, const uint8_t* data, int dataSize, int* outW = nullptr, int* outH = nullptr);
     ID3D11ShaderResourceView* GetTexture(const std::string& id) const;
     void RemoveTexture(const std::string& id);
@@ -71,6 +73,7 @@ private:
         ID3D11Texture2D* texture = nullptr;
         int width = 0, height = 0;
         bool dynamic = false;
+        DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
     };
 
     ID3D11Device* m_Device = nullptr;
@@ -97,6 +100,7 @@ private:
     void ReleaseGifEntry(const std::string& id);
 
     TextureEntry CreateTexture(const uint8_t* rgba, int width, int height, bool dynamic);
+    TextureEntry CreateTextureWithFormat(const uint8_t* data, int width, int height, bool dynamic, DXGI_FORMAT format);
 
     void DeferRelease(IUnknown* ptr);
 };

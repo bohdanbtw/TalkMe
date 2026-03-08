@@ -492,10 +492,10 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps, ID
         return false;
     }
 
-    if (d3dDevice && (m_InputSubtype == MFVideoFormat_ARGB32 || m_InputSubtype == MFVideoFormat_RGB32)) {
-        if (InitializeDxgiSurfaceInput(d3dDevice)) {
+    if (managerDevice && (m_InputSubtype == MFVideoFormat_ARGB32 || m_InputSubtype == MFVideoFormat_RGB32)) {
+        if (InitializeDxgiSurfaceInput(managerDevice)) {
             m_UseDxgiSurfaceInput = true;
-            std::fprintf(stderr, "[H264Encoder] Using DXGI zero-copy ARGB input\n");
+            std::fprintf(stderr, "[H264Encoder] Using DXGI ARGB input on encode adapter\n");
         } else {
             std::fprintf(stderr, "[H264Encoder] DXGI surface input unavailable, falling back to CPU sample path\n");
         }
@@ -529,8 +529,8 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrateKbps, ID
     m_FrameIndex = 0;
 
     // Try to initialize GPU conversion for NV12 path (optional, falls back to CPU if fails)
-    if (d3dDevice && m_InputSubtype == MFVideoFormat_NV12) {
-        if (!InitializeGPUConversion(d3dDevice)) {
+    if (managerDevice && m_InputSubtype == MFVideoFormat_NV12) {
+        if (!InitializeGPUConversion(managerDevice)) {
             std::fprintf(stderr, "[H264Encoder] GPU conversion init failed, falling back to CPU\n");
         } else {
             std::fprintf(stderr, "[H264Encoder] Using GPU-accelerated BGRA→NV12 conversion\n");
@@ -689,6 +689,8 @@ void H264Encoder::Shutdown() {
 // ============= DECODER =============
 
 bool H264Decoder::Initialize(int width, int height) {
+    if (m_Initialized) Shutdown();
+    m_OutputIsRGB32 = false;
     m_Width = width;
     m_Height = height;
 
@@ -731,20 +733,35 @@ bool H264Decoder::Initialize(int width, int height) {
         return false;
     }
 
-    // Enumerate output types and pick NV12 or RGB32
+    // Enumerate output types and prefer RGB32 when available.
+    IMFMediaType* chosenRgb32 = nullptr;
+    IMFMediaType* chosenNv12 = nullptr;
     for (DWORD i = 0; ; i++) {
         IMFMediaType* pOutType = nullptr;
         hr = m_Decoder->GetOutputAvailableType(0, i, &pOutType);
         if (FAILED(hr)) break;
         GUID subtype;
         pOutType->GetGUID(MF_MT_SUBTYPE, &subtype);
-        if (subtype == MFVideoFormat_NV12 || subtype == MFVideoFormat_RGB32) {
-            m_Decoder->SetOutputType(0, pOutType, 0);
-            pOutType->Release();
-            break;
+        if (subtype == MFVideoFormat_RGB32 && !chosenRgb32) {
+            chosenRgb32 = pOutType;
+            continue;
+        }
+        if (subtype == MFVideoFormat_NV12 && !chosenNv12) {
+            chosenNv12 = pOutType;
+            continue;
         }
         pOutType->Release();
     }
+    IMFMediaType* chosenOutType = chosenRgb32 ? chosenRgb32 : chosenNv12;
+    if (chosenOutType) {
+        GUID subtype = GUID_NULL;
+        chosenOutType->GetGUID(MF_MT_SUBTYPE, &subtype);
+        m_OutputIsRGB32 = (subtype == MFVideoFormat_RGB32);
+        m_Decoder->SetOutputType(0, chosenOutType, 0);
+        chosenOutType->Release();
+    }
+    if (chosenRgb32 && chosenRgb32 != chosenOutType) chosenRgb32->Release();
+    if (chosenNv12 && chosenNv12 != chosenOutType) chosenNv12->Release();
 
     m_Decoder->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
     m_Decoder->GetOutputStreamInfo(0, &m_OutputInfo);
@@ -753,7 +770,7 @@ bool H264Decoder::Initialize(int width, int height) {
     return true;
 }
 
-bool H264Decoder::Decode(const uint8_t* h264Data, int dataSize, std::vector<uint8_t>& rgbaOut, int& outWidth, int& outHeight) {
+bool H264Decoder::Decode(const uint8_t* h264Data, int dataSize, std::vector<uint8_t>& bgraOut, int& outWidth, int& outHeight) {
     if (!m_Initialized || !m_Decoder || !h264Data || dataSize <= 0) return false;
 
     IMFMediaBuffer* pInBuf = nullptr;
@@ -796,21 +813,37 @@ bool H264Decoder::Decode(const uint8_t* h264Data, int dataSize, std::vector<uint
 
     // Handle format change
     if (hr == MF_E_TRANSFORM_STREAM_CHANGE) {
+        IMFMediaType* chosenRgb32 = nullptr;
+        IMFMediaType* chosenNv12 = nullptr;
         for (DWORD i = 0; ; i++) {
             IMFMediaType* pType = nullptr;
             if (FAILED(m_Decoder->GetOutputAvailableType(0, i, &pType))) break;
             GUID subtype;
             pType->GetGUID(MF_MT_SUBTYPE, &subtype);
-            if (subtype == MFVideoFormat_NV12 || subtype == MFVideoFormat_RGB32) {
-                m_Decoder->SetOutputType(0, pType, 0);
-                UINT32 w = 0, h = 0;
-                MFGetAttributeSize(pType, MF_MT_FRAME_SIZE, &w, &h);
-                m_Width = w; m_Height = h;
-                pType->Release();
-                break;
+            if (subtype == MFVideoFormat_RGB32 && !chosenRgb32) {
+                chosenRgb32 = pType;
+                continue;
+            }
+            if (subtype == MFVideoFormat_NV12 && !chosenNv12) {
+                chosenNv12 = pType;
+                continue;
             }
             pType->Release();
         }
+        IMFMediaType* chosenOutType = chosenRgb32 ? chosenRgb32 : chosenNv12;
+        if (chosenOutType) {
+            GUID subtype = GUID_NULL;
+            chosenOutType->GetGUID(MF_MT_SUBTYPE, &subtype);
+            m_OutputIsRGB32 = (subtype == MFVideoFormat_RGB32);
+            m_Decoder->SetOutputType(0, chosenOutType, 0);
+            UINT32 w = 0, h = 0;
+            MFGetAttributeSize(chosenOutType, MF_MT_FRAME_SIZE, &w, &h);
+            m_Width = w;
+            m_Height = h;
+            chosenOutType->Release();
+        }
+        if (chosenRgb32 && chosenRgb32 != chosenOutType) chosenRgb32->Release();
+        if (chosenNv12 && chosenNv12 != chosenOutType) chosenNv12->Release();
         m_Decoder->GetOutputStreamInfo(0, &m_OutputInfo);
         if (pOutSample) pOutSample->Release();
         return false;
@@ -829,13 +862,13 @@ bool H264Decoder::Decode(const uint8_t* h264Data, int dataSize, std::vector<uint
             outWidth = m_Width;
             outHeight = m_Height;
 
-            // NV12 to RGBA using fixed-point integer math (BT.601)
+            // NV12 to BGRA using fixed-point integer math (BT.601)
             int ySize = m_Width * m_Height;
-            if ((int)len >= ySize * 3 / 2) {
-                rgbaOut.resize(ySize * 4);
+            if (!m_OutputIsRGB32 && (int)len >= ySize * 3 / 2) {
+                bgraOut.resize(ySize * 4);
                 const uint8_t* Y = raw;
                 const uint8_t* UV = raw + ySize;
-                uint8_t* dst = rgbaOut.data();
+                uint8_t* dst = bgraOut.data();
                 for (int y = 0; y < m_Height; y++) {
                     const uint8_t* yRow = Y + y * m_Width;
                     const uint8_t* uvRow = UV + (y / 2) * m_Width;
@@ -848,22 +881,17 @@ bool H264Decoder::Decode(const uint8_t* h264Data, int dataSize, std::vector<uint
                         int r = (298 * C + 409 * E + 128) >> 8;
                         int g = (298 * C - 100 * D - 208 * E + 128) >> 8;
                         int b = (298 * C + 516 * D + 128) >> 8;
-                        dstRow[x * 4 + 0] = (uint8_t)((unsigned)r <= 255 ? r : (r < 0 ? 0 : 255));
+                        dstRow[x * 4 + 0] = (uint8_t)((unsigned)b <= 255 ? b : (b < 0 ? 0 : 255));
                         dstRow[x * 4 + 1] = (uint8_t)((unsigned)g <= 255 ? g : (g < 0 ? 0 : 255));
-                        dstRow[x * 4 + 2] = (uint8_t)((unsigned)b <= 255 ? b : (b < 0 ? 0 : 255));
+                        dstRow[x * 4 + 2] = (uint8_t)((unsigned)r <= 255 ? r : (r < 0 ? 0 : 255));
                         dstRow[x * 4 + 3] = 255;
                     }
                 }
                 decoded = true;
             } else if ((int)len >= m_Width * m_Height * 4) {
-                // RGB32 output
-                rgbaOut.resize(m_Width * m_Height * 4);
-                for (int i = 0; i < m_Width * m_Height; i++) {
-                    rgbaOut[i * 4 + 0] = raw[i * 4 + 2]; // R
-                    rgbaOut[i * 4 + 1] = raw[i * 4 + 1]; // G
-                    rgbaOut[i * 4 + 2] = raw[i * 4 + 0]; // B
-                    rgbaOut[i * 4 + 3] = 255;
-                }
+                // RGB32/BGRA output, copy as-is.
+                bgraOut.resize(m_Width * m_Height * 4);
+                std::memcpy(bgraOut.data(), raw, static_cast<size_t>(m_Width) * static_cast<size_t>(m_Height) * 4);
                 decoded = true;
             }
             pBuf->Unlock();
@@ -885,6 +913,7 @@ void H264Decoder::Shutdown() {
         m_Decoder = nullptr;
     }
     m_Initialized = false;
+    m_OutputIsRGB32 = false;
     MFShutdown();
 }
 

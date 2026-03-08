@@ -188,13 +188,14 @@ void TextureManager::EvictTexturesWithPrefixExcept(const std::string& prefix,
     }
 }
 
-TextureManager::TextureEntry TextureManager::CreateTexture(const uint8_t* rgba, int width, int height, bool dynamic) {
+TextureManager::TextureEntry TextureManager::CreateTextureWithFormat(const uint8_t* data, int width, int height, bool dynamic, DXGI_FORMAT format) {
     TextureEntry entry;
     entry.width = width;
     entry.height = height;
     entry.dynamic = dynamic;
+    entry.format = format;
 
-    if (!m_Device || !rgba || width <= 0 || height <= 0) return entry;
+    if (!m_Device || !data || width <= 0 || height <= 0) return entry;
     if (width > kMaxTextureDimension || height > kMaxTextureDimension) return entry;
 
     D3D11_TEXTURE2D_DESC desc = {};
@@ -202,14 +203,14 @@ TextureManager::TextureEntry TextureManager::CreateTexture(const uint8_t* rgba, 
     desc.Height = height;
     desc.MipLevels = 1;
     desc.ArraySize = 1;
-    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.Format = format;
     desc.SampleDesc.Count = 1;
     desc.Usage = dynamic ? D3D11_USAGE_DEFAULT : D3D11_USAGE_IMMUTABLE;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     desc.CPUAccessFlags = 0;
 
     D3D11_SUBRESOURCE_DATA initData = {};
-    initData.pSysMem = rgba;
+    initData.pSysMem = data;
     initData.SysMemPitch = width * 4;
     initData.SysMemSlicePitch = 0;
 
@@ -227,6 +228,10 @@ TextureManager::TextureEntry TextureManager::CreateTexture(const uint8_t* rgba, 
     }
 
     return entry;
+}
+
+TextureManager::TextureEntry TextureManager::CreateTexture(const uint8_t* rgba, int width, int height, bool dynamic) {
+    return CreateTextureWithFormat(rgba, width, height, dynamic, DXGI_FORMAT_R8G8B8A8_UNORM);
 }
 
 ID3D11ShaderResourceView* TextureManager::LoadFromRGBA(const std::string& id, const uint8_t* rgba, int width, int height, bool flipY, size_t dataSizeBytes) {
@@ -271,6 +276,7 @@ ID3D11ShaderResourceView* TextureManager::UpsertDynamicFromRGBA(const std::strin
         it->second.texture &&
         it->second.srv &&
         it->second.dynamic &&
+        it->second.format == DXGI_FORMAT_R8G8B8A8_UNORM &&
         it->second.width == width &&
         it->second.height == height) {
         ID3D11DeviceContext* ctx = nullptr;
@@ -284,6 +290,39 @@ ID3D11ShaderResourceView* TextureManager::UpsertDynamicFromRGBA(const std::strin
 
     ReleaseStaticEntry(id);
     auto entry = CreateTexture(rgba, width, height, true);
+    if (!entry.srv) return nullptr;
+    m_Textures[id] = entry;
+    TouchStatic(id);
+    return entry.srv;
+}
+
+ID3D11ShaderResourceView* TextureManager::UpsertDynamicFromBGRA(const std::string& id, const uint8_t* bgra, int width, int height, size_t dataSizeBytes) {
+    std::lock_guard lock(m_Mutex);
+    if (width <= 0 || height <= 0 || width > kMaxTextureDimension || height > kMaxTextureDimension || !bgra)
+        return nullptr;
+    const size_t requiredBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+    if (dataSizeBytes < requiredBytes) return nullptr;
+    if (!m_Device) return nullptr;
+
+    auto it = m_Textures.find(id);
+    if (it != m_Textures.end() &&
+        it->second.texture &&
+        it->second.srv &&
+        it->second.dynamic &&
+        it->second.format == DXGI_FORMAT_B8G8R8A8_UNORM &&
+        it->second.width == width &&
+        it->second.height == height) {
+        ID3D11DeviceContext* ctx = nullptr;
+        m_Device->GetImmediateContext(&ctx);
+        if (!ctx) return nullptr;
+        ctx->UpdateSubresource(it->second.texture, 0, nullptr, bgra, width * 4, 0);
+        ctx->Release();
+        TouchStatic(id);
+        return it->second.srv;
+    }
+
+    ReleaseStaticEntry(id);
+    auto entry = CreateTextureWithFormat(bgra, width, height, true, DXGI_FORMAT_B8G8R8A8_UNORM);
     if (!entry.srv) return nullptr;
     m_Textures[id] = entry;
     TouchStatic(id);
