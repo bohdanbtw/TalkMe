@@ -858,7 +858,6 @@ namespace TalkMe::UI::Views {
                         if (!dib || !bits) {
                             if (dib) ::DeleteObject(dib);
                             ::DeleteDC(memDC);
-                            ::ReleaseDC(nullptr, srcDC);
                             return;
                         }
                         HGDIOBJ old = ::SelectObject(memDC, dib);
@@ -874,8 +873,8 @@ namespace TalkMe::UI::Views {
                                 if (::GetWindowRect(srcWindow, &wr)) {
                                     HDC wndDC = ::GetWindowDC(srcWindow);
                                     if (wndDC) {
-                                        int srcW = (std::max)(1, wr.right - wr.left);
-                                        int srcH = (std::max)(1, wr.bottom - wr.top);
+                                        int srcW = (std::max)(1, static_cast<int>(wr.right - wr.left));
+                                        int srcH = (std::max)(1, static_cast<int>(wr.bottom - wr.top));
                                         ::StretchBlt(memDC, 0, 0, outW, outH, wndDC, 0, 0, srcW, srcH, SRCCOPY);
                                         ::ReleaseDC(srcWindow, wndDC);
                                         copied = true;
@@ -892,8 +891,8 @@ namespace TalkMe::UI::Views {
                                 return;
                             }
                             RECT src = { 0, 0, ::GetSystemMetrics(SM_CXSCREEN), ::GetSystemMetrics(SM_CYSCREEN) };
-                            int srcW = (std::max)(1, src.right - src.left);
-                            int srcH = (std::max)(1, src.bottom - src.top);
+                            int srcW = (std::max)(1, static_cast<int>(src.right - src.left));
+                            int srcH = (std::max)(1, static_cast<int>(src.bottom - src.top));
                             ::StretchBlt(memDC, 0, 0, outW, outH, srcDC, src.left, src.top, srcW, srcH, SRCCOPY);
                             ::ReleaseDC(nullptr, srcDC);
                         }
