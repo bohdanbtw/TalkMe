@@ -12,8 +12,6 @@
 #include <algorithm>
 #include <chrono>
 #include <format>
-#include <fstream>
-#include <cstdlib>
 
 using json = nlohmann::json;
 
@@ -27,38 +25,6 @@ static std::string GetCurrentTimeStr() {
         std::chrono::zoned_time{ std::chrono::current_zone(),
                                  std::chrono::system_clock::now() });
 }
-
-// #region agent log
-static void DebugSessionLogNet(const char* runId,
-                               const char* hypothesisId,
-                               const char* location,
-                               const char* message,
-                               const json& data) {
-    try {
-        static bool s_enabled = []() {
-            char* value = nullptr;
-            size_t len = 0;
-            if (_dupenv_s(&value, &len, "TALKME_DEBUG_SESSION") != 0 || !value) return false;
-            bool enabled = (value[0] == '1' || value[0] == 'y' || value[0] == 'Y' || value[0] == 't' || value[0] == 'T');
-            free(value);
-            return enabled;
-        }();
-        if (!s_enabled) return;
-        std::ofstream f("debug-904cb8.log", std::ios::app);
-        if (!f.is_open()) return;
-        json j;
-        j["sessionId"] = "904cb8";
-        j["runId"] = runId ? runId : "run1";
-        j["hypothesisId"] = hypothesisId ? hypothesisId : "unknown";
-        j["location"] = location ? location : "unknown";
-        j["message"] = message ? message : "log";
-        j["data"] = data;
-        j["timestamp"] = (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-        f << j.dump() << "\n";
-    } catch (...) {}
-}
-// #endregion
 
 } // namespace
 
@@ -380,9 +346,7 @@ void Application::ProcessNetworkMessages() {
                 else if (action == "force_deafen") { m_SelfDeafened = j.value("state", true); if (m_SelfDeafened) m_SelfMuted = true; }
                 else if (action == "disconnect" && m_ActiveVoiceChannelId != -1) {
                     if (m_ScreenShare.iAmSharing) {
-                        m_DXGICapture.Stop();
-                        m_AudioLoopback.Stop();
-                        m_ScreenShare.iAmSharing = false;
+                        StopScreenShareProcess();
                     }
                     {
                         std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);

@@ -22,6 +22,8 @@ public:
     ID3D11ShaderResourceView* LoadFromBMP(const std::string& id, const uint8_t* bmpData, int dataSize);
     /// If dataSizeBytes > 0, returns nullptr unless dataSizeBytes >= width*height*4 (avoids reading past buffer).
     ID3D11ShaderResourceView* LoadFromRGBA(const std::string& id, const uint8_t* rgba, int width, int height, bool flipY = false, size_t dataSizeBytes = 0);
+    /// Uploads to an existing dynamic texture when possible; otherwise recreates as dynamic.
+    ID3D11ShaderResourceView* UpsertDynamicFromRGBA(const std::string& id, const uint8_t* rgba, int width, int height, size_t dataSizeBytes = 0);
     ID3D11ShaderResourceView* LoadFromMemory(const std::string& id, const uint8_t* data, int dataSize, int* outW = nullptr, int* outH = nullptr);
     ID3D11ShaderResourceView* GetTexture(const std::string& id) const;
     void RemoveTexture(const std::string& id);
@@ -68,6 +70,7 @@ private:
         ID3D11ShaderResourceView* srv = nullptr;
         ID3D11Texture2D* texture = nullptr;
         int width = 0, height = 0;
+        bool dynamic = false;
     };
 
     ID3D11Device* m_Device = nullptr;
@@ -93,7 +96,7 @@ private:
     void ReleaseStaticEntry(const std::string& id);
     void ReleaseGifEntry(const std::string& id);
 
-    TextureEntry CreateTexture(const uint8_t* rgba, int width, int height);
+    TextureEntry CreateTexture(const uint8_t* rgba, int width, int height, bool dynamic);
 
     void DeferRelease(IUnknown* ptr);
 };

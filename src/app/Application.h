@@ -115,7 +115,7 @@ namespace TalkMe {
         void RenderRegister();
         void RenderMainApp();
 
-        void StartScreenShareProcess(int fps, int quality, int width, int height);
+        void StartScreenShareProcess(int fps, int quality, int width, int height, void* targetWindow = nullptr);
         void StopScreenShareProcess();
         int GetEffectiveShareFps() const;
         static void UpdateFpsWindow(std::chrono::steady_clock::time_point& windowStart,

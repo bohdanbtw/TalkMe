@@ -183,8 +183,7 @@ bool H264Encoder::InitializeGPUConversion(ID3D11Device* device) {
     return true;
 }
 
-bool H264Encoder::ConvertBGRAviaGPU(const uint8_t* bgraData, int width, int height,
-                                     uint8_t*& outNV12, DWORD& outNV12Size) {
+bool H264Encoder::ConvertBGRAviaGPU(const uint8_t* bgraData, int width, int height, std::vector<uint8_t>& outNV12) {
     if (!m_GPUConversionReady || !m_D3DContext) return false;
 
     // Upload BGRA via UpdateSubresource (DEFAULT texture can't be mapped)
@@ -212,26 +211,30 @@ bool H264Encoder::ConvertBGRAviaGPU(const uint8_t* bgraData, int width, int heig
     m_D3DContext->CSSetUnorderedAccessViews(0, 2, nullUAVs, nullptr);
 
     // Read back NV12 using cached staging textures
-    outNV12Size = width * height * 3 / 2;
-    outNV12 = new uint8_t[outNV12Size];
+    const size_t outNV12Size = static_cast<size_t>(width) * static_cast<size_t>(height) * 3 / 2;
+    outNV12.resize(outNV12Size);
 
     // Y plane readback
     m_D3DContext->CopyResource(m_YStaging, m_YTexture);
     D3D11_MAPPED_SUBRESOURCE mappedY = {};
     if (SUCCEEDED(m_D3DContext->Map(m_YStaging, 0, D3D11_MAP_READ, 0, &mappedY))) {
         for (int y = 0; y < height; y++)
-            memcpy(outNV12 + y * width, (uint8_t*)mappedY.pData + y * mappedY.RowPitch, width);
+            memcpy(outNV12.data() + static_cast<size_t>(y) * width, (uint8_t*)mappedY.pData + static_cast<size_t>(y) * mappedY.RowPitch, width);
         m_D3DContext->Unmap(m_YStaging, 0);
+    } else {
+        return false;
     }
 
     // UV plane readback
     m_D3DContext->CopyResource(m_UVStaging, m_UVTexture);
     D3D11_MAPPED_SUBRESOURCE mappedUV = {};
     if (SUCCEEDED(m_D3DContext->Map(m_UVStaging, 0, D3D11_MAP_READ, 0, &mappedUV))) {
-        uint8_t* pUV = outNV12 + width * height;
+        uint8_t* pUV = outNV12.data() + static_cast<size_t>(width) * height;
         for (int y = 0; y < height / 2; y++)
-            memcpy(pUV + y * width, (uint8_t*)mappedUV.pData + y * mappedUV.RowPitch, width);
+            memcpy(pUV + static_cast<size_t>(y) * width, (uint8_t*)mappedUV.pData + static_cast<size_t>(y) * mappedUV.RowPitch, width);
         m_D3DContext->Unmap(m_UVStaging, 0);
+    } else {
+        return false;
     }
 
     return true;
@@ -383,18 +386,17 @@ std::vector<uint8_t> H264Encoder::Encode(const uint8_t* bgraData, int width, int
     // Try GPU conversion if available, fall back to CPU
     IMFSample* pInputSample = nullptr;
     if (m_GPUConversionReady) {
-        uint8_t* nv12Data = nullptr;
-        DWORD nv12Size = 0;
-        if (ConvertBGRAviaGPU(bgraData, width, height, nv12Data, nv12Size)) {
+        std::vector<uint8_t> nv12Data;
+        if (ConvertBGRAviaGPU(bgraData, width, height, nv12Data) && !nv12Data.empty()) {
             // Create MFSample from GPU-converted NV12
             IMFMediaBuffer* pBuf = nullptr;
-            MFCreateMemoryBuffer(nv12Size, &pBuf);
+            MFCreateMemoryBuffer(static_cast<DWORD>(nv12Data.size()), &pBuf);
             if (pBuf) {
                 BYTE* pData = nullptr;
                 pBuf->Lock(&pData, nullptr, nullptr);
-                memcpy(pData, nv12Data, nv12Size);
+                memcpy(pData, nv12Data.data(), nv12Data.size());
                 pBuf->Unlock();
-                pBuf->SetCurrentLength(nv12Size);
+                pBuf->SetCurrentLength(static_cast<DWORD>(nv12Data.size()));
 
                 MFCreateSample(&pInputSample);
                 pInputSample->AddBuffer(pBuf);
@@ -404,7 +406,6 @@ std::vector<uint8_t> H264Encoder::Encode(const uint8_t* bgraData, int width, int
                 pInputSample->SetSampleTime(m_FrameIndex * duration);
                 pInputSample->SetSampleDuration(duration);
             }
-            delete[] nv12Data;
         }
     }
 
@@ -480,6 +481,7 @@ void H264Encoder::Shutdown() {
         m_Encoder = nullptr;
     }
     m_Initialized = false;
+    MFShutdown();
 }
 
 // ============= DECODER =============
@@ -681,6 +683,7 @@ void H264Decoder::Shutdown() {
         m_Decoder = nullptr;
     }
     m_Initialized = false;
+    MFShutdown();
 }
 
 } // namespace TalkMe

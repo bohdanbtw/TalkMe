@@ -67,8 +67,7 @@ private:
     ID3D11Texture2D* m_UVStaging = nullptr;
 
     bool InitializeGPUConversion(ID3D11Device* device);
-    bool ConvertBGRAviaGPU(const uint8_t* bgraData, int width, int height, 
-                           uint8_t*& outNV12, DWORD& outNV12Size);
+    bool ConvertBGRAviaGPU(const uint8_t* bgraData, int width, int height, std::vector<uint8_t>& outNV12);
     void ShutdownGPUResources();
 };
 

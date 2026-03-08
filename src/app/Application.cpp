@@ -849,9 +849,12 @@ namespace TalkMe {
                     if (!m_VoiceMembers.empty()) m_VoiceMembers.clear();
                     if (m_ActiveVoiceChannelId != -1) m_ActiveVoiceChannelId = -1;
                     m_UserMuteStates.clear();
-                    if (m_ScreenShare.iAmSharing) { m_DXGICapture.Stop(); m_AudioLoopback.Stop(); m_ScreenShare.iAmSharing = false; }
-                    m_ScreenShare.activeStreams.clear();
-                    m_ScreenShare.viewingStream.clear();
+                    if (m_ScreenShare.iAmSharing) { StopScreenShareProcess(); }
+                    {
+                        std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                        m_ScreenShare.activeStreams.clear();
+                        m_ScreenShare.viewingStream.clear();
+                    }
                     m_CurrentState = AppState::Login;
                     strcpy_s(m_StatusMessage, sizeof(m_StatusMessage), "Disconnected. Please sign in again.");
                 }
@@ -916,9 +919,7 @@ namespace TalkMe {
                 if (m_ActiveVoiceChannelId != m_PrevActiveVoiceChannelId) {
                     // Stop screen share when leaving any voice channel
                     if (m_ActiveVoiceChannelId == -1 && m_ScreenShare.iAmSharing) {
-                        m_DXGICapture.Stop();
-                        m_AudioLoopback.Stop();
-                        m_ScreenShare.iAmSharing = false;
+                        StopScreenShareProcess();
                         m_NetClient.Send(PacketType::Screen_Share_Stop, "{}");
                     }
                     if (m_ActiveVoiceChannelId == -1) {
@@ -1007,34 +1008,79 @@ namespace TalkMe {
                     }
                     // Skip decode when minimized or unfocused to save resources
                     const bool windowActive = !m_Window.IsMinimized() && m_Window.IsForeground();
-                    for (auto& [user, si] : m_ScreenShare.activeStreams) {
-                        if (!si.frameUpdated || si.lastFrameData.size() <= 1) continue;
-                        if (!windowActive) { si.frameUpdated = false; continue; }
+                    struct PendingPreviewFrame {
+                        std::string user;
+                        std::vector<uint8_t> frame;
+                    };
+                    std::vector<PendingPreviewFrame> pendingPreviewFrames;
+                    {
+                        std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                        std::string selectedStream = m_ScreenShare.viewingStream;
+                        if (selectedStream.empty() && m_ScreenShare.iAmSharing)
+                            selectedStream = m_CurrentUser.username;
+                        if (selectedStream.empty() && !m_ScreenShare.activeStreams.empty())
+                            selectedStream = m_ScreenShare.activeStreams.begin()->first;
 
-                        const auto now = std::chrono::steady_clock::now();
+                        for (auto& [user, si] : m_ScreenShare.activeStreams) {
+                            if (!selectedStream.empty() && user != selectedStream)
+                                continue; // decode/upload only the viewed stream
+                            if (!si.frameUpdated || si.lastFrameData.size() <= 1)
+                                continue;
+                            if (!windowActive) {
+                                si.frameUpdated = false;
+                                continue;
+                            }
 
-                        uint8_t codec = si.lastFrameData[0];
-                        const uint8_t* payload = si.lastFrameData.data() + 1;
-                        int payloadSize = (int)si.lastFrameData.size() - 1;
-                        std::string texId = "screenshare_" + user;
+                            const auto now = std::chrono::steady_clock::now();
+                            if (m_AdaptiveSharePreview) {
+                                const int effectiveShareFps = (std::max)(1, GetEffectiveShareFps());
+                                const int targetPreviewFps = (effectiveShareFps > 90) ? 75 : effectiveShareFps;
+                                const auto minInterval = std::chrono::microseconds(1'000'000 / (std::max)(1, targetPreviewFps));
+                                if (si.lastPreviewUpdateTime.time_since_epoch().count() > 0 &&
+                                    (now - si.lastPreviewUpdateTime) < minInterval) {
+                                    continue;
+                                }
+                            }
+
+                            pendingPreviewFrames.push_back(PendingPreviewFrame{ user, si.lastFrameData });
+                            si.frameUpdated = false;
+                        }
+                    }
+
+                    for (auto& pf : pendingPreviewFrames) {
+                        const uint8_t codec = pf.frame[0];
+                        const uint8_t* payload = pf.frame.data() + 1;
+                        const int payloadSize = (int)pf.frame.size() - 1;
+                        const std::string texId = "screenshare_" + pf.user;
+
+                        int fw = 0;
+                        int fh = 0;
+                        bool updated = false;
 
                         if (codec == 0) {
-                            int fw = 0, fh = 0;
-                            tm.LoadFromMemory(texId, payload, payloadSize, &fw, &fh);
-                            if (fw > 0 && fh > 0) { si.frameWidth = fw; si.frameHeight = fh; }
+                            updated = (tm.LoadFromMemory(texId, payload, payloadSize, &fw, &fh) != nullptr);
                         } else if (codec == 1) {
                             if (!m_H264Decoder.IsInitialized())
                                 m_H264Decoder.Initialize(1920, 1080);
                             std::vector<uint8_t> rgba;
-                            int fw = 0, fh = 0;
                             if (m_H264Decoder.Decode(payload, payloadSize, rgba, fw, fh) && !rgba.empty()) {
-                                tm.LoadFromRGBA(texId, rgba.data(), fw, fh, false, rgba.size());
-                                si.frameWidth = fw; si.frameHeight = fh;
+                                updated = (tm.UpsertDynamicFromRGBA(texId, rgba.data(), fw, fh, rgba.size()) != nullptr);
                             }
                         }
-                        si.frameUpdated = false;
-                        si.lastPreviewUpdateTime = now;
-                        UpdateFpsWindow(si.previewFpsWindowStart, si.previewFramesInWindow, si.previewFps, now);
+
+                        if (updated) {
+                            const auto now = std::chrono::steady_clock::now();
+                            std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                            auto it = m_ScreenShare.activeStreams.find(pf.user);
+                            if (it != m_ScreenShare.activeStreams.end()) {
+                                if (fw > 0 && fh > 0) {
+                                    it->second.frameWidth = fw;
+                                    it->second.frameHeight = fh;
+                                }
+                                it->second.lastPreviewUpdateTime = now;
+                                UpdateFpsWindow(it->second.previewFpsWindowStart, it->second.previewFramesInWindow, it->second.previewFps, now);
+                            }
+                        }
                     }
                 }
 
@@ -1222,8 +1268,13 @@ namespace TalkMe {
         {
             static bool s_prevMaximized = false;
             // Auto-clear maximized when stream disappears so window restores automatically.
+            bool noActiveStreams = false;
+            {
+                std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                noActiveStreams = m_ScreenShare.activeStreams.empty();
+            }
             if (m_ScreenShare.maximized &&
-                m_ScreenShare.activeStreams.empty() && !m_ScreenShare.iAmSharing)
+                noActiveStreams && !m_ScreenShare.iAmSharing)
                 m_ScreenShare.maximized = false;
 
             if (m_ScreenShare.maximized != s_prevMaximized) {
@@ -1922,19 +1973,25 @@ namespace TalkMe {
             const ImVec2 ds = ImGui::GetIO().DisplaySize;
 
             // Resolve current stream.
-            std::string fsKey = m_ScreenShare.viewingStream;
-            if (fsKey.empty() && m_ScreenShare.iAmSharing) fsKey = m_CurrentUser.username;
-            if (fsKey.empty() && !m_ScreenShare.activeStreams.empty())
-                fsKey = m_ScreenShare.activeStreams.begin()->first;
+            std::string fsKey;
+            int fsW = 0;
+            int fsH = 0;
+            {
+                std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                fsKey = m_ScreenShare.viewingStream;
+                if (fsKey.empty() && m_ScreenShare.iAmSharing) fsKey = m_CurrentUser.username;
+                if (fsKey.empty() && !m_ScreenShare.activeStreams.empty())
+                    fsKey = m_ScreenShare.activeStreams.begin()->first;
+                auto fsIt = fsKey.empty()
+                    ? m_ScreenShare.activeStreams.end()
+                    : m_ScreenShare.activeStreams.find(fsKey);
+                fsW = (fsIt != m_ScreenShare.activeStreams.end()) ? fsIt->second.frameWidth : 0;
+                fsH = (fsIt != m_ScreenShare.activeStreams.end()) ? fsIt->second.frameHeight : 0;
+            }
 
             auto* fsTex = fsKey.empty()
                 ? nullptr
                 : TalkMe::TextureManager::Get().GetTexture("screenshare_" + fsKey);
-            auto fsIt = fsKey.empty()
-                ? m_ScreenShare.activeStreams.end()
-                : m_ScreenShare.activeStreams.find(fsKey);
-            const int fsW = (fsIt != m_ScreenShare.activeStreams.end()) ? fsIt->second.frameWidth  : 0;
-            const int fsH = (fsIt != m_ScreenShare.activeStreams.end()) ? fsIt->second.frameHeight : 0;
 
             // Full-screen child fills the whole "Main" window (no padding so stream reaches edges).
             ImGui::SetCursorPos(ImVec2(0.0f, 0.0f));
@@ -2557,27 +2614,7 @@ namespace TalkMe {
                         m_ScreenShare.iAmSharing = true;
                         m_ScreenShare.fps = fps;
                         m_ScreenShare.quality = quality;
-                        const int effectiveFps = GetEffectiveShareFps();
-                        DXGICaptureSettings dxSettings;
-                        dxSettings.fps = effectiveFps;
-                        dxSettings.quality = quality;
-                        dxSettings.maxWidth = (std::max)(320, maxW);
-                        dxSettings.maxHeight = (std::max)(240, maxH);
-                        dxSettings.targetWindow = hwnd;
-                        m_DXGICapture.Start(dxSettings, [this](const std::vector<uint8_t>& data, int w, int h, bool isKey) {
-                            if (data.empty()) return;
-                            // Only send to server when at least one other user is in the channel
-                            if (m_VoiceMembers.size() > 1)
-                                m_NetClient.SendRaw(PacketType::Screen_Share_Frame, data);
-                            const auto now = std::chrono::steady_clock::now();
-                            auto& si = m_ScreenShare.activeStreams[m_CurrentUser.username];
-                            si.username = m_CurrentUser.username;
-                            si.lastFrameData = data;
-                            si.frameWidth = w;
-                            si.frameHeight = h;
-                            si.frameUpdated = true;
-                            UpdateFpsWindow(si.streamFpsWindowStart, si.streamFramesInWindow, si.streamFps, now);
-                        });
+                        StartScreenShareProcess(fps, quality, (std::max)(320, maxW), (std::max)(240, maxH), hwnd);
                         // Start system audio loopback capture
                         m_AudioLoopback.Start([this](const float* samples, int frameCount, int sampleRate, int channels) {
                             // Resample to mono 48kHz if needed, then send as voice data alongside mic
@@ -2603,20 +2640,25 @@ namespace TalkMe {
                         m_NetClient.Send(PacketType::Screen_Share_Start, sj.dump());
                     },
                     [this]() {
-                        m_DXGICapture.Stop();
-                        m_AudioLoopback.Stop();
-                        m_ScreenShare.iAmSharing = false;
+                        StopScreenShareProcess();
                         m_NetClient.Send(PacketType::Screen_Share_Stop, "{}");
                     },
                     m_ScreenShare.iAmSharing,
-                    !m_ScreenShare.activeStreams.empty(),
+                    [this]() {
+                        std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                        return !m_ScreenShare.activeStreams.empty();
+                    }(),
                     [this]() -> void* {
-                        std::string key = m_ScreenShare.viewingStream;
-                        if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
-                        if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
-                        return key.empty() ? nullptr : (void*)TalkMe::TextureManager::Get().GetTexture("screenshare_" + key);
+                        {
+                            std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                            std::string key = m_ScreenShare.viewingStream;
+                            if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
+                            if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
+                            return key.empty() ? nullptr : (void*)TalkMe::TextureManager::Get().GetTexture("screenshare_" + key);
+                        }
                     }(),
                     [this]() -> int {
+                        std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
                         std::string key = m_ScreenShare.viewingStream;
                         if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
                         if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
@@ -2624,6 +2666,7 @@ namespace TalkMe {
                         return (it != m_ScreenShare.activeStreams.end()) ? it->second.frameWidth : 0;
                     }(),
                     [this]() -> int {
+                        std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
                         std::string key = m_ScreenShare.viewingStream;
                         if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
                         if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
@@ -2633,7 +2676,10 @@ namespace TalkMe {
                     [this]() -> const std::vector<std::string>* {
                         static std::vector<std::string> streamers;
                         streamers.clear();
-                        for (const auto& [user, _] : m_ScreenShare.activeStreams) streamers.push_back(user);
+                        {
+                            std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                            for (const auto& [user, _] : m_ScreenShare.activeStreams) streamers.push_back(user);
+                        }
                         return streamers.empty() ? nullptr : &streamers;
                     }(),
                     &m_ScreenShare.viewingStream,
@@ -2747,6 +2793,7 @@ namespace TalkMe {
                     &isDraggingFilesOver,
                     m_TargetFps,
                     [this]() -> float {
+                        std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
                         std::string key = m_ScreenShare.viewingStream;
                         if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
                         if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
@@ -2754,6 +2801,7 @@ namespace TalkMe {
                         return (it != m_ScreenShare.activeStreams.end()) ? it->second.streamFps : 0.0f;
                     }(),
                     [this]() -> float {
+                        std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
                         std::string key = m_ScreenShare.viewingStream;
                         if (key.empty() && m_ScreenShare.iAmSharing) key = m_CurrentUser.username;
                         if (key.empty() && !m_ScreenShare.activeStreams.empty()) key = m_ScreenShare.activeStreams.begin()->first;
@@ -2808,15 +2856,16 @@ namespace TalkMe {
         try {
             if (m_DXGICapture.IsRunning() || m_ScreenShare.iAmSharing) {
                 LOG_APP("Stopping screen share...");
-                m_DXGICapture.Stop();
-                m_AudioLoopback.Stop();
+                StopScreenShareProcess();
                 m_WebcamCapture.Stop();
-                m_ScreenShare.iAmSharing = false;
             }
-            m_ScreenShare.activeStreams.clear();
-            m_ScreenShare.viewingStream.clear();
+            {
+                std::lock_guard<std::mutex> lock(m_ScreenShareStreamMutex);
+                m_ScreenShare.activeStreams.clear();
+                m_ScreenShare.viewingStream.clear();
+            }
 
-            // Stop screen share send thread
+            // Ensure send thread is stopped even if sharing state was already false.
             m_ScreenShareSendThreadRunning.store(false);
             m_ScreenShareSendCV.notify_one();
             if (m_ScreenShareSendThread.joinable())

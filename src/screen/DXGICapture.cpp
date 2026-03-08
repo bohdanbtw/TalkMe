@@ -279,6 +279,8 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
     std::vector<uint8_t> bgraBuffer;
     std::vector<uint8_t> packetBuffer;
     int prevOutW = 0, prevOutH = 0;
+    POINT prevCursorPos{ LONG_MIN, LONG_MIN };
+    bool prevCursorVisible = false;
 
     // Smart timeout: Don't spin too fast at high FPS
     // Use longer timeout (25ms) to reduce CPU usage and jitter
@@ -341,25 +343,20 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
                 }
             }
 
-            // SOLUTION D: Automatic Resolution Reduction at High FPS
-            // At 120+ FPS, cap to 720p (50% fewer pixels)
-            // At 100-119 FPS, cap to 800p (38% fewer pixels)  
-            // At 80-99 FPS, cap to 900p (19% fewer pixels)
-            // At 60-79 FPS, keep native resolution
-
             int maxEncW = m_Settings.maxWidth;
             int maxEncH = m_Settings.maxHeight;
             bool resolutionLimited = false;
 
-            // Solution D: Cap resolution at high FPS for faster encoding
+            // Keep high FPS attainable, but avoid over-aggressive quality loss at 120 fps.
+            // 120 fps now targets up to 1080p instead of forcing 720p.
             if (targetFps >= 120) {
-                maxEncH = 720;  // 50% pixel reduction
+                maxEncH = (std::min)(maxEncH, 1080);
                 resolutionLimited = true;
             } else if (targetFps >= 100) {
-                maxEncH = 800;  // 38% pixel reduction
+                maxEncH = (std::min)(maxEncH, 1200);
                 resolutionLimited = true;
             } else if (targetFps >= 80) {
-                maxEncH = 900;  // 19% pixel reduction
+                maxEncH = (std::min)(maxEncH, 1440);
                 resolutionLimited = true;
             }
 
@@ -367,7 +364,7 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
             if (resolutionLimited && targetFps % 30 == 0) {  // Log once per ~30 frames
                 static int logCounter = 0;
                 if (logCounter++ % 30 == 0) {
-                    std::fprintf(stderr, "[DXGICapture] Resolution capped: %dp @ %d FPS (50%% encoding speedup)\n",
+                    std::fprintf(stderr, "[DXGICapture] Resolution capped: <=%dp at %d FPS\n",
                                maxEncH, targetFps);
                     std::fflush(stderr);
                 }
@@ -388,7 +385,7 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
                 prevOutW = outW;
                 prevOutH = outH;
                 if (resolutionLimited) {
-                    std::fprintf(stderr, "[DXGICapture] Resolution changed: %dx%d (50%% fewer pixels)\n", 
+                    std::fprintf(stderr, "[DXGICapture] Resolution changed: %dx%d\n",
                                outW, outH);
                     std::fflush(stderr);
                 }
@@ -407,10 +404,19 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
 
             CURSORINFO ci = {};
             ci.cbSize = sizeof(ci);
-            if (GetCursorInfo(&ci) && ci.hCursor && ci.flags == CURSOR_SHOWING)
-                DrawCursorOntoBgra(bgraBuffer.data(), outW, outH,
-                    (int)((ci.ptScreenPos.x - srcX) * scale),
-                    (int)((ci.ptScreenPos.y - srcY) * scale));
+            if (GetCursorInfo(&ci) && ci.hCursor && ci.flags == CURSOR_SHOWING) {
+                const int cursorX = (int)((ci.ptScreenPos.x - srcX) * scale);
+                const int cursorY = (int)((ci.ptScreenPos.y - srcY) * scale);
+                const bool cursorMoved = (ci.ptScreenPos.x != prevCursorPos.x || ci.ptScreenPos.y != prevCursorPos.y);
+                const bool visibilityChanged = !prevCursorVisible;
+                const bool shouldDrawCursor = (targetFps <= 90) || cursorMoved || visibilityChanged || ((frameCount % 6) == 0);
+                if (shouldDrawCursor)
+                    DrawCursorOntoBgra(bgraBuffer.data(), outW, outH, cursorX, cursorY);
+                prevCursorPos = ci.ptScreenPos;
+                prevCursorVisible = true;
+            } else {
+                prevCursorVisible = false;
+            }
 
             if (!m_UseJpegFallback && !m_H264Encoder.IsInitialized()) {
                 // Calculate bitrate using current quality (may be adaptive)
@@ -426,27 +432,19 @@ void DXGICapture::CaptureLoop(std::atomic<bool>* externalStop) {
                     }
                 }
 
-                // Conservative bitrate scaling - prioritize quality over bandwidth
-                // Artifacts are worse than higher bandwidth!
-                int baseBitrate = 500 + effectiveQuality * 12;
+                // Quality-based bitrate model (kbps) based on pixel throughput.
+                // This avoids severe artifacts at high fps where fixed low caps under-allocate bitrate.
+                const double pixelsPerSecond = static_cast<double>(outW) * static_cast<double>(outH) * static_cast<double>(targetFps);
+                const double quality01 = (std::clamp)(effectiveQuality, 1, 100) / 100.0;
+                const double bitsPerPixelPerFrame = 0.05 + quality01 * 0.12; // 0.05..0.17
+                int bitrate = static_cast<int>((pixelsPerSecond * bitsPerPixelPerFrame) / 1000.0);
+                bitrate = (std::clamp)(bitrate, 1200, 18000);
 
-                // Minimal reduction at high FPS - H.264 needs room to encode
-                if (targetFps >= 120) {
-                    baseBitrate = (baseBitrate * 85) / 100;  // Only 15% reduction
-                } else if (targetFps >= 100) {
-                    baseBitrate = (baseBitrate * 90) / 100;  // Only 10% reduction
-                } else if (targetFps >= 80) {
-                    baseBitrate = (baseBitrate * 95) / 100;  // Only 5% reduction
-                }
-                // At ≤60 FPS: NO reduction
-
-                // Keyframe-only mode NOT supported with H.264 - disable it
+                // Keyframe-only mode is not compatible with predictive H.264 streaming.
                 if (m_Settings.keyframeOnlyMode && !m_UseJpegFallback) {
                     std::fprintf(stderr, "[DXGICapture] WARNING: Keyframe-only with H.264 causes artifacts - forcing normal mode\n");
-                    // Don't apply additional reduction
                 }
 
-                int bitrate = (std::min)(3000, (std::max)(600, baseBitrate));
                 if (!m_H264Encoder.Initialize(outW, outH, m_Settings.fps, bitrate, m_Device))
                     m_UseJpegFallback = true;
             }

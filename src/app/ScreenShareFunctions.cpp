@@ -28,7 +28,7 @@ void Application::UpdateFpsWindow(
     }
 }
 
-void Application::StartScreenShareProcess(int fps, int quality, int width, int height) {
+void Application::StartScreenShareProcess(int fps, int quality, int width, int height, void* targetWindow) {
     (void)fps; // m_ScreenShare.fps already set by caller
     if (m_DXGICapture.IsRunning())
         return;
@@ -41,11 +41,19 @@ void Application::StartScreenShareProcess(int fps, int quality, int width, int h
     DXGICaptureSettings settings;
     settings.fps = effectiveFps;
     settings.quality = (std::max)(1, (std::min)(100, quality));
+    m_AdaptiveQualityLevel.store(settings.quality);
     settings.maxWidth = (std::max)(1, (std::min)(4096, width));
     settings.maxHeight = (std::max)(1, (std::min)(4096, height));
+    settings.targetWindow = targetWindow;
     settings.keyframeOnlyMode = m_ScreenShare.keyframeOnlyMode;
     settings.keyframeIntervalFrames = m_ScreenShare.keyframeIntervalFrames;
     settings.pAdaptiveQuality = &m_AdaptiveQualityLevel;  // NEW: Pass pointer for adaptive bitrate
+    {
+        std::lock_guard<std::mutex> lock(m_ScreenShareSendQueueMutex);
+        while (!m_ScreenShareSendQueue.empty())
+            m_ScreenShareSendQueue.pop();
+    }
+    m_ScreenShareQueueDepth.store(0);
 
     // Start send thread if not already running
     if (!m_ScreenShareSendThreadRunning.load()) {
@@ -56,18 +64,19 @@ void Application::StartScreenShareProcess(int fps, int quality, int width, int h
     }
 
     auto onFrame = [this](const std::vector<uint8_t>& data, int w, int h, bool isKeyFrame) {
+        (void)isKeyFrame;
         if (data.empty() || !m_NetClient.IsConnected())
             return;
 
-        // MINIMAL callback: just queue for send + update display
-        // Queue frame for async network send (do this FIRST, lock-free if possible)
-        if (m_VoiceMembers.size() > 1) {
-            {
-                std::lock_guard<std::mutex> queueLock(m_ScreenShareSendQueueMutex);
-                m_ScreenShareSendQueue.push(data);
-            }
-            m_ScreenShareSendCV.notify_one();
+        // Queue frame for async network send.
+        // Keep queue short to preserve low latency under load.
+        {
+            std::lock_guard<std::mutex> queueLock(m_ScreenShareSendQueueMutex);
+            while (m_ScreenShareSendQueue.size() > 2)
+                m_ScreenShareSendQueue.pop();
+            m_ScreenShareSendQueue.push(data);
         }
+        m_ScreenShareSendCV.notify_one();
 
         // Update display info in background (lower priority)
         {
@@ -97,6 +106,11 @@ void Application::StopScreenShareProcess() {
     m_ScreenShareSendCV.notify_one();
     if (m_ScreenShareSendThread.joinable())
         m_ScreenShareSendThread.join();
+    {
+        std::lock_guard<std::mutex> lock(m_ScreenShareSendQueueMutex);
+        while (!m_ScreenShareSendQueue.empty())
+            m_ScreenShareSendQueue.pop();
+    }
 }
 
 void Application::RunScreenShareSendThread() {

@@ -188,10 +188,11 @@ void TextureManager::EvictTexturesWithPrefixExcept(const std::string& prefix,
     }
 }
 
-TextureManager::TextureEntry TextureManager::CreateTexture(const uint8_t* rgba, int width, int height) {
+TextureManager::TextureEntry TextureManager::CreateTexture(const uint8_t* rgba, int width, int height, bool dynamic) {
     TextureEntry entry;
     entry.width = width;
     entry.height = height;
+    entry.dynamic = dynamic;
 
     if (!m_Device || !rgba || width <= 0 || height <= 0) return entry;
     if (width > kMaxTextureDimension || height > kMaxTextureDimension) return entry;
@@ -203,7 +204,7 @@ TextureManager::TextureEntry TextureManager::CreateTexture(const uint8_t* rgba, 
     desc.ArraySize = 1;
     desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.Usage = dynamic ? D3D11_USAGE_DEFAULT : D3D11_USAGE_IMMUTABLE;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
     desc.CPUAccessFlags = 0;
 
@@ -250,8 +251,40 @@ ID3D11ShaderResourceView* TextureManager::LoadFromRGBA(const std::string& id, co
         src = buffer.data();
     }
 
-    auto entry = CreateTexture(src, width, height);
+    auto entry = CreateTexture(src, width, height, false);
     if (!entry.srv) return nullptr;  // Do not store failed entries so we can retry when device is valid
+    m_Textures[id] = entry;
+    TouchStatic(id);
+    return entry.srv;
+}
+
+ID3D11ShaderResourceView* TextureManager::UpsertDynamicFromRGBA(const std::string& id, const uint8_t* rgba, int width, int height, size_t dataSizeBytes) {
+    std::lock_guard lock(m_Mutex);
+    if (width <= 0 || height <= 0 || width > kMaxTextureDimension || height > kMaxTextureDimension || !rgba)
+        return nullptr;
+    const size_t requiredBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+    if (dataSizeBytes < requiredBytes) return nullptr;
+    if (!m_Device) return nullptr;
+
+    auto it = m_Textures.find(id);
+    if (it != m_Textures.end() &&
+        it->second.texture &&
+        it->second.srv &&
+        it->second.dynamic &&
+        it->second.width == width &&
+        it->second.height == height) {
+        ID3D11DeviceContext* ctx = nullptr;
+        m_Device->GetImmediateContext(&ctx);
+        if (!ctx) return nullptr;
+        ctx->UpdateSubresource(it->second.texture, 0, nullptr, rgba, width * 4, 0);
+        ctx->Release();
+        TouchStatic(id);
+        return it->second.srv;
+    }
+
+    ReleaseStaticEntry(id);
+    auto entry = CreateTexture(rgba, width, height, true);
+    if (!entry.srv) return nullptr;
     m_Textures[id] = entry;
     TouchStatic(id);
     return entry.srv;
@@ -370,7 +403,7 @@ bool TextureManager::LoadGifFrames(const std::string& id,
             for (auto& e : entries) { if (e.srv) e.srv->Release(); if (e.texture) e.texture->Release(); }
             return false;
         }
-        auto entry = CreateTexture(pixels.data(), width, height);
+        auto entry = CreateTexture(pixels.data(), width, height, false);
         if (!entry.srv) {
             for (auto& e : entries) { if (e.srv) e.srv->Release(); if (e.texture) e.texture->Release(); }
             if (entry.srv) entry.srv->Release();
@@ -414,11 +447,13 @@ ID3D11ShaderResourceView* TextureManager::LoadFromMemory(const std::string& id, 
 }
 
 int TextureManager::GetWidth(const std::string& id) const {
+    std::lock_guard lock(m_Mutex);
     auto it = m_Textures.find(id);
     return (it != m_Textures.end()) ? it->second.width : 0;
 }
 
 int TextureManager::GetHeight(const std::string& id) const {
+    std::lock_guard lock(m_Mutex);
     auto it = m_Textures.find(id);
     return (it != m_Textures.end()) ? it->second.height : 0;
 }
