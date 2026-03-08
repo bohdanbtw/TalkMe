@@ -868,8 +868,8 @@ namespace TalkMe::UI::Views {
                             if (!::GetWindowRect(srcWindow, &src))
                                 src = RECT{ 0, 0, ::GetSystemMetrics(SM_CXSCREEN), ::GetSystemMetrics(SM_CYSCREEN) };
                         }
-                        int srcW = (std::max)(1, src.right - src.left);
-                        int srcH = (std::max)(1, src.bottom - src.top);
+                        int srcW = (std::max)(1, static_cast<int>(src.right - src.left));
+                        int srcH = (std::max)(1, static_cast<int>(src.bottom - src.top));
                         ::StretchBlt(memDC, 0, 0, outW, outH, srcDC, src.left, src.top, srcW, srcH, SRCCOPY);
 
                         std::vector<uint8_t> rgba(static_cast<size_t>(outW) * static_cast<size_t>(outH) * 4);
