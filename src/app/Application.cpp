@@ -786,17 +786,16 @@ namespace TalkMe {
                 if (done || !m_Window.GetHwnd()) break;
 
                 // STEP 2: Wait for quit, network wake, or any input.
-                // When a target FPS is active, always use waitMs=0 to avoid starving the
-                // render loop (the post-Present pacer handles cadence).
+                // Use waitMs=0 whenever target FPS is set or when in a voice channel so the
+                // render loop is never throttled (post-Present pacer handles FPS cadence).
                 DWORD waitMs = INFINITE;
                 if (m_CurrentState == AppState::Login || m_CurrentState == AppState::Login2FA || m_CurrentState == AppState::Register) {
                     waitMs = INFINITE;
-                } else if (m_TargetFps >= 10 && m_TargetFps <= 1000) {
+                } else if ((m_TargetFps >= 10 && m_TargetFps <= 1000) ||
+                           (m_ActiveVoiceChannelId != -1 && m_NetClient.IsConnected())) {
                     waitMs = 0;
                 } else if (m_GameMode) {
                     waitMs = 1000;
-                } else if (m_ActiveVoiceChannelId != -1 && m_NetClient.IsConnected()) {
-                    waitMs = 250;
                 } else {
                     const bool hasActiveGifs = TalkMe::TextureManager::Get().HasActiveGifSets() || m_ShowGifPicker;
                     waitMs = hasActiveGifs ? (DWORD)TalkMe::Limits::kAnimWaitMs : (DWORD)TalkMe::Limits::kIdleWaitMs;
@@ -908,10 +907,14 @@ namespace TalkMe {
                 // STEP 6: Voice channel state
                 m_ActiveVoiceChannelIdForVoice.store(m_ActiveVoiceChannelId, std::memory_order_relaxed);
                 if (m_ActiveVoiceChannelId != -1) {
-                    auto tel = m_AudioEngine.GetTelemetry();
-                    m_VoiceRedundancyEnabled = (tel.packetLossPercentage > 40.0f);
+                    auto now = std::chrono::steady_clock::now();
+                    auto telemetryElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_LastVoiceTelemetryTime).count();
+                    if (telemetryElapsedMs >= kVoiceTelemetryCacheIntervalMs) {
+                        m_CachedVoiceTelemetry = m_AudioEngine.GetTelemetry();
+                        m_LastVoiceTelemetryTime = now;
+                    }
+                    m_VoiceRedundancyEnabled = (m_CachedVoiceTelemetry.packetLossPercentage > 40.0f);
                     if (m_PendingVoiceRedundant) {
-                        auto now = std::chrono::steady_clock::now();
                         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_LastVoiceRedundantTime).count();
                         if (elapsed >= 5) {
                             if (!m_LastVoiceRedundantPayload.empty() && m_UseUdpVoice) {
@@ -959,7 +962,7 @@ namespace TalkMe {
                     auto statsElapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_LastVoiceStatsLogTime).count();
                     if (statsElapsed >= 15) {
                         m_LastVoiceStatsLogTime = now;
-                        auto tel = m_AudioEngine.GetTelemetry();
+                        const auto& tel = m_CachedVoiceTelemetry;
                         Logger::Instance().LogVoiceStats(m_ActiveVoiceChannelId, m_VoiceMembers,
                             tel.totalPacketsReceived, tel.totalPacketsLost, tel.packetLossPercentage,
                             tel.avgJitterMs, tel.currentBufferMs, tel.currentEncoderBitrateKbps);

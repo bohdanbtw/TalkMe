@@ -97,11 +97,30 @@ namespace TalkMe {
         if (m_Enabled && m_Hwnd) Repaint();
     }
 
+    static bool MembersEqual(const std::vector<OverlayMember>& a, const std::vector<OverlayMember>& b) {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (a[i].name != b[i].name || a[i].isMuted != b[i].isMuted ||
+                a[i].isDeafened != b[i].isDeafened || a[i].isSpeaking != b[i].isSpeaking)
+                return false;
+        }
+        return true;
+    }
+
     void GameOverlay::UpdateMembers(const std::vector<OverlayMember>& members) {
+        // Skip expensive GDI+ Repaint when nothing changed (avoids ~20 FPS drop in voice).
+        if (m_Hwnd && m_Enabled && !members.empty() && MembersEqual(members, m_Members)) {
+            return;
+        }
         m_Members = members;
         if (!m_Hwnd) return;
         if (m_Enabled && !m_Members.empty()) {
-            Repaint();
+            auto now = std::chrono::steady_clock::now();
+            auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_LastRepaintTime).count();
+            if (elapsedMs >= kMinRepaintIntervalMs) {
+                m_LastRepaintTime = now;
+                Repaint();
+            }
             ::ShowWindow(m_Hwnd, SW_SHOWNOACTIVATE);
         } else if (m_Members.empty()) {
             ::ShowWindow(m_Hwnd, SW_HIDE);

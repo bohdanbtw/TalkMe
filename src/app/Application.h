@@ -390,6 +390,7 @@ namespace TalkMe {
         std::set<std::pair<std::string, uint32_t>> m_VoiceDedupeSet;
         std::deque<std::pair<std::string, uint32_t>> m_VoiceDedupeQueue;
         static const size_t kMaxVoiceDedupe = 400;
+        static constexpr int kVoiceTelemetryCacheIntervalMs = 100;
         std::chrono::steady_clock::time_point m_LastVoiceStateRequestTime;
         std::chrono::steady_clock::time_point m_LastVoiceStatsLogTime;
         std::chrono::steady_clock::time_point m_LastVoiceDebugLogTime;
@@ -402,6 +403,9 @@ namespace TalkMe {
         std::vector<uint8_t> m_LastVoiceRedundantPayload;
         std::vector<uint8_t> m_LastVoiceRedundantOpus;
         uint32_t m_LastVoiceRedundantTimestamp = 0;
+        /// Cached telemetry when in voice; updated at most every kVoiceTelemetryCacheIntervalMs to avoid mutex contention.
+        AudioEngine::Telemetry m_CachedVoiceTelemetry;
+        std::chrono::steady_clock::time_point m_LastVoiceTelemetryTime;
 
         std::string m_DeviceId;
         char m_EmailBuf[128] = "";

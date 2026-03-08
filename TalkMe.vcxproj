@@ -146,6 +146,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\app\ScreenShareFunctions.cpp" />
+    <ClCompile Include="src\app\screen_capture_main.cpp" />
     <ClCompile Include="src\audio\AudioEngineDevice.cpp" />
     <ClCompile Include="src\audio\NativeAudioProcessor.cpp" />
     <ClCompile Include="src\audio\AudioEngineEncode.cpp" />
@@ -191,6 +192,7 @@
     <ClCompile Include="vendor\qrcodegen.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\app\ResourceLimits.h" />
     <ClInclude Include="src\audio\AudioEngineDevice.h" />
     <ClInclude Include="src\audio\NativeAudioProcessor.h" />
     <ClInclude Include="src\audio\AudioEngineInternal.h" />
@@ -200,6 +202,7 @@
     <ClInclude Include="src\core\Logger.h" />
     <ClInclude Include="src\core\Secrets.h" />
     <ClInclude Include="src\overlay\GameOverlay.h" />
+    <ClInclude Include="src\screen\ColorConversion_bytecode.h" />
     <ClInclude Include="src\screen\ScreenCapture.h" />
     <ClInclude Include="src\screen\ScreenCaptureProcess.h" />
     <ClInclude Include="src\screen\DXGICapture.h" />
@@ -261,6 +264,7 @@
     <None Include="secret\secrets" />
     <None Include="SOLUTIONS_A_B_COMPLETE.md" />
     <None Include="SOLUTIONS_A_B_C_D_COMPLETE.md" />
+    <None Include="src\screen\ColorConversion.cso" />
     <None Include="SUMMARY.md" />
     <None Include="TECHNICAL_ANALYSIS.md" />
     <None Include="TELEMETRY_MONITORING_GUIDE.md" />

@@ -189,8 +189,8 @@ bool CaptureWindowContentToBgra(HWND hwnd, int outW, int outH, uint8_t* outBgra)
     if (!ok) {
         RECT wr = {};
         ::GetWindowRect(hwnd, &wr);
-        const int srcW = (std::max)(1, wr.right - wr.left);
-        const int srcH = (std::max)(1, wr.bottom - wr.top);
+        const int srcW = (std::max)(1, static_cast<int>(wr.right - wr.left));
+        const int srcH = (std::max)(1, static_cast<int>(wr.bottom - wr.top));
         ::SetStretchBltMode(memDc, HALFTONE);
         ok = ::StretchBlt(memDc, 0, 0, outW, outH, windowDc, 0, 0, srcW, srcH, SRCCOPY);
     }

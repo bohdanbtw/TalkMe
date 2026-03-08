@@ -144,6 +144,9 @@
     <ClCompile Include="src\screen\WebcamCapture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\app\screen_capture_main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="vendor\qrcodegen.hpp">
@@ -287,6 +290,12 @@
     <ClInclude Include="src\screen\WebcamCapture.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\screen\ColorConversion_bytecode.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\app\ResourceLimits.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="resource.h">
@@ -318,6 +327,7 @@
     <None Include="EXECUTIVE_SUMMARY.md" />
     <None Include="ARCHITECTURE_DIAGRAM.md" />
     <None Include="IMPLEMENTATION_CHECKLIST.md" />
+    <None Include="src\screen\ColorConversion.cso" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="TalkMe.rc">

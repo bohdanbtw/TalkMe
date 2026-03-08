@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <chrono>
 #include <windows.h>
 
 namespace TalkMe {
@@ -47,6 +48,8 @@ namespace TalkMe {
         int m_LineHeight = 24;
         int m_Padding = 10;
         std::vector<OverlayMember> m_Members;
+        std::chrono::steady_clock::time_point m_LastRepaintTime;
+        static constexpr int kMinRepaintIntervalMs = 66;  // ~15 FPS max for overlay to avoid main-loop stall
     };
 
 }
